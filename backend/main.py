@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from . import brain, llm, store  # noqa: E402
-from .vapi_config import build_assistant  # noqa: E402
+from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("app")
@@ -68,7 +68,7 @@ def root():
 @app.get("/api/health")
 def health():
     return {"ok": True, "mock": llm.MOCK, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
-            "public_url": os.getenv("PUBLIC_URL", ""), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
+            "public_url": public_url(), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
             "admin_protected": bool(ADMIN_KEY), "admin_weak": WEAK_ADMIN}
 
 

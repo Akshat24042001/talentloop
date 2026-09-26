@@ -1,0 +1,29 @@
+# One-click deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+# PUBLIC_URL is filled automatically from RENDER_EXTERNAL_URL.
+services:
+  - type: web
+    name: talentloop-ai-interview
+    runtime: docker
+    plan: starter            # persistent disk needs a paid plan; the free plan wipes data on every restart
+    healthCheckPath: /api/health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: ADMIN_KEY
+        generateValue: true  # read it in Render -> Environment; the HR page asks for it
+      - key: VAPI_PUBLIC_KEY
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: FAST_MODEL
+        value: gpt-4.1-mini
+      - key: SMART_MODEL
+        value: gpt-4.1
+      - key: LLM_MOCK
+        value: "0"

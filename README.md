@@ -105,7 +105,7 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 
 ## Review status
 
-Read `REVIEW.md` before running real candidates. It lists what was fixed, what is still open, and what must be verified on a live Vapi call.
+Read `REVIEW.md` before running real candidates. Hosting: see `DEPLOY.md`. It lists what was fixed, what is still open, and what must be verified on a live Vapi call.
 
 ## Files
 

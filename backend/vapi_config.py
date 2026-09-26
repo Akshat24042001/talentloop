@@ -15,12 +15,20 @@ def _env(k, d=""):
     return os.getenv(k, d).strip()
 
 
+def public_url() -> str:
+    """PUBLIC_URL if set, else the URL the hosting platform gives us (Render, Railway)."""
+    url = _env("PUBLIC_URL") or _env("RENDER_EXTERNAL_URL")
+    if not url and _env("RAILWAY_PUBLIC_DOMAIN"):
+        url = "https://" + _env("RAILWAY_PUBLIC_DOMAIN")
+    return url.rstrip("/")
+
+
 def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dict:
     """token: per-session secret placed in the LLM and webhook URLs, so a dead or duplicate call
     can't write into the current session. NOTE: this whole config passes through the candidate's
     browser (vapi.start), so the token is visible to the candidate. It protects against stale calls
     and people without the link, not against the candidate. See REVIEW.md for the private-key route."""
-    public = _env("PUBLIC_URL").rstrip("/")
+    public = public_url()
     if not public.startswith("https://"):
         raise RuntimeError("PUBLIC_URL must be your https tunnel URL (cloudflared/ngrok). Vapi must reach this server.")
 
