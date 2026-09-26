@@ -1,0 +1,21 @@
+Java Backend Developer (2-4 years) - Ahmedabad (Hybrid)
+
+About the role
+We build order management and billing software for mid-size distributors. You will build and maintain REST APIs and background jobs used by 300+ business customers.
+
+Must have
+- 2+ years building production services in Java 11+ and Spring Boot
+- Strong SQL: MySQL or PostgreSQL, query optimisation, indexing
+- REST API design, authentication with JWT
+- Git, code reviews, writing unit tests (JUnit, Mockito)
+- Debugging production issues using logs
+
+Good to have
+- Kafka or RabbitMQ
+- Docker, basic AWS (EC2, S3, RDS)
+- Redis caching
+
+Details
+- 5 days a week, 3 days in office at Prahlad Nagar, Ahmedabad
+- Team of 8 engineers, reporting to the Engineering Manager
+- Interview process: AI first round, technical round, manager round

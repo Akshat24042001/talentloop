@@ -1,0 +1,35 @@
+:root{
+  --bg:#f6f7f9; --card:#fff; --ink:#15181e; --muted:#5d6573; --line:#e3e6eb;
+  --brand:#1f5eff; --brand-ink:#fff; --ok:#12805c; --warn:#b45309; --bad:#c62828;
+  --chip:#eef2ff; --r:12px;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0f1115;--card:#171a21;--ink:#e8eaee;--muted:#9aa3b2;--line:#2a2f3a;--chip:#1e2640}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:22px;margin:0 0 4px} h2{font-size:17px;margin:0 0 12px} h3{font-size:15px;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:16px}
+label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:120px;resize:vertical}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+button,.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:600 14px system-ui;cursor:pointer;text-decoration:none}
+button.primary,.btn.primary{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.muted{color:var(--muted)} .small{font-size:13px}
+.chip{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--chip);font-size:12px;font-weight:600}
+.ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.q{border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0}
+.q .meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.err{background:#fdecea;color:#8a1c1c;padding:10px 12px;border-radius:8px;margin-top:10px}
+@media (prefers-color-scheme: dark){.err{background:#3a1616;color:#ffb4b4}}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.hidden{display:none!important}
+.big{font-size:32px;font-weight:700}
+.linkbox{display:flex;gap:8px} .linkbox input{flex:1}

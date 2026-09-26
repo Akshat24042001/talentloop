@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interview</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .stage{display:grid;grid-template-columns:1fr 280px;gap:16px}
+  @media (max-width:760px){.stage{grid-template-columns:1fr}}
+  video{width:100%;border-radius:10px;background:#000;transform:scaleX(-1)}
+  .status{font-size:20px;font-weight:700;margin:6px 0}
+  .caption{font-size:19px;line-height:1.5;min-height:90px;padding:16px;border-radius:10px;background:var(--chip)}
+  .meter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}
+  .meter>div{height:100%;width:0;background:var(--ok);transition:width .08s}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--muted);margin-right:8px}
+  .dot.speaking{background:var(--brand);animation:pulse 1s infinite} .dot.listening{background:var(--ok)}
+  @keyframes pulse{50%{opacity:.35}}
+  ul.tips{padding-left:18px;margin:8px 0} ul.tips li{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap" style="max-width:900px">
+  <h1 id="title">Interview</h1>
+  <p class="sub" id="subtitle"></p>
+
+  <!-- Step 1: consent -->
+  <div class="card" id="s1">
+    <h2>Before you start</h2>
+    <ul class="tips">
+      <li>This is a first-round interview conducted by an <b>AI interviewer</b>. It will take about <b id="mins"></b> minutes.</li>
+      <li>Sit in a quiet place, use a laptop with a working microphone and camera, and use headphones if you can.</li>
+      <li>Speak naturally. Take your time to think; the interviewer will wait. You can ask it to repeat a question.</li>
+      <li>Please stay on this tab. Leaving the tab or using other help is recorded.</li>
+    </ul>
+    <label style="font-weight:400;display:flex;gap:10px;align-items:flex-start">
+      <input type="checkbox" id="consent" style="width:auto;margin-top:4px">
+      <span class="small">I agree that this interview (audio, video and transcript) will be recorded and processed by AI services, including cloud providers outside India, only to evaluate my application. A human at the company reviews the result and makes the decision. I can ask HR for a human interview instead, and ask for my data to be deleted.</span>
+    </label>
+    <div class="actions"><button class="primary" id="toCheck" disabled>Continue</button></div>
+  </div>
+
+  <!-- Step 2: device check -->
+  <div class="card hidden" id="s2">
+    <h2>Check your camera and microphone</h2>
+    <div class="row">
+      <div><video id="preview" autoplay muted playsinline></video></div>
+      <div>
+        <p>Say something like <i>"Hello, my name is ..."</i>. The bar should move.</p>
+        <div class="meter"><div id="meter"></div></div>
+        <p class="small muted" id="micMsg">Waiting for your voice...</p>
+        <div class="actions"><button class="primary" id="startBtn" disabled>Start interview</button></div>
+      </div>
+    </div>
+    <div id="err2"></div>
+  </div>
+
+  <!-- Step 3: interview -->
+  <div class="card hidden" id="s3">
+    <div class="stage">
+      <div>
+        <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting...</span></div>
+        <div class="caption" id="caption">The interviewer will start speaking in a moment.</div>
+        <p class="small muted">Take your time. When you finish an answer, just stop talking. Say "can you repeat that" anytime.</p>
+        <div class="meter"><div id="meter2"></div></div>
+      </div>
+      <div>
+        <video id="self" autoplay muted playsinline></video>
+        <div class="actions"><button id="endBtn">End interview</button></div>
+      </div>
+    </div>
+    <div id="err3"></div>
+  </div>
+
+  <!-- Step 4: done / dropped -->
+  <div class="card hidden" id="s4">
+    <h2 id="doneTitle">Thank you</h2>
+    <p id="doneMsg">Your interview is complete. The HR team will get back to you.</p>
+    <p class="small muted" id="uploadMsg"></p>
+    <div class="actions hidden" id="reconnectBox"><button class="primary" id="reconnectBtn">Reconnect and continue</button></div>
+  </div>
+</div>
+
+<script type="module">
+// Load the Vapi SDK lazily so the page still works (and shows a clear error) if the CDN is slow or blocked.
+let Vapi = null;
+const vapiReady = import('https://esm.sh/@vapi-ai/web').then(m => { Vapi = m.default?.default || m.default || m; }).catch(e => { console.error(e); });
+const $ = id => document.getElementById(id);
+const iid = new URLSearchParams(location.search).get('id');
+let stream, recorder, chunks = [], vapi, events = [], ended = false, audioCtx;
+
+function show(step){ ['s1','s2','s3','s4'].forEach(s => $(s).classList.toggle('hidden', s !== step)); }
+function ev(type, detail=''){ events.push({type, ts: Date.now(), detail: String(detail).slice(0,200)}); }
+async function post(path, body){ const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok){ let d; try{d=(await r.json()).detail}catch{}; throw new Error(d||r.statusText);} return r.json(); }
+async function flushEvents(){ if(!events.length) return; const b = events.splice(0); try{ await post(`/api/interviews/${iid}/events`, b);}catch{ events.unshift(...b);} }
+setInterval(flushEvents, 5000);
+
+async function load(){
+  if(!iid){ $('subtitle').textContent = 'Invalid link.'; $('s1').classList.add('hidden'); return; }
+  const r = await fetch(`/api/interviews/${iid}/public`);
+  if(!r.ok){ $('subtitle').textContent = 'This interview link is not valid.'; $('s1').classList.add('hidden'); return; }
+  const p = await r.json();
+  $('title').textContent = `${p.role || 'Interview'}${p.company ? ' · ' + p.company : ''}`;
+  $('subtitle').textContent = p.candidate_name ? `For ${p.candidate_name}` : '';
+  $('mins').textContent = p.duration_min;
+  if (p.status === 'completed' || p.status === 'scored'){ show('s4'); return; }
+  if (p.expired){ show('s4'); $('doneTitle').textContent='Link expired'; $('doneMsg').textContent='Please contact HR for a new link.'; return; }
+  if (p.resuming){ $('toCheck').textContent = 'Continue your interview'; }
+}
+$('consent').onchange = e => $('toCheck').disabled = !e.target.checked;
+
+$('toCheck').onclick = async () => {
+  show('s2');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}, video:{width:640,height:360}});
+  }catch(e){ $('err2').innerHTML = `<div class="err">Camera/microphone blocked: ${e.message}. Allow access in the browser address bar and reload.</div>`; return; }
+  $('preview').srcObject = stream; $('self').srcObject = stream;
+  audioCtx = new AudioContext();
+  const an = audioCtx.createAnalyser(); an.fftSize = 512;
+  audioCtx.createMediaStreamSource(stream).connect(an);
+  const buf = new Uint8Array(an.fftSize); let heard = 0;
+  (function tick(){
+    an.getByteTimeDomainData(buf); let peak = 0;
+    for(const v of buf) peak = Math.max(peak, Math.abs(v-128));
+    const pct = Math.min(100, peak*1.6);
+    $('meter').style.width = pct+'%'; $('meter2').style.width = pct+'%';
+    if (pct > 25 && ++heard > 8 && $('startBtn').disabled){ $('startBtn').disabled = false; $('micMsg').textContent = 'Microphone works.'; }
+    requestAnimationFrame(tick);
+  })();
+};
+
+function startRecording(){
+  const types = ['video/webm;codecs=vp8,opus','video/webm','video/mp4'];
+  const mimeType = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+  if (!mimeType) { ev('recorder_unsupported'); return; }
+  chunks = [];
+  recorder = new MediaRecorder(stream, {mimeType, videoBitsPerSecond: 300000});
+  recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+  recorder.start(5000);
+}
+function stopRecording(){
+  return new Promise(res => { if(!recorder || recorder.state==='inactive') return res(); recorder.onstop = res; recorder.stop(); });
+}
+async function uploadRecording(){
+  if (!chunks.length) return;
+  const type = recorder.mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
+  const fd = new FormData(); fd.append('file', new Blob(chunks, {type: recorder.mimeType}), `recording.${type}`);
+  $('uploadMsg').textContent = 'Uploading your recording, please keep this page open...';
+  try{ await fetch(`/api/interviews/${iid}/media`, {method:'POST', body: fd}); $('uploadMsg').textContent = 'Recording uploaded.'; }
+  catch(e){ $('uploadMsg').textContent = 'Recording upload failed. HR still has the audio and transcript.'; }
+}
+
+function setStatus(mode){
+  $('dot').className = 'dot ' + mode;
+  $('statusText').textContent = mode === 'speaking' ? 'Interviewer is speaking' : mode === 'listening' ? 'Listening. Take your time.' : 'Connecting...';
+}
+
+async function begin(){
+  show('s3'); ended = false; setStatus('');
+  try{ await document.documentElement.requestFullscreen(); }catch{}
+  let cfg;
+  try{ cfg = await post(`/api/interviews/${iid}/assistant`, {}); }
+  catch(e){ $('err3').innerHTML = `<div class="err">${e.message}</div>`; return; }
+  await vapiReady;
+  if (!Vapi){ $('err3').innerHTML = '<div class="err">Could not load the voice component. Check your internet connection and reload.</div>'; return; }
+  vapi = new Vapi(cfg.publicKey);
+  vapi.on('call-start', () => { setStatus('speaking'); ev('call_start'); });
+  vapi.on('speech-start', () => setStatus('speaking'));
+  vapi.on('speech-end', () => setStatus('listening'));
+  vapi.on('message', m => {
+    if (m.type === 'transcript' && m.role === 'assistant' && m.transcriptType === 'final') $('caption').textContent = m.transcript;
+  });
+  vapi.on('error', e => { ev('vapi_error', JSON.stringify(e).slice(0,200)); console.error(e); });
+  vapi.on('call-end', finish);
+  startRecording();
+  try{
+    const call = await vapi.start(cfg.assistant);
+    if (call && call.id) post(`/api/interviews/${iid}/started`, {call_id: call.id}).catch(()=>{});
+  }catch(e){ $('err3').innerHTML = `<div class="err">Could not start the call: ${e.message || e}</div>`; }
+}
+$('startBtn').onclick = begin;
+$('reconnectBtn').onclick = begin;
+$('endBtn').onclick = () => { if (confirm('End the interview now? You may not be able to restart it.')) { ev('ended_by_candidate'); vapi && vapi.stop(); } };
+
+async function finish(){
+  if (ended) return; ended = true;
+  ev('call_end');
+  show('s4');
+  if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  await stopRecording();
+  await flushEvents();
+  await uploadRecording();
+  let status = 'completed';
+  try{ status = (await post(`/api/interviews/${iid}/complete`, {})).status; }catch{}
+  if (status !== 'completed' && status !== 'scored'){
+    $('doneTitle').textContent = 'The call ended early';
+    $('doneMsg').textContent = 'If this was a connection problem, you can reconnect and continue from the same question.';
+    $('reconnectBox').classList.remove('hidden');
+  }
+}
+
+document.addEventListener('visibilitychange', () => ev(document.hidden ? 'tab_hidden' : 'tab_visible'));
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && !ended && vapi) ev('fullscreen_exit'); });
+window.addEventListener('beforeunload', () => { if (events.length) navigator.sendBeacon(`/api/interviews/${iid}/events`, new Blob([JSON.stringify(events)], {type:'application/json'})); });
+load();
+</script>
+</body>
+</html>

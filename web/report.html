@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interview report</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .ev{border-left:3px solid var(--line);padding:4px 10px;margin:6px 0;font-size:14px}
+  .ev.exact,.ev.approx{border-color:var(--ok)} .ev.unverified{border-color:var(--bad)}
+  .score{font-size:22px;font-weight:700}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .tx{white-space:pre-wrap;font-size:13px;max-height:500px;overflow:auto}
+  .flag{background:#fff7e6;color:#7a4b00;padding:10px 12px;border-radius:8px;margin:6px 0;font-size:14px}
+  @media (prefers-color-scheme: dark){.flag{background:#3a2c10;color:#ffd58a}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="small"><a href="/hr.html">← All interviews</a></p>
+  <div id="root">Loading...</div>
+</div>
+<script src="/common.js"></script>
+<script>
+const iid = new URLSearchParams(location.search).get('id');
+let REC = null, timer = null;
+
+function mmss(t){ t = Math.round(t||0); return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0'); }
+
+async function load(){
+  try{ REC = await api(`/api/interviews/${iid}`); }catch(e){ $('root').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  render();
+  clearTimeout(timer);
+  if (REC.status === 'completed' && !REC.report) timer = setTimeout(load, 8000);
+  if (REC.status === 'in_progress') timer = setTimeout(load, 5000);
+}
+
+function render(){
+  const p = REC.plan, rep = REC.report, st = REC.state || {log:[], notes:{}};
+  const hr = REC.hr || {}; const hrs = hr.scores || {};
+  const qmap = Object.fromEntries(p.questions.map(q=>[q.id,q]));
+  let h = `<div class="card"><h1>${esc(p.candidate_name)} · ${esc(p.role)}</h1>
+    <p class="muted small">${esc(p.company||'')} · status: <b>${esc(REC.status)}</b> · created ${new Date(REC.created_at*1000).toLocaleString()}</p>
+    <div class="actions"><button id="scoreBtn" ${REC.state?'':'disabled'}>${rep?'Re-score':'Score now'}</button>
+    <span class="small muted" style="align-self:center">Candidate link: /interview.html?id=${esc(iid)}</span></div></div>`;
+
+  if (!rep){
+    h += `<div class="card muted">${REC.status==='completed' ? 'Scoring in progress, this page refreshes automatically...' : REC.status==='in_progress' ? 'Interview in progress (live transcript below).' : 'Interview not taken yet.'}</div>`;
+  } else {
+    const c = rep.computed || {};
+    h += `<div class="card"><div class="grid2">
+      <div><div class="muted small">AI recommendation (HR decides)</div>
+        <div class="big ${REC_CLASS[rep.recommendation]||''}">${esc(REC_LABEL[rep.recommendation]||rep.recommendation)}</div>
+        <div class="small">Confidence: ${esc(rep.confidence)} · Overall ${c.overall ?? '-'} / 5</div></div>
+      <div class="small">Questions asked: ${c.questions_asked}/${c.questions_planned}<br>
+        Evidence quotes verified against transcript: ${esc(c.evidence_verified)}<br>
+        Avg live turn latency (LLM): ${c.avg_turn_latency_ms ?? '-'} ms<br>Scoring passes: ${c.scoring_passes}</div></div>
+      <p>${esc(rep.summary)}</p>
+      ${(rep.human_review_reasons||[]).map(r=>`<div class="flag">⚠ ${esc(r)}</div>`).join('')}
+    </div>`;
+    h += `<div class="card grid2">
+      <div><h3>Strengths</h3><ul>${(rep.strengths||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ul></div>
+      <div><h3>Concerns</h3><ul>${(rep.concerns||[]).map(s=>`<li>${esc(s)}</li>`).join('')}${(rep.red_flags||[]).map(s=>`<li class="bad">${esc(s)}</li>`).join('')}</ul></div>
+    </div>`;
+    if ((rep.resume_claims||[]).length) h += `<div class="card"><h3>Resume claims</h3><table>
+      <tr><th>Claim</th><th>Status</th><th>Note</th></tr>${rep.resume_claims.map(r=>`<tr><td>${esc(r.claim)}</td>
+      <td class="${r.status==='supported'?'ok':r.status==='contradicted'?'bad':'warn'}">${esc(r.status)}</td><td>${esc(r.note)}</td></tr>`).join('')}</table></div>`;
+  }
+
+  // per-question with HR calibration inputs
+  const qres = Object.fromEntries(((rep&&rep.questions)||[]).map(q=>[q.q_id,q]));
+  h += `<div class="card"><h2>Answers</h2><p class="small muted">Enter your own score per question. This is how we measure whether the AI scores like your team does.</p>`;
+  for (const q of p.questions){
+    const r = qres[q.id] || {}; const notes = (st.notes||{})[q.id] || [];
+    h += `<div class="q"><div class="meta"><span class="chip">${esc(q.id)} · ${esc(q.type)}</span>${q.scored?'':'<span class="chip">not scored</span>'}</div>
+      <b>${esc(q.ask)}</b>
+      <div class="grid2" style="margin-top:8px"><div>
+        <div class="score">${r.score ?? '-'}<span class="small muted"> / 5 AI</span></div>
+        ${(r.evidence||[]).map(e=>`<div class="ev ${esc(e.verified)}">"${esc(e.quote)}" <span class="muted small">[${esc(e.t)}] ${e.verified==='unverified'?'<b class="bad">not found in transcript</b>':'verified'}</span></div>`).join('')}
+        ${r.rationale?`<p class="small">${esc(r.rationale)}</p>`:''}
+        ${(r.missed_points||[]).length?`<p class="small warn">Missed: ${r.missed_points.map(esc).join(' · ')}</p>`:''}
+        ${notes.length?`<p class="small muted">Live notes: ${notes.map(esc).join(' | ')}</p>`:''}
+      </div><div>${q.scored?`<label>HR score</label><select data-q="${q.id}" class="hrs">
+        <option value="">-</option>${[1,2,3,4,5].map(n=>`<option ${String(hrs[q.id])===String(n)?'selected':''}>${n}</option>`).join('')}</select>`:''}</div></div></div>`;
+  }
+  h += `<label>HR decision</label><select id="decision"><option value="">-</option>
+      ${['next_round','hold','reject'].map(d=>`<option ${hr.decision===d?'selected':''} value="${d}">${d.replace('_',' ')}</option>`).join('')}</select>
+    <label>Notes</label><textarea id="notes" style="min-height:70px">${esc(hr.notes||'')}</textarea>
+    <div class="actions"><button class="primary" id="saveHr">Save HR review</button><span id="savedMsg" class="small ok"></span></div></div>`;
+
+  const media = REC.media || [];
+  if (media.length) h += `<div class="card"><h3>Recordings</h3>${media.map(m=> m.kind==='candidate_video'
+      ? `<video controls src="${mediaUrl(iid,m.file)}" style="width:100%;max-width:560px;border-radius:8px"></video>`
+      : `<audio controls src="${mediaUrl(iid,m.file)}" style="width:100%"></audio>`).join('')}
+      <p class="small muted">Candidate video is the candidate's camera and mic. Call audio (both sides) is copied from Vapi after the call.</p></div>`;
+  if (rep && rep.proctoring) h += `<div class="card small"><h3>Proctoring signals</h3>${esc(JSON.stringify(rep.proctoring.counts))} · time away from tab: ${rep.proctoring.hidden_seconds}s
+      <p class="muted">Signals, not proof. Review the video before concluding anything.</p></div>`;
+
+  h += `<div class="card"><details ${rep?'':'open'}><summary><b>Transcript</b> <span class="small muted">(${st.log.length} turns)</span></summary><div class="tx">${
+    st.log.map(e=>`<div><span class="muted">[${mmss(e.t)}]</span> <b>${e.role==='ai'?'AI':'Candidate'}:</b> ${esc(e.text)}${e.action&&e.role==='ai'?` <span class="chip">${esc(e.action)}</span>`:''}</div>`).join('')
+  }</div></details></div>`;
+
+  $('root').innerHTML = h;
+  const sb = $('scoreBtn'); if (sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Scoring (30-90s)...';
+    try{ await api(`/api/interviews/${iid}/score`, {method:'POST'}); }catch(e){ alert(e.message); } load(); };
+  $('saveHr').onclick = async () => {
+    const scores = {}; document.querySelectorAll('.hrs').forEach(s=>{ if (s.value) scores[s.dataset.q] = +s.value; });
+    await api(`/api/interviews/${iid}/hr`, {method:'POST', json:{scores, decision: $('decision').value, notes: $('notes').value}});
+    $('savedMsg').textContent = 'Saved';
+  };
+}
+load();
+</script>
+</body>
+</html>

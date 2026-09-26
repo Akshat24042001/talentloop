@@ -1,0 +1,22 @@
+Rohan Mehta
+Ahmedabad | rohan.mehta@example.com
+
+Summary
+Backend developer with 3 years of experience building Spring Boot microservices for e-commerce and logistics.
+
+Experience
+Software Engineer, ShipKart Logistics Pvt Ltd (Jun 2023 - Present)
+- Built shipment tracking APIs in Spring Boot used by 40 enterprise clients
+- Reduced p95 latency of order search API from 1.8s to 350ms by adding composite indexes and Redis caching
+- Migrated notification service from cron jobs to Kafka consumers
+- Led a team of 3 developers for the rate-card module
+
+Junior Developer, Webnova Solutions (Jul 2022 - May 2023)
+- Built admin panel APIs for an e-commerce client using Spring Boot and MySQL
+- Wrote JUnit and Mockito tests, improved coverage from 40% to 72%
+
+Skills
+Java 17, Spring Boot, Spring Security, JWT, MySQL, PostgreSQL, Redis, Kafka, Docker, AWS EC2 and S3, Git, JUnit, Mockito
+
+Education
+B.E. Computer Engineering, Gujarat Technological University, 2022

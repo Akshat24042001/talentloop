@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TalentLoop AI Interview · HR</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>TalentLoop AI Interview</h1>
+  <p class="sub">Set up an AI first-round interview: job description + resume + your questions → reviewed plan → candidate link.</p>
+  <div id="health" class="small muted"></div>
+
+  <div class="card">
+    <h2>1. Interview inputs</h2>
+    <div class="row">
+      <div><label>Company</label><input id="company" placeholder="RAC IT Solutions"></div>
+      <div><label>Role</label><input id="role" placeholder="Java Backend Developer"></div>
+      <div><label>Candidate name</label><input id="cand" placeholder="Full name"></div>
+      <div><label>Length</label>
+        <select id="dur"><option>10</option><option selected>15</option><option>20</option><option>30</option></select></div>
+    </div>
+    <label>Job description <span class="muted small">(paste, or upload PDF/TXT/DOCX)</span></label>
+    <input type="file" id="jdFile" accept=".pdf,.txt,.docx">
+    <textarea id="jd" placeholder="Paste the JD"></textarea>
+    <label>Resume <span class="muted small">(paste, or upload PDF/TXT/DOCX)</span></label>
+    <input type="file" id="cvFile" accept=".pdf,.txt,.docx">
+    <textarea id="cv" placeholder="Paste the resume text"></textarea>
+    <label>HR questions <span class="muted small">(one per line, all will be asked)</span></label>
+    <textarea id="qs" style="min-height:90px" placeholder="Why are you looking for a change?&#10;What is your notice period?"></textarea>
+    <div class="actions">
+      <button class="primary" id="genBtn">Generate interview plan</button>
+      <button id="sampleBtn">Load sample data</button>
+    </div>
+    <div id="err1"></div>
+  </div>
+
+  <div class="card hidden" id="planCard">
+    <h2>2. Review the plan <span class="muted small" id="planMeta"></span></h2>
+    <p class="muted small">This is exactly what the AI will ask, in order. Edit the JSON if anything is off (wording, time budgets, follow-ups), then create the link. HR approval of the plan is the control point.</p>
+    <div id="planView"></div>
+    <details><summary class="small">Edit plan JSON</summary>
+      <textarea id="planJson" class="mono" style="min-height:360px"></textarea>
+      <div class="actions"><button id="applyJson">Apply JSON edits</button></div>
+    </details>
+    <div class="actions"><button class="primary" id="createBtn">Create candidate link</button></div>
+    <div id="err2"></div>
+    <div id="linkOut" class="hidden">
+      <label>Candidate link (send this)</label>
+      <div class="linkbox"><input id="candLink" readonly><button id="copyBtn">Copy</button></div>
+      <p class="small"><a id="reportLink" target="_blank">Open HR report page</a></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Interviews <button id="refresh" style="float:right;padding:4px 10px">Refresh</button></h2>
+    <div id="calib" class="small muted"></div>
+    <div id="list" class="small muted">Loading...</div>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let PLAN = null, PUBLIC_BASE = location.origin;
+
+async function init(){
+  try{
+    const h = await api('/api/health');
+    if (h.public_url) PUBLIC_BASE = h.public_url.replace(/\/$/,'');
+    const bits = [];
+    bits.push(h.mock ? '<span class="warn">LLM_MOCK=1 (fake AI, for testing flow only)</span>' : `Live turns: ${esc(h.fast_model)} · Plan/scoring: ${esc(h.smart_model)}`);
+    bits.push(h.public_url ? `Public URL: ${esc(h.public_url)}` : '<span class="bad">PUBLIC_URL not set: Vapi cannot reach this server</span>');
+    bits.push(h.vapi_key_set ? 'Vapi key set' : '<span class="bad">VAPI_PUBLIC_KEY missing</span>');
+    $('health').innerHTML = bits.join(' · ');
+  }catch(e){ $('health').textContent = 'Server not reachable: ' + e.message; }
+  loadList();
+}
+
+async function upload(inputId, targetId){
+  const f = $(inputId).files[0]; if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  $(targetId).value = 'Reading file...';
+  try{ const r = await api('/api/extract', {method:'POST', body: fd}); $(targetId).value = r.text; }
+  catch(e){ $(targetId).value = ''; alert(e.message); }
+}
+$('jdFile').onchange = () => upload('jdFile','jd');
+$('cvFile').onchange = () => upload('cvFile','cv');
+
+$('sampleBtn').onclick = async () => {
+  const [jd, cv, qs] = await Promise.all(['sample_jd.txt','sample_resume.txt','sample_questions.txt'].map(f => fetch('/samples/'+f).then(r=>r.text())));
+  $('company').value = 'Demo Tech Pvt Ltd'; $('role').value = 'Java Backend Developer'; $('cand').value = 'Rohan Mehta';
+  $('jd').value = jd; $('cv').value = cv; $('qs').value = qs.trim();
+};
+
+$('genBtn').onclick = async () => {
+  $('err1').innerHTML = '';
+  const inp = {company: $('company').value, role: $('role').value, candidate_name: $('cand').value,
+    duration_min: +$('dur').value, jd: $('jd').value, resume: $('cv').value,
+    questions: $('qs').value.split('\n').map(s=>s.trim()).filter(Boolean)};
+  if (!inp.jd || !inp.resume){ $('err1').innerHTML = '<div class="err">JD and resume are required.</div>'; return; }
+  $('genBtn').disabled = true; $('genBtn').textContent = 'Generating (20-60s)...';
+  try{
+    const r = await api('/api/plan', {method:'POST', json: inp});
+    PLAN = r.plan; window.INPUTS = inp; showPlan(); $('planCard').classList.remove('hidden');
+    $('planCard').scrollIntoView({behavior:'smooth'});
+  }catch(e){ $('err1').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  $('genBtn').disabled = false; $('genBtn').textContent = 'Generate interview plan';
+};
+
+function showPlan(){
+  const total = PLAN.questions.reduce((a,q)=>a+q.time_budget_sec,0);
+  const cap = PLAN.duration_min*60;
+  $('planMeta').innerHTML = `· ${PLAN.questions.length} questions · budget ${Math.round(total/60)} of ${PLAN.duration_min} min ` +
+    (total > cap*0.9 ? '<span class="warn">(tight: some questions may be cut by the timer)</span>' : '');
+  const comps = Object.fromEntries((PLAN.competencies||[]).map(c=>[c.id,c.name]));
+  $('planView').innerHTML = PLAN.questions.map((q,i)=>`
+    <div class="q"><div class="meta"><span class="chip">${i+1}. ${esc(q.type)}</span>
+      <span class="chip">${esc(comps[q.competency_id]||'')}</span><span class="chip">${q.time_budget_sec}s</span>
+      <span class="chip">follow-ups ≤ ${q.max_followups}</span>${q.scored?'':'<span class="chip">not scored</span>'}</div>
+      <div><b>${esc(q.ask)}</b></div>
+      ${q.good_answer_covers.length?`<div class="small muted">Good answer covers: ${q.good_answer_covers.map(esc).join(' · ')}</div>`:''}
+    </div>`).join('') +
+    `<p class="small muted">STT key terms: ${(PLAN.keyterms||[]).map(esc).join(', ')||'none'}</p>
+     <p class="small muted">Resume claims to verify: ${(PLAN.resume_claims_to_verify||[]).map(esc).join(' · ')||'none'}</p>`;
+  $('planJson').value = JSON.stringify(PLAN, null, 2);
+}
+$('applyJson').onclick = () => { try{ PLAN = JSON.parse($('planJson').value); showPlan(); }catch(e){ alert('Invalid JSON: '+e.message); } };
+
+$('createBtn').onclick = async () => {
+  $('err2').innerHTML = '';
+  try{
+    const r = await api('/api/interviews', {method:'POST', json:{plan: PLAN, inputs: window.INPUTS, expires_hours: 72}});
+    $('candLink').value = PUBLIC_BASE + r.candidate_path;
+    $('reportLink').href = r.report_path;
+    $('linkOut').classList.remove('hidden');
+    loadList();
+  }catch(e){ $('err2').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+};
+$('copyBtn').onclick = () => { navigator.clipboard.writeText($('candLink').value); $('copyBtn').textContent='Copied'; };
+
+async function loadList(){
+  try{
+    const [rows, cal] = await Promise.all([api('/api/interviews'), api('/api/calibration')]);
+    $('calib').innerHTML = cal.pairs ? `Calibration: AI within ±1 of HR on <b>${cal.within_1}%</b> of ${cal.pairs} scored answers · exact ${cal.exact}% · AI minus HR avg ${cal.ai_minus_hr_avg}` : 'Calibration: no HR scores entered yet. Score interviews on the report page to measure AI vs HR agreement.';
+    if (!rows.length){ $('list').textContent = 'No interviews yet.'; return; }
+    $('list').innerHTML = `<table><tr><th>Candidate</th><th>Role</th><th>Status</th><th>AI rec.</th><th>Score</th><th></th></tr>` +
+      rows.map(r=>`<tr><td>${esc(r.candidate)}</td><td>${esc(r.role)}</td><td>${esc(r.status)}</td>
+        <td class="${REC_CLASS[r.recommendation]||''}">${esc(REC_LABEL[r.recommendation]||'')}</td>
+        <td>${r.overall ?? ''}</td>
+        <td><a href="/report.html?id=${r.id}">Report</a> · <a href="#" onclick="navigator.clipboard.writeText('${PUBLIC_BASE}/interview.html?id=${r.id}');this.textContent='copied';return false">Copy link</a></td></tr>`).join('') + '</table>';
+  }catch(e){ $('list').textContent = e.message; }
+}
+$('refresh').onclick = loadList;
+init();
+</script>
+</body>
+</html>
