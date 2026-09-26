@@ -56,6 +56,7 @@ def main():
     if r.status_code != 200:
         sys.exit(f"Cannot start: {r.text}  (PUBLIC_URL and VAPI_PUBLIC_KEY must be set even for rehearsal)")
     first = r.json()["assistant"]["firstMessage"]
+    llm_path = "/llm/" + r.json()["assistant"]["model"]["url"].split("/llm/", 1)[1] + "/chat/completions"
     messages = [{"role": "system", "content": "x"}, {"role": "assistant", "content": first}]
     print(f"AI: {first}\n")
 
@@ -71,7 +72,7 @@ def main():
             if ans in ("/quit", "/q"):
                 break
         messages.append({"role": "user", "content": ans})
-        resp = c.post(f"/llm/{iid}/chat/completions", json={"messages": messages, "stream": True})
+        resp = c.post(llm_path, json={"messages": messages, "stream": True})
         say = sse_text(resp)
         messages.append({"role": "assistant", "content": say})
         print(f"AI: {say}\n")
@@ -80,7 +81,16 @@ def main():
 
     c.post(f"/api/interviews/{iid}/complete")
     print("Scoring...")
-    rep = c.post(f"/api/interviews/{iid}/score").json()
+    c.post(f"/api/interviews/{iid}/score").raise_for_status()
+    import time
+    for _ in range(120):
+        rec = c.get(f"/api/interviews/{iid}").json()
+        if rec.get("report") or (rec.get("scoring") or {}).get("state") == "failed":
+            break
+        time.sleep(2)
+    if not rec.get("report"):
+        sys.exit(f"Scoring failed: {(rec.get('scoring') or {}).get('error')}")
+    rep = rec["report"]
     print(json.dumps({k: rep.get(k) for k in ("recommendation", "confidence", "summary", "computed",
                                                 "human_review_reasons")}, indent=2))
     print(f"\nFull report: {a.base}/report.html?id={iid}")

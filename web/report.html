@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="/style.css">
 <style>
   .ev{border-left:3px solid var(--line);padding:4px 10px;margin:6px 0;font-size:14px}
-  .ev.exact,.ev.approx{border-color:var(--ok)} .ev.unverified{border-color:var(--bad)}
+  .ev.exact,.ev.approx{border-color:var(--ok)} .ev.unverified{border-color:var(--bad)} .ev.other_question{border-color:var(--warn)}
   .score{font-size:22px;font-weight:700}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:760px){.grid2{grid-template-columns:1fr}}
   .tx{white-space:pre-wrap;font-size:13px;max-height:500px;overflow:auto}
@@ -30,7 +30,8 @@ async function load(){
   try{ REC = await api(`/api/interviews/${iid}`); }catch(e){ $('root').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
   render();
   clearTimeout(timer);
-  if (REC.status === 'completed' && !REC.report) timer = setTimeout(load, 8000);
+  const sc = REC.scoring || {};
+  if (sc.state === 'running' || (REC.status === 'completed' && !REC.report && sc.state !== 'failed')) timer = setTimeout(load, 5000);
   if (REC.status === 'in_progress') timer = setTimeout(load, 5000);
 }
 
@@ -41,17 +42,20 @@ function render(){
   let h = `<div class="card"><h1>${esc(p.candidate_name)} · ${esc(p.role)}</h1>
     <p class="muted small">${esc(p.company||'')} · status: <b>${esc(REC.status)}</b> · created ${new Date(REC.created_at*1000).toLocaleString()}</p>
     <div class="actions"><button id="scoreBtn" ${REC.state?'':'disabled'}>${rep?'Re-score':'Score now'}</button>
-    <span class="small muted" style="align-self:center">Candidate link: /interview.html?id=${esc(iid)}</span></div></div>`;
+    <button id="delBtn">Delete all data</button>
+    <span class="small muted" style="align-self:center">Candidate link: /interview.html?id=${esc(iid)}</span></div>
+    ${(REC.scoring||{}).state==='running'?'<p class="small muted">Scoring in progress, this page refreshes automatically...</p>':''}
+    ${(REC.scoring||{}).state==='failed'?`<div class="err">Scoring failed: ${esc(REC.scoring.error)}. Click Score now to retry.</div>`:''}</div>`;
 
   if (!rep){
-    h += `<div class="card muted">${REC.status==='completed' ? 'Scoring in progress, this page refreshes automatically...' : REC.status==='in_progress' ? 'Interview in progress (live transcript below).' : 'Interview not taken yet.'}</div>`;
+    h += `<div class="card muted">${REC.status==='completed' ? 'Waiting for the report.' : REC.status==='in_progress' ? 'Interview in progress (live transcript below).' : 'Interview not taken yet.'}</div>`;
   } else {
     const c = rep.computed || {};
     h += `<div class="card"><div class="grid2">
       <div><div class="muted small">AI recommendation (HR decides)</div>
         <div class="big ${REC_CLASS[rep.recommendation]||''}">${esc(REC_LABEL[rep.recommendation]||rep.recommendation)}</div>
-        <div class="small">Confidence: ${esc(rep.confidence)} · Overall ${c.overall ?? '-'} / 5</div></div>
-      <div class="small">Questions asked: ${c.questions_asked}/${c.questions_planned}<br>
+        <div class="small">Confidence: ${esc(rep.confidence)} · Overall ${esc(c.overall ?? '-')} / 5</div></div>
+      <div class="small">Questions asked: ${esc(c.questions_asked)}/${esc(c.questions_planned)}<br>
         Evidence quotes verified against transcript: ${esc(c.evidence_verified)}<br>
         Avg live turn latency (LLM): ${c.avg_turn_latency_ms ?? '-'} ms<br>Scoring passes: ${c.scoring_passes}</div></div>
       <p>${esc(rep.summary)}</p>
@@ -74,8 +78,8 @@ function render(){
     h += `<div class="q"><div class="meta"><span class="chip">${esc(q.id)} · ${esc(q.type)}</span>${q.scored?'':'<span class="chip">not scored</span>'}</div>
       <b>${esc(q.ask)}</b>
       <div class="grid2" style="margin-top:8px"><div>
-        <div class="score">${r.score ?? '-'}<span class="small muted"> / 5 AI</span></div>
-        ${(r.evidence||[]).map(e=>`<div class="ev ${esc(e.verified)}">"${esc(e.quote)}" <span class="muted small">[${esc(e.t)}] ${e.verified==='unverified'?'<b class="bad">not found in transcript</b>':'verified'}</span></div>`).join('')}
+        <div class="score">${esc(r.score ?? '-')}<span class="small muted"> / 5 AI</span></div>
+        ${(r.evidence||[]).map(e=>`<div class="ev ${esc(e.verified)}">"${esc(e.quote)}" <span class="muted small">[${esc(e.t)}] ${e.verified==='unverified'?'<b class="bad">not found in transcript</b>':e.verified==='other_question'?'<b class="warn">said in a different answer</b>':'verified'}</span></div>`).join('')}
         ${r.rationale?`<p class="small">${esc(r.rationale)}</p>`:''}
         ${(r.missed_points||[]).length?`<p class="small warn">Missed: ${r.missed_points.map(esc).join(' · ')}</p>`:''}
         ${notes.length?`<p class="small muted">Live notes: ${notes.map(esc).join(' | ')}</p>`:''}
@@ -101,7 +105,10 @@ function render(){
 
   $('root').innerHTML = h;
   const sb = $('scoreBtn'); if (sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Scoring (30-90s)...';
-    try{ await api(`/api/interviews/${iid}/score`, {method:'POST'}); }catch(e){ alert(e.message); } load(); };
+    try{ await api(`/api/interviews/${iid}/score`, {method:'POST'}); }catch(e){ alert(e.message); } setTimeout(load, 1500); };
+  $('delBtn').onclick = async () => {
+    if (!confirm('Permanently delete this interview, its transcript, report and recordings from this server? Vapi and the AI provider keep their own copies under their retention policies.')) return;
+    try{ await api(`/api/interviews/${iid}`, {method:'DELETE'}); location.href = '/hr.html'; }catch(e){ alert(e.message); } };
   $('saveHr').onclick = async () => {
     const scores = {}; document.querySelectorAll('.hrs').forEach(s=>{ if (s.value) scores[s.dataset.q] = +s.value; });
     await api(`/api/interviews/${iid}/hr`, {method:'POST', json:{scores, decision: $('decision').value, notes: $('notes').value}});

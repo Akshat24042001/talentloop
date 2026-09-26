@@ -6,7 +6,7 @@ import json
 import os
 import re
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 MOCK = os.getenv("LLM_MOCK", "0") == "1"
 FAST_MODEL = os.getenv("FAST_MODEL", "gpt-4.1-mini")
@@ -49,5 +49,17 @@ async def complete_json(system: str, user: str, model: str, temperature: float =
     )
     if JSON_MODE:
         kwargs["response_format"] = {"type": "json_object"}
-    resp = await client().chat.completions.create(**kwargs)
-    return parse_json(resp.choices[0].message.content)
+    try:
+        resp = await client().chat.completions.create(**kwargs)
+    except BadRequestError as e:
+        # Newer OpenAI models (gpt-5, o-series) reject max_tokens and a custom temperature.
+        msg = str(e)
+        if "max_tokens" not in msg and "temperature" not in msg:
+            raise
+        kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+        kwargs.pop("temperature", None)
+        resp = await client().chat.completions.create(**kwargs)
+    out = parse_json(resp.choices[0].message.content)
+    if not isinstance(out, dict):
+        raise ValueError("model did not return a JSON object")
+    return out

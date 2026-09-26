@@ -25,7 +25,7 @@ HR page ──> /api/plan (SMART_MODEL) ──> HR reviews/edits plan ──> ca
 Candidate browser (interview.html) ── Vapi web SDK ── Vapi cloud (STT, TTS, turn-taking)
                                                          │  every candidate turn
                                                          ▼
-                                  POST /llm/{id}/chat/completions   (this server)
+                                  POST /llm/{id}/{session_token}/chat/completions
                                   brain.handle_turn():
                                     code decides allowed actions (time, follow-up budget)
                                     FAST_MODEL judges answer, picks one action, writes words
@@ -43,7 +43,7 @@ The interviewer's possible actions each turn are: follow up, next question, repe
 2. `pip install -r backend/requirements.txt`
 3. Start a tunnel: `cloudflared tunnel --url http://localhost:8000`, then copy the `https://....trycloudflare.com` URL.
 4. `cp .env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `ADMIN_KEY`.
-5. `uvicorn backend.main:app --host 0.0.0.0 --port 8000`
+5. `uvicorn backend.main:app --host 0.0.0.0 --port 8000` (one worker only: interview locks live in process memory)
 6. Open `http://localhost:8000` (the HR page). The top line must show no red warnings.
 
 Quick checks before spending money:
@@ -102,6 +102,10 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 - **Storage is JSON files** on one machine, and there is no HR login beyond `ADMIN_KEY`. That's fine for a pilot, not for production.
 - **Recordings on Vapi are temporary.** This server copies the call audio when the end-of-call webhook arrives. The candidate's camera video is uploaded from the browser at the end.
 - **Latency.** Each turn waits for the silence window plus about 1 second of LLM time. That's acceptable for an interview, but measure it.
+
+## Review status
+
+Read `REVIEW.md` before running real candidates. It lists what was fixed, what is still open, and what must be verified on a live Vapi call.
 
 ## Files
 

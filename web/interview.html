@@ -86,7 +86,9 @@ let Vapi = null;
 const vapiReady = import('https://esm.sh/@vapi-ai/web').then(m => { Vapi = m.default?.default || m.default || m; }).catch(e => { console.error(e); });
 const $ = id => document.getElementById(id);
 const iid = new URLSearchParams(location.search).get('id');
-let stream, recorder, chunks = [], vapi, events = [], ended = false, audioCtx;
+let stream, recorder, vapi, events = [], ended = false, audioCtx, inCall = false, starting = false;
+// Recording is uploaded in 5 s pieces during the call, in order, so a closed tab loses seconds, not the video.
+let recId = '', recSeq = 0, recExt = 'webm', upQueue = [], upBusy = false, upFailed = false;
 
 function show(step){ ['s1','s2','s3','s4'].forEach(s => $(s).classList.toggle('hidden', s !== step)); }
 function ev(type, detail=''){ events.push({type, ts: Date.now(), detail: String(detail).slice(0,200)}); }
@@ -132,21 +134,38 @@ function startRecording(){
   const types = ['video/webm;codecs=vp8,opus','video/webm','video/mp4'];
   const mimeType = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
   if (!mimeType) { ev('recorder_unsupported'); return; }
-  chunks = [];
+  recId = Math.random().toString(36).slice(2, 12) + Date.now().toString(36); recSeq = 0; upFailed = false;
+  recExt = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
   recorder = new MediaRecorder(stream, {mimeType, videoBitsPerSecond: 300000});
-  recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+  recorder.ondataavailable = e => { if (e.data.size){ upQueue.push({rid: recId, seq: recSeq++, ext: recExt, blob: e.data}); pump(); } };
   recorder.start(5000);
+}
+async function pump(){
+  if (upBusy) return; upBusy = true;
+  while (upQueue.length){
+    const c = upQueue[0]; let ok = false;
+    for (let i = 0; i < 4 && !ok; i++){
+      try{
+        const r = await fetch(`/api/interviews/${iid}/media/chunk?rid=${c.rid}&seq=${c.seq}&ext=${c.ext}`,
+                              {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body: c.blob});
+        ok = r.ok; if (r.status === 413 || r.status === 410) break;
+      }catch{}
+      if (!ok) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+    }
+    if (!ok){ upFailed = true; ev('recording_upload_failed', c.seq); upQueue = upQueue.filter(x => x.rid !== c.rid); continue; }
+    upQueue.shift();
+  }
+  upBusy = false;
 }
 function stopRecording(){
   return new Promise(res => { if(!recorder || recorder.state==='inactive') return res(); recorder.onstop = res; recorder.stop(); });
 }
-async function uploadRecording(){
-  if (!chunks.length) return;
-  const type = recorder.mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
-  const fd = new FormData(); fd.append('file', new Blob(chunks, {type: recorder.mimeType}), `recording.${type}`);
-  $('uploadMsg').textContent = 'Uploading your recording, please keep this page open...';
-  try{ await fetch(`/api/interviews/${iid}/media`, {method:'POST', body: fd}); $('uploadMsg').textContent = 'Recording uploaded.'; }
-  catch(e){ $('uploadMsg').textContent = 'Recording upload failed. HR still has the audio and transcript.'; }
+async function drainUploads(){
+  if (!upQueue.length && !upBusy) return;
+  $('uploadMsg').textContent = 'Saving the last part of your recording, please keep this page open...';
+  const t0 = Date.now();
+  while ((upQueue.length || upBusy) && Date.now() - t0 < 60000) await new Promise(r => setTimeout(r, 300));
+  $('uploadMsg').textContent = upFailed ? 'Part of the video recording could not be saved. HR still has the call audio and transcript.' : '';
 }
 
 function setStatus(mode){
@@ -154,16 +173,22 @@ function setStatus(mode){
   $('statusText').textContent = mode === 'speaking' ? 'Interviewer is speaking' : mode === 'listening' ? 'Listening. Take your time.' : 'Connecting...';
 }
 
+function showErr3(msg){ const d = document.createElement('div'); d.className = 'err'; d.textContent = msg; $('err3').replaceChildren(d); }
 async function begin(){
-  show('s3'); ended = false; setStatus('');
+  if (starting) return;            // double clicks used to open two calls and burn a reconnect
+  starting = true; $('startBtn').disabled = true; $('reconnectBtn').disabled = true;
+  try{ await beginInner(); } finally { starting = false; $('reconnectBtn').disabled = false; }
+}
+async function beginInner(){
+  show('s3'); ended = false; setStatus(''); $('err3').replaceChildren();
   try{ await document.documentElement.requestFullscreen(); }catch{}
+  await vapiReady;                 // load the SDK BEFORE opening a session on the server
+  if (!Vapi){ showErr3('Could not load the voice component. Check your internet connection and reload.'); return; }
   let cfg;
   try{ cfg = await post(`/api/interviews/${iid}/assistant`, {}); }
-  catch(e){ $('err3').innerHTML = `<div class="err">${e.message}</div>`; return; }
-  await vapiReady;
-  if (!Vapi){ $('err3').innerHTML = '<div class="err">Could not load the voice component. Check your internet connection and reload.</div>'; return; }
+  catch(e){ showErr3(e.message); return; }
   vapi = new Vapi(cfg.publicKey);
-  vapi.on('call-start', () => { setStatus('speaking'); ev('call_start'); });
+  vapi.on('call-start', () => { inCall = true; setStatus('speaking'); ev('call_start'); });
   vapi.on('speech-start', () => setStatus('speaking'));
   vapi.on('speech-end', () => setStatus('listening'));
   vapi.on('message', m => {
@@ -175,20 +200,20 @@ async function begin(){
   try{
     const call = await vapi.start(cfg.assistant);
     if (call && call.id) post(`/api/interviews/${iid}/started`, {call_id: call.id}).catch(()=>{});
-  }catch(e){ $('err3').innerHTML = `<div class="err">Could not start the call: ${e.message || e}</div>`; }
+  }catch(e){ showErr3(`Could not start the call: ${e.message || e}`); await stopRecording(); }
 }
 $('startBtn').onclick = begin;
 $('reconnectBtn').onclick = begin;
 $('endBtn').onclick = () => { if (confirm('End the interview now? You may not be able to restart it.')) { ev('ended_by_candidate'); vapi && vapi.stop(); } };
 
 async function finish(){
-  if (ended) return; ended = true;
+  if (ended) return; ended = true; inCall = false;
   ev('call_end');
   show('s4');
   if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
   await stopRecording();
   await flushEvents();
-  await uploadRecording();
+  await drainUploads();
   let status = 'completed';
   try{ status = (await post(`/api/interviews/${iid}/complete`, {})).status; }catch{}
   if (status !== 'completed' && status !== 'scored'){
@@ -198,9 +223,12 @@ async function finish(){
   }
 }
 
-document.addEventListener('visibilitychange', () => ev(document.hidden ? 'tab_hidden' : 'tab_visible'));
-document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && !ended && vapi) ev('fullscreen_exit'); });
-window.addEventListener('beforeunload', () => { if (events.length) navigator.sendBeacon(`/api/interviews/${iid}/events`, new Blob([JSON.stringify(events)], {type:'application/json'})); });
+// Proctoring signals only count while the call is live, not while reading instructions.
+document.addEventListener('visibilitychange', () => { if (inCall) ev(document.hidden ? 'tab_hidden' : 'tab_visible'); });
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && inCall) ev('fullscreen_exit'); });
+window.addEventListener('beforeunload', e => {
+  if (inCall || upQueue.length){ e.preventDefault(); e.returnValue = ''; }
+  if (events.length) navigator.sendBeacon(`/api/interviews/${iid}/events`, new Blob([JSON.stringify(events)], {type:'application/json'})); });
 load();
 </script>
 </body>

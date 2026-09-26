@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 
 from . import llm, prompts
@@ -22,18 +23,45 @@ CLOSING = ("That brings us to the end. Thank you for your time today. "
 TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "7"))
 END_BUFFER_SEC = 40          # below this remaining time, wrap up
 MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "3")) + 1
+QUESTION_TYPES = ("warmup", "hr_mandatory", "resume_probe", "jd_skill", "behavioral")
+RECOMMENDATIONS = ("strong_yes", "yes", "maybe", "no")
 
 
 # ---------------------------------------------------------------------------
 # Plan
 # ---------------------------------------------------------------------------
+def _int(v, default: int) -> int:
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
 def normalize_plan(plan: dict, duration_min: int | None = None) -> dict:
     """Make the plan safe to run no matter what the LLM (or HR edits) produced."""
     plan = copy.deepcopy(plan)
     if duration_min:
-        plan["duration_min"] = int(duration_min)
-    plan["duration_min"] = int(plan.get("duration_min") or 20)
-    qs = [q for q in plan.get("questions", []) if (q.get("ask") or "").strip()]
+        plan["duration_min"] = _int(duration_min, 20)
+    plan["duration_min"] = max(5, min(60, _int(plan.get("duration_min"), 20)))
+
+    comps = [c for c in (plan.get("competencies") or []) if isinstance(c, dict)]
+    if not comps:
+        comps = [{"id": "c1", "name": "Overall fit", "weight": 1.0, "anchors": {}}]
+    for i, c in enumerate(comps):
+        c["id"] = str(c.get("id") or f"c{i+1}")
+        c.setdefault("name", c["id"])
+        c.setdefault("anchors", {})
+        try:
+            c["weight"] = max(0.0, float(c.get("weight", 0) or 0))
+        except (TypeError, ValueError):
+            c["weight"] = 0.0
+    total_w = sum(c["weight"] for c in comps)
+    for c in comps:
+        c["weight"] = round(c["weight"] / total_w, 3) if total_w > 0 else round(1 / len(comps), 3)
+    plan["competencies"] = comps
+    comp_ids = {c["id"] for c in comps}
+
+    qs = [q for q in plan.get("questions", []) if isinstance(q, dict) and str(q.get("ask") or "").strip()]
     if not qs:
         raise ValueError("Plan has no questions")
     seen = set()
@@ -41,26 +69,47 @@ def normalize_plan(plan: dict, duration_min: int | None = None) -> dict:
         qid = str(q.get("id") or f"q{i+1}")
         if qid in seen:
             qid = f"q{i+1}"
+            while qid in seen:
+                qid += "b"
         seen.add(qid)
         q["id"] = qid
-        q["ask"] = q["ask"].strip()
-        q.setdefault("type", "jd_skill")
+        q["ask"] = str(q["ask"]).strip()
+        q["type"] = q.get("type") if q.get("type") in QUESTION_TYPES else "jd_skill"
         q["scored"] = bool(q.get("scored", q["type"] != "warmup"))
         q["good_answer_covers"] = [str(x) for x in (q.get("good_answer_covers") or [])][:5]
         q["red_flags"] = [str(x) for x in (q.get("red_flags") or [])]
-        q["max_followups"] = max(0, min(3, int(q.get("max_followups", 1))))
-        q["time_budget_sec"] = max(45, min(420, int(q.get("time_budget_sec", 150))))
+        q["max_followups"] = max(0, min(3, _int(q.get("max_followups"), 1)))
+        q["time_budget_sec"] = max(45, min(420, _int(q.get("time_budget_sec"), 150)))
+        if q.get("competency_id") not in comp_ids:  # otherwise the score silently drops out of the overall
+            q["competency_id"] = comps[0]["id"]
     plan["questions"] = qs
-    comps = plan.get("competencies") or [{"id": "c1", "name": "Overall fit", "weight": 1.0, "anchors": {}}]
-    total_w = sum(float(c.get("weight", 0) or 0) for c in comps) or 1.0
-    for c in comps:
-        c["weight"] = round(float(c.get("weight", 0) or 0) / total_w, 3) if total_w else 1 / len(comps)
-    plan["competencies"] = comps
     plan["keyterms"] = [str(k)[:50] for k in (plan.get("keyterms") or []) if str(k).strip()][:50]
     plan.setdefault("company_facts", [])
     plan.setdefault("resume_claims_to_verify", [])
     plan.setdefault("do_not_ask", [])
     return plan
+
+
+def plan_warnings(plan: dict, hr_questions: list[str] | None = None) -> list[str]:
+    """Things HR must look at before sending the link. Shown on the HR page."""
+    w = []
+    qs = plan["questions"]
+    n_hr = len([x for x in (hr_questions or []) if str(x).strip()])
+    n_mand = sum(1 for q in qs if q["type"] == "hr_mandatory")
+    if n_hr and n_mand != n_hr:
+        w.append(f"You gave {n_hr} HR questions but the plan has {n_mand} marked hr_mandatory. "
+                 "Check none were dropped or merged.")
+    budget = sum(q["time_budget_sec"] for q in qs)
+    cap = plan["duration_min"] * 60
+    if budget > cap * 0.9:
+        w.append(f"Question time budgets add up to {round(budget / 60, 1)} of {plan['duration_min']} minutes. "
+                 "Optional questions will be skipped automatically if time runs short.")
+    long_q = [q["id"] for q in qs if len(q["ask"].split()) > 40]
+    if long_q:
+        w.append(f"Very long spoken questions (hard to hold in your head): {', '.join(long_q)}")
+    if qs[0]["type"] != "warmup":
+        w.append("First question is not a warm-up. Candidates perform worse when the first question is scored.")
+    return w
 
 
 async def generate_plan(inp: dict) -> dict:
@@ -80,6 +129,9 @@ async def generate_plan(inp: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Live interview state machine
 # ---------------------------------------------------------------------------
+SNAPSHOTS_KEPT = 12
+
+
 def _first_name(plan: dict) -> str:
     name = (plan.get("candidate_name") or "").strip()
     return name.split()[0] if name else "there"
@@ -93,21 +145,27 @@ def opening_message(plan: dict) -> str:
             "If you want a question repeated, just say so. Let's begin. " + q0)
 
 
+def _snap(st: dict) -> dict:
+    return {"seq": st["seq"], "state": copy.deepcopy(st)}
+
+
 def start_session(rec: dict) -> str:
-    """Called when a (re)connecting candidate starts a call. Returns the first message to speak."""
+    """Called when a (re)connecting candidate starts a call. Returns the first message to speak.
+
+    Every call gets a fresh session number and a fresh secret token. The token is part of the
+    custom-LLM URL, so requests from an older, dead call can never touch the current state.
+    A session in which the candidate never spoke (mic failed, Vapi failed to start, page
+    refreshed) does not count as a reconnect and restarts the interview cleanly."""
     plan = rec["plan"]
     now = time.time()
     st = rec.get("state")
-    if st is None:
-        st = {"session": 1, "q_idx": 0, "fu_used": 0, "stall": 0, "covered": {}, "notes": {},
-              "ended": False, "active_before": 0.0, "last_active": 0.0, "q_started_active": 0.0,
-              "session_started": now, "log": []}
-        first = opening_message(plan)
-    else:
-        if st.get("ended"):
-            raise ValueError("Interview already completed")
-        if st["session"] >= MAX_SESSIONS:
-            raise ValueError("Too many reconnects")
+    if st and st.get("ended"):
+        raise ValueError("Interview already completed")
+    spoke = bool(st) and any(e["role"] == "candidate" for e in st.get("log", []))
+    if st and spoke:
+        if st.get("reconnects", 0) + 1 >= MAX_SESSIONS:
+            raise ValueError("Too many reconnects. Please contact HR.")
+        st["reconnects"] = st.get("reconnects", 0) + 1
         st["session"] += 1
         st["active_before"] = st.get("last_active", 0.0)
         st["session_started"] = now
@@ -115,10 +173,25 @@ def start_session(rec: dict) -> str:
         q = plan["questions"][st["q_idx"]]
         first = (f"Welcome back {_first_name(plan)}. It looks like we got disconnected. "
                  f"Let's continue from where we stopped. {q['ask']}")
+        action = "resume"
+    else:
+        tokens = (st or {}).get("tokens", [])
+        st = {"session": (st or {}).get("session", 0) + 1, "reconnects": 0, "q_idx": 0, "fu_used": 0,
+              "stall": 0, "covered": {}, "notes": {}, "skipped": [], "judge_failures": 0,
+              "ended": False, "active_before": 0.0, "last_active": 0.0, "q_started_active": 0.0,
+              "session_started": now, "log": [], "tokens": tokens, "seq": 0}
+        first = opening_message(plan)
+        action = "open"
+    st["token"] = secrets.token_urlsafe(16)
+    st["tokens"] = (st.get("tokens") or [])[-10:] + [st["token"]]
+    st["seq"] = st.get("seq", 0) + 1
+    st["last_say"] = first
+    st["ai_n"] = 1
     st["log"].append({"role": "ai", "text": first, "q_id": plan["questions"][st["q_idx"]]["id"],
-                      "action": "open" if st["session"] == 1 else "resume", "t": round(st["active_before"])})
+                      "action": action, "t": round(st["active_before"])})
     rec["state"] = st
-    rec["snapshots"] = {f"{st['session']}:0": copy.deepcopy(st)}
+    rec["snapshots"] = [_snap(st)]
+    rec["committed_seq"] = st["seq"]
     rec["status"] = "in_progress"
     return first
 
@@ -130,14 +203,52 @@ def _content(m: dict) -> str:
     return (c or "").strip()
 
 
-def _trailing_user_text(messages: list[dict]) -> str:
+def _same_utterance(ours: str, heard: str) -> bool:
+    """Does an assistant message in Vapi's history correspond to a line we produced?
+    Vapi keeps only the part actually spoken when the candidate interrupts, so allow a prefix."""
+    a, b = _norm(ours), _norm(heard)
+    if not a or not b:
+        return False
+    return a == b or (len(b) >= 12 and a.startswith(b))
+
+
+def _locate(rec: dict, messages: list[dict]) -> tuple[dict | None, str, bool]:
+    """Find the state the candidate is actually replying to, and what they said since.
+
+    Vapi's message history is the source of truth for what was really spoken. We walk its
+    assistant messages from newest to oldest and match them to our snapshots. This handles:
+      * re-requests for the same turn (candidate kept talking, text got longer),
+      * a reply we generated that Vapi threw away unspoken (it is not in the history, so the
+        state it produced is ignored instead of silently skipping a question),
+      * idle prompts spoken by Vapi itself ("Take your time...") that we never produced.
+    Returns (base_state, candidate_text, matched)."""
+    snaps = rec.get("snapshots") or []
+    ai_pos = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and _content(m)]
+    for rank in range(len(ai_pos) - 1, -1, -1):
+        i = ai_pos[rank]
+        heard = _content(messages[i])
+        hits = [s for s in reversed(snaps) if _same_utterance(s["state"].get("last_say", ""), heard)]
+        if not hits:
+            continue
+        exact = [s for s in hits if s["state"].get("ai_n") == rank + 1]
+        base = (exact or hits)[0]["state"]
+        said = " ".join(_content(m) for m in messages[i + 1:] if m.get("role") == "user" and _content(m))
+        return base, said, True
+    # Nothing matched. Fall back to the committed state and trailing user text.
     parts = []
     for m in reversed(messages):
+        if m.get("role") == "assistant":
+            break
         if m.get("role") == "user":
             parts.append(_content(m))
-        elif m.get("role") == "assistant":
-            break
-    return " ".join(reversed([p for p in parts if p]))
+    base = snaps[0]["state"] if (not ai_pos and snaps) else rec.get("state")
+    return base, " ".join(reversed([p for p in parts if p])), False
+
+
+def _remaining_mandatory_sec(plan: dict, after_idx: int) -> float:
+    """Minimum time still needed for HR-mandatory questions after index after_idx."""
+    return sum(min(q["time_budget_sec"], 90) for q in plan["questions"][after_idx + 1:]
+               if q["type"] == "hr_mandatory")
 
 
 def _allowed_actions(st: dict, plan: dict, active: float) -> tuple[list[str], str]:
@@ -151,9 +262,24 @@ def _allowed_actions(st: dict, plan: dict, active: float) -> tuple[list[str], st
     q_time = active - st["q_started_active"]
     if st["stall"] < 2:  # stop loops of repeats / redirects
         allowed += ["invite_continue", "clarify_repeat", "answer_candidate_question", "redirect"]
-    if (st["fu_used"] < q["max_followups"] and q_time < q["time_budget_sec"] * 1.25 and remaining > 90):
+    spare = remaining - END_BUFFER_SEC - _remaining_mandatory_sec(plan, st["q_idx"])
+    if st["fu_used"] < q["max_followups"] and q_time < q["time_budget_sec"] * 1.25 and spare > 90:
         allowed.append("follow_up")
     return allowed, progress
+
+
+def _next_index(st: dict, plan: dict, active: float) -> int | None:
+    """Next question to ask, skipping optional questions when time is short so that
+    HR-mandatory questions are always reached. None means there is nothing left to ask."""
+    qs = plan["questions"]
+    i = st["q_idx"] + 1
+    while i < len(qs):
+        remaining = plan["duration_min"] * 60 - active - END_BUFFER_SEC
+        if qs[i]["type"] == "hr_mandatory" or remaining - _remaining_mandatory_sec(plan, i) >= 60:
+            return i
+        st["skipped"].append(qs[i]["id"])
+        i += 1
+    return None
 
 
 def _recent(st: dict, k: int = 6) -> str:
@@ -186,53 +312,74 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str]) -> dict:
     )
 
 
+_END_RE = re.compile(re.escape(END_PHRASE), re.I)
+
+
 def _clean(s) -> str:
     s = re.sub(r"[*#_`>\[\]]", "", str(s or "")).strip()
-    return s.replace(END_PHRASE, "").replace(END_PHRASE.capitalize(), "")
+    return _END_RE.sub("", s).strip()
 
 
-async def handle_turn(rec: dict, messages: list[dict]) -> str:
-    """Process one candidate turn. Idempotent per turn number: if Vapi re-requests the same
-    turn (candidate kept talking), we recompute from the snapshot before that turn."""
+def _looks_cut_off(said: str) -> bool:
+    return bool(re.search(r"\b(and|so|but|because|or|like|then|which|that)\W*$", said.strip(), re.I))
+
+
+def prepare_turn(rec: dict, messages: list[dict]) -> dict:
+    """Phase 1 (under the interview lock, fast): decide which state this request builds on.
+    Returns either {"reply": str} for an immediate answer, or a context for the LLM judge."""
     plan = rec["plan"]
-    cur = rec.get("state")
-    if cur is None:
-        start_session(rec)
-        cur = rec["state"]
-    s = cur["session"]
-    n = sum(1 for m in messages if m.get("role") == "user")
-    said = _trailing_user_text(messages)
-    qs = plan["questions"]
-
-    if n == 0 or not said:
-        return qs[cur["q_idx"]]["ask"]
-
-    snaps = rec.setdefault("snapshots", {})
-    base_keys = [int(k.split(":")[1]) for k in snaps if k.startswith(f"{s}:") and int(k.split(":")[1]) < n]
-    base = snaps[f"{s}:{max(base_keys)}"] if base_keys else cur
+    cur = rec["state"]
+    base, said, matched = _locate(rec, messages)
+    if base is None:
+        base = cur
+    if not matched:
+        log.warning("[%s] could not match Vapi history to a snapshot; using committed state", rec["id"])
+    if base.get("ended"):
+        return {"reply": "Thank you, " + END_PHRASE + "."}
+    if not said:
+        return {"reply": base.get("last_say") or plan["questions"][base["q_idx"]]["ask"]}
     st = copy.deepcopy(base)
-
-    if st.get("ended"):
-        return "Thank you, " + END_PHRASE + "."
-
-    now = time.time()
-    active = st["active_before"] + (now - st["session_started"])
+    active = st["active_before"] + (time.time() - st["session_started"])
     allowed, progress = _allowed_actions(st, plan, active)
-    q = qs[st["q_idx"]]
+    rec["turn_seq"] = rec.get("turn_seq", 0) + 1
+    return {"st": st, "said": said, "active": active, "allowed": allowed, "progress": progress,
+            "req": rec["turn_seq"], "ai_n": sum(1 for m in messages if m.get("role") == "assistant" and _content(m)) + 1}
 
+
+async def judge_turn(prep: dict, plan: dict) -> tuple[dict, int, bool]:
+    """Phase 2 (NO lock held): ask the LLM. Never raises."""
     t0 = time.time()
+    failed = False
     try:
-        d = await _judge(st, plan, said, allowed)
+        d = await _judge(prep["st"], plan, prep["said"], prep["allowed"])
+        if not isinstance(d, dict):
+            raise ValueError("judge returned non-object")
     except Exception as e:  # never let the interview stall on an LLM failure
-        log.warning("judge failed (%s); falling back to %s", e, progress)
-        d = {"action": progress, "ack": "Thank you."}
-    latency_ms = int((time.time() - t0) * 1000)
+        failed = True
+        if _looks_cut_off(prep["said"]) and "invite_continue" in prep["allowed"]:
+            d = {"action": "invite_continue"}
+        else:
+            d = {"action": prep["progress"], "ack": "Thank you."}
+        log.warning("judge failed (%s); falling back to %s", e, d["action"])
+    return d, int((time.time() - t0) * 1000), failed
+
+
+def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) -> str:
+    """Phase 3 (under the lock): turn the decision into words and commit the new state."""
+    plan = rec["plan"]
+    qs = plan["questions"]
+    st, said, active, allowed, progress = prep["st"], prep["said"], prep["active"], prep["allowed"], prep["progress"]
+    q = qs[st["q_idx"]]
 
     action = d.get("action") if d.get("action") in allowed else progress
     if action == "follow_up" and not _clean(d.get("followup")):
         action = progress
     ack = _clean(d.get("ack")) or "Thank you."
 
+    if action == "next_question":
+        nxt = _next_index(st, plan, active)
+        if nxt is None:
+            action = "end"
     if action == "invite_continue":
         say = _clean(d.get("reply")) or "Please go on, I'm listening."
         st["stall"] += 1
@@ -247,9 +394,9 @@ async def handle_turn(rec: dict, messages: list[dict]) -> str:
         say = _clean(d.get("reply")) or ("Let's stay with the interview. " + q["ask"])
         st["stall"] += 1
     elif action == "next_question":
-        st["q_idx"] += 1
-        nq = qs[st["q_idx"]]
-        prefix = "Final question. " if st["q_idx"] == len(qs) - 1 else ""
+        st["q_idx"] = nxt
+        nq = qs[nxt]
+        prefix = "Final question. " if nxt == len(qs) - 1 else ""
         say = f"{ack} {prefix}{nq['ask']}"
         st["fu_used"] = 0
         st["stall"] = 0
@@ -265,20 +412,38 @@ async def handle_turn(rec: dict, messages: list[dict]) -> str:
     st["covered"][q["id"]] = sorted(cov)
     if d.get("note"):
         st["notes"].setdefault(q["id"], []).append(_clean(d["note"])[:200])
+    if failed:
+        st["judge_failures"] = st.get("judge_failures", 0) + 1
 
     st["log"].append({"role": "candidate", "text": said, "q_id": q["id"], "t": round(active)})
     st["log"].append({"role": "ai", "text": say, "q_id": qs[st["q_idx"]]["id"], "action": action,
-                      "t": round(active), "judge_ms": latency_ms})
+                      "t": round(active), "judge_ms": latency_ms, **({"fallback": True} if failed else {})})
     st["last_active"] = active
+    st["last_say"] = say
+    st["ai_n"] = prep["ai_n"]
 
-    snaps[f"{s}:{n}"] = copy.deepcopy(st)
-    # keep the snapshot dict small
-    for k in sorted([k for k in snaps if k.startswith(f"{s}:")], key=lambda k: int(k.split(":")[1]))[:-6]:
-        snaps.pop(k, None)
+    # A newer request for this call already committed: this one is stale (Vapi has moved on).
+    if prep["req"] < rec.get("committed_req", 0):
+        return say
+    rec["committed_req"] = prep["req"]
+    st["seq"] = max(s["seq"] for s in rec.get("snapshots") or [{"seq": 0}]) + 1
+    rec.setdefault("snapshots", []).append(_snap(st))
+    rec["snapshots"] = rec["snapshots"][-SNAPSHOTS_KEPT:]
     rec["state"] = st
     if st["ended"]:
         rec["status"] = "completed"
     return say
+
+
+async def handle_turn(rec: dict, messages: list[dict]) -> str:
+    """Single-call convenience (no lock splitting). The server uses the three phases directly."""
+    if rec.get("state") is None:
+        start_session(rec)
+    prep = prepare_turn(rec, messages)
+    if "reply" in prep:
+        return prep["reply"]
+    d, ms, failed = await judge_turn(prep, rec["plan"])
+    return apply_turn(rec, prep, d, ms, failed)
 
 
 # ---------------------------------------------------------------------------
@@ -351,54 +516,85 @@ async def _score_once(rec: dict, transcript: str) -> dict:
                                    timeout=180)
 
 
+def _coerce_score(v):
+    if v is None or v == "":
+        return None
+    try:
+        return max(1, min(5, int(round(float(v)))))
+    except (TypeError, ValueError):
+        return None
+
+
 async def score_interview(rec: dict) -> dict:
     plan = rec["plan"]
+    st = rec["state"]
     transcript = build_transcript(rec)
     passes = max(1, int(os.getenv("SCORING_PASSES", "1")))
     results = await asyncio.gather(*[_score_once(rec, transcript) for _ in range(passes)])
+    results = [r if isinstance(r, dict) else {} for r in results]
+    for r in results:
+        r["questions"] = [qr for qr in (r.get("questions") or []) if isinstance(qr, dict)]
+        for qr in r["questions"]:
+            qr["q_id"] = str(qr.get("q_id", ""))
+            qr["score"] = _coerce_score(qr.get("score"))
     rep = results[0]
-    review = list(rep.get("human_review_reasons") or [])
+    review = [str(x) for x in (rep.get("human_review_reasons") or [])]
+    qmap = {q["id"]: q for q in plan["questions"]}
+
+    # drop questions the model invented, add ones it forgot
+    rep["questions"] = [qr for qr in rep["questions"] if qr["q_id"] in qmap]
+    got = {qr["q_id"] for qr in rep["questions"]}
+    for q in plan["questions"]:
+        if q["id"] not in got:
+            rep["questions"].append({"q_id": q["id"], "score": None, "evidence": [], "covered_points": [],
+                                     "missed_points": [], "rationale": "Not returned by the scoring model."})
+            if q["scored"]:
+                review.append(f"{q['id']}: scoring model returned no score")
+    order = {q["id"]: i for i, q in enumerate(plan["questions"])}
+    rep["questions"].sort(key=lambda qr: order[qr["q_id"]])
 
     # consistency check across passes
     if passes > 1:
         by_q = {}
         for r in results:
             for qr in r.get("questions", []):
-                if isinstance(qr.get("score"), (int, float)):
+                if qr["score"] is not None:
                     by_q.setdefault(qr["q_id"], []).append(qr["score"])
-        for qr in rep.get("questions", []):
-            vals = by_q.get(qr.get("q_id"), [])
+        for qr in rep["questions"]:
+            vals = by_q.get(qr["q_id"], [])
             if len(vals) > 1:
                 if max(vals) - min(vals) > 1:
                     review.append(f"{qr['q_id']}: scoring unstable across passes ({vals})")
                 qr["score"] = round(sum(vals) / len(vals))
 
     # evidence verification: quotes must exist in what the candidate actually said
-    cand_lines = [e["text"] for e in rec["state"]["log"] if e["role"] == "candidate"]
-    qmap = {q["id"]: q for q in plan["questions"]}
     n_ev = n_ok = 0
-    for qr in rep.get("questions", []):
+    for qr in rep["questions"]:
+        q = qmap[qr["q_id"]]
+        cand_lines = [e["text"] for e in st["log"] if e["role"] == "candidate" and e["q_id"] == qr["q_id"]]
+        all_lines = [e["text"] for e in st["log"] if e["role"] == "candidate"]
         ok_any = False
-        for ev in qr.get("evidence") or []:
+        qr["evidence"] = [ev for ev in (qr.get("evidence") or []) if isinstance(ev, dict)]
+        for ev in qr["evidence"]:
             ev["verified"] = _verify_quote(ev.get("quote", ""), cand_lines)
+            if ev["verified"] == "unverified" and _verify_quote(ev.get("quote", ""), all_lines) != "unverified":
+                ev["verified"] = "other_question"  # real quote, but from a different answer
             n_ev += 1
             if ev["verified"] != "unverified":
                 n_ok += 1
                 ok_any = True
-        if isinstance(qr.get("score"), (int, float)) and qr["score"] > 1 and not ok_any:
-            review.append(f"{qr.get('q_id')}: score {qr['score']} has no verifiable quote")
-        q = qmap.get(qr.get("q_id"))
-        if q:
-            qr["ask"] = q["ask"]
-            qr["type"] = q["type"]
-            qr["competency_id"] = q.get("competency_id")
-            if not q["scored"]:
-                qr["score"] = None
+        if qr["score"] is not None and qr["score"] > 1 and not ok_any:
+            review.append(f"{qr['q_id']}: score {qr['score']} has no verifiable quote")
+        qr["ask"] = q["ask"]
+        qr["type"] = q["type"]
+        qr["competency_id"] = q.get("competency_id")
+        if not q["scored"]:
+            qr["score"] = None
 
     # weighted overall computed in code, not by the LLM
     comp_scores = {}
-    for qr in rep.get("questions", []):
-        if isinstance(qr.get("score"), (int, float)) and qr.get("competency_id"):
+    for qr in rep["questions"]:
+        if qr["score"] is not None and qr.get("competency_id"):
             comp_scores.setdefault(qr["competency_id"], []).append(qr["score"])
     num = den = 0.0
     for c in plan["competencies"]:
@@ -406,26 +602,40 @@ async def score_interview(rec: dict) -> dict:
         if vals:
             num += c["weight"] * (sum(vals) / len(vals))
             den += c["weight"]
-    q_scores = [qr["score"] for qr in rep.get("questions", []) if isinstance(qr.get("score"), (int, float))]
+    q_scores = [qr["score"] for qr in rep["questions"] if qr["score"] is not None]
     overall = round(num / den, 2) if den else (round(sum(q_scores) / len(q_scores), 2) if q_scores else None)
 
-    asked = {e["q_id"] for e in rec["state"]["log"] if e["role"] == "candidate"}
-    missing = [q["id"] for q in plan["questions"] if q["id"] not in asked]
+    if rep.get("recommendation") not in RECOMMENDATIONS:
+        review.append(f"Scoring model gave an invalid recommendation ({rep.get('recommendation')!r})")
+        rep["recommendation"] = "maybe"
+    if overall is not None and ((overall < 2.5 and rep["recommendation"] in ("yes", "strong_yes")) or
+                                (overall >= 4 and rep["recommendation"] == "no")):
+        review.append(f"Recommendation '{rep['recommendation']}' does not match the computed score {overall}")
+
+    asked = {e["q_id"] for e in st["log"] if e["role"] == "candidate"}
+    skipped = [x for x in st.get("skipped", []) if x not in asked]
+    missing = [q["id"] for q in plan["questions"] if q["id"] not in asked and q["id"] not in skipped]
+    if skipped:
+        review.append(f"Skipped to save time: {', '.join(skipped)}")
     if missing:
         review.append(f"Questions not reached: {', '.join(missing)}")
-    if not rec["state"].get("ended"):
+    if not st.get("ended"):
         review.append("Interview did not reach its normal end (dropped call or candidate left)")
+    if st.get("judge_failures"):
+        review.append(f"Live AI failed on {st['judge_failures']} turn(s); the interviewer used a safe fallback")
+    if st.get("reconnects"):
+        review.append(f"Call reconnected {st['reconnects']} time(s)")
 
     proctor = proctoring_summary(rec.get("events", []))
     review += proctor["flags"]
 
     rep["computed"] = {
         "overall": overall,
-        "overall_pct": round((overall - 1) / 4 * 100) if overall else None,
+        "overall_pct": round((overall - 1) / 4 * 100) if overall is not None else None,
         "questions_asked": len(asked), "questions_planned": len(plan["questions"]),
         "evidence_verified": f"{n_ok}/{n_ev}",
         "scoring_passes": passes,
-        "avg_turn_latency_ms": _avg([e.get("judge_ms") for e in rec["state"]["log"] if e.get("judge_ms")]),
+        "avg_turn_latency_ms": _avg([e.get("judge_ms") for e in st["log"] if e.get("judge_ms") is not None]),
     }
     rep["proctoring"] = proctor
     rep["human_review_reasons"] = list(dict.fromkeys(review))

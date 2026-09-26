@@ -21,7 +21,7 @@ def lock(iid: str) -> asyncio.Lock:
 
 
 def _path(iid: str) -> Path:
-    if not iid.replace("-", "").replace("_", "").isalnum():
+    if not (iid.replace("-", "").replace("_", "").isascii() and iid.replace("-", "").replace("_", "").isalnum()):
         raise ValueError("bad id")
     return INT_DIR / f"{iid}.json"
 
@@ -38,6 +38,15 @@ def save(rec: dict) -> None:
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(p)
+
+
+def delete(iid: str) -> None:
+    import shutil
+    p = _path(iid)
+    if p.exists():
+        p.unlink()
+    shutil.rmtree(MEDIA_DIR / iid, ignore_errors=True)
+    _locks.pop(iid, None)
 
 
 def list_all() -> list[dict]:

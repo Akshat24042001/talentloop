@@ -71,6 +71,7 @@ async function init(){
     bits.push(h.mock ? '<span class="warn">LLM_MOCK=1 (fake AI, for testing flow only)</span>' : `Live turns: ${esc(h.fast_model)} · Plan/scoring: ${esc(h.smart_model)}`);
     bits.push(h.public_url ? `Public URL: ${esc(h.public_url)}` : '<span class="bad">PUBLIC_URL not set: Vapi cannot reach this server</span>');
     bits.push(h.vapi_key_set ? 'Vapi key set' : '<span class="bad">VAPI_PUBLIC_KEY missing</span>');
+    if (h.admin_weak) bits.push('<span class="bad">ADMIN_KEY empty or weak: anyone with your tunnel URL can read resumes and reports</span>');
     $('health').innerHTML = bits.join(' · ');
   }catch(e){ $('health').textContent = 'Server not reachable: ' + e.message; }
   loadList();
@@ -101,7 +102,7 @@ $('genBtn').onclick = async () => {
   $('genBtn').disabled = true; $('genBtn').textContent = 'Generating (20-60s)...';
   try{
     const r = await api('/api/plan', {method:'POST', json: inp});
-    PLAN = r.plan; window.INPUTS = inp; showPlan(); $('planCard').classList.remove('hidden');
+    PLAN = r.plan; window.INPUTS = inp; window.PLAN_WARN = r.warnings || []; showPlan(); $('planCard').classList.remove('hidden');
     $('planCard').scrollIntoView({behavior:'smooth'});
   }catch(e){ $('err1').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   $('genBtn').disabled = false; $('genBtn').textContent = 'Generate interview plan';
@@ -113,12 +114,12 @@ function showPlan(){
   $('planMeta').innerHTML = `· ${PLAN.questions.length} questions · budget ${Math.round(total/60)} of ${PLAN.duration_min} min ` +
     (total > cap*0.9 ? '<span class="warn">(tight: some questions may be cut by the timer)</span>' : '');
   const comps = Object.fromEntries((PLAN.competencies||[]).map(c=>[c.id,c.name]));
-  $('planView').innerHTML = PLAN.questions.map((q,i)=>`
+  $('planView').innerHTML = (window.PLAN_WARN||[]).map(w=>`<div class="err">${esc(w)}</div>`).join('') + PLAN.questions.map((q,i)=>`
     <div class="q"><div class="meta"><span class="chip">${i+1}. ${esc(q.type)}</span>
-      <span class="chip">${esc(comps[q.competency_id]||'')}</span><span class="chip">${q.time_budget_sec}s</span>
-      <span class="chip">follow-ups ≤ ${q.max_followups}</span>${q.scored?'':'<span class="chip">not scored</span>'}</div>
+      <span class="chip">${esc(comps[q.competency_id]||'')}</span><span class="chip">${esc(q.time_budget_sec)}s</span>
+      <span class="chip">follow-ups ≤ ${esc(q.max_followups)}</span>${q.scored?'':'<span class="chip">not scored</span>'}</div>
       <div><b>${esc(q.ask)}</b></div>
-      ${q.good_answer_covers.length?`<div class="small muted">Good answer covers: ${q.good_answer_covers.map(esc).join(' · ')}</div>`:''}
+      ${(q.good_answer_covers||[]).length?`<div class="small muted">Good answer covers: ${q.good_answer_covers.map(esc).join(' · ')}</div>`:''}
     </div>`).join('') +
     `<p class="small muted">STT key terms: ${(PLAN.keyterms||[]).map(esc).join(', ')||'none'}</p>
      <p class="small muted">Resume claims to verify: ${(PLAN.resume_claims_to_verify||[]).map(esc).join(' · ')||'none'}</p>`;
