@@ -4,12 +4,14 @@ services:
   - type: web
     name: talentloop-ai-interview
     runtime: docker
-    plan: starter            # persistent disk needs a paid plan; the free plan wipes data on every restart
+    # Free plan: no persistent disk, so interviews are wiped when the service restarts or sleeps
+    # (after 15 min idle). For real candidates switch to "starter" and uncomment the disk block.
+    plan: free
     healthCheckPath: /api/health
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 5
+    # disk:
+    #   name: data
+    #   mountPath: /data
+    #   sizeGB: 5
     envVars:
       - key: DATA_DIR
         value: /data
