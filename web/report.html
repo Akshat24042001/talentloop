@@ -57,7 +57,7 @@ function render(){
         <div class="small">Confidence: ${esc(rep.confidence)} · Overall ${esc(c.overall ?? '-')} / 5</div></div>
       <div class="small">Questions asked: ${esc(c.questions_asked)}/${esc(c.questions_planned)}<br>
         Evidence quotes verified against transcript: ${esc(c.evidence_verified)}<br>
-        Avg live turn latency (LLM): ${c.avg_turn_latency_ms ?? '-'} ms<br>Scoring passes: ${c.scoring_passes}</div></div>
+        Avg live turn latency (LLM): ${c.avg_turn_latency_ms ?? '-'} ms<br>Scoring passes: ${esc(c.scoring_passes)}${(c.scoring_models||[]).length?` (${c.scoring_models.map(esc).join(", ")})`:""}</div></div>
       <p>${esc(rep.summary)}</p>
       ${(rep.human_review_reasons||[]).map(r=>`<div class="flag">⚠ ${esc(r)}</div>`).join('')}
     </div>`;

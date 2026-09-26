@@ -39,6 +39,11 @@ if WEAK_ADMIN:
 app = FastAPI(title="TalentLoop AI Interview PoC")
 
 
+@app.on_event("startup")
+async def _check_models():
+    await llm.resolve_models()
+
+
 def require_admin(req: Request):
     if not ADMIN_KEY:
         return
@@ -68,6 +73,10 @@ def root():
 @app.get("/api/health")
 def health():
     return {"ok": True, "mock": llm.MOCK, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
+            "llm_provider": "openrouter" if llm.OPENROUTER else ("custom" if llm.BASE_URL else "openai"),
+            "llm_key_set": bool(llm.API_KEY), "fast_chain": llm.FAST_CHAIN, "smart_chain": llm.SMART_CHAIN,
+            "free_models": any(m.endswith(":free") for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
+            "model_note": llm.MODEL_CHECK["note"],
             "public_url": public_url(), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
             "admin_protected": bool(ADMIN_KEY), "admin_weak": WEAK_ADMIN}
 

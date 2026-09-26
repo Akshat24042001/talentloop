@@ -1,29 +1,36 @@
-# Deploy (Render, about 10 minutes)
+# Deploy for free (Render + OpenRouter)
 
-The app is one Python server plus static pages. Render builds it from the `Dockerfile`, and `render.yaml` sets everything up.
+## 1. OpenRouter (the AI)
+1. Sign up at https://openrouter.ai and create a key under **Keys**. It starts with `sk-or-`.
+2. Go to **Settings > Privacy** and turn on the option that allows **free model** endpoints that may train on or log prompts. Without it, free models return "No endpoints found matching your data policy" and every AI call fails.
+3. Optional, strongly recommended: buy $10 of credit once. Free models stay free, but the daily cap goes from 50 to 1,000 requests. One interview uses about 25 to 35 requests, so without it you get 1 or 2 interviews a day.
 
-## 1. Get the code into GitHub
-Push this branch to `Akshat24042001/talentloop` (Claude's push needs the Claude GitHub App installed on the repo with write access).
+## 2. Vapi (the voice)
+Dashboard > **API Keys** > copy the **Public** key. Vapi is not free: it bills per minute, and new accounts get some trial credit. Check your balance before testing.
 
-## 2. Create the service
-1. https://dashboard.render.com, then **New > Blueprint**, then pick the `talentloop` repo and this branch.
-2. Render reads `render.yaml`. Fill the secret values it asks for:
-   - `VAPI_PUBLIC_KEY`: Vapi dashboard > API Keys > **Public** key
-   - `LLM_API_KEY`: your OpenAI key (or another OpenAI-compatible provider; then also set `LLM_BASE_URL`)
-3. Click **Apply**. The first build takes 3 to 5 minutes.
-4. `ADMIN_KEY` is generated for you. Copy it from **Environment**; the HR page asks for it once per browser tab.
+## 3. Render (the server), free plan
+1. https://dashboard.render.com > **New +** > **Web Service** > pick `Akshat24042001/talentloop`.
+2. Branch `main`, runtime **Docker**, instance type **Free**.
+3. Environment variables:
+   | Key | Value |
+   |---|---|
+   | `LLM_API_KEY` | your OpenRouter key |
+   | `VAPI_PUBLIC_KEY` | your Vapi public key |
+   | `ADMIN_KEY` | a random string of 20+ characters (your HR password) |
+4. Advanced > Health Check Path: `/api/health`. Then click **Deploy**.
 
-You don't need to set `PUBLIC_URL`. The server takes it from Render's `RENDER_EXTERNAL_URL`.
+Or use **New + > Blueprint** with this repo: `render.yaml` is set to the free plan and generates `ADMIN_KEY` for you.
 
-## 3. Check it
-- Open `https://<your-service>.onrender.com`. The top line of the HR page must show no red warnings.
-- Load the sample data, generate a plan, create a link and open it in Chrome to run a real voice call.
-- Then work through the checklist in `REVIEW.md` ("Verify on the first real Vapi call").
+Don't set `PUBLIC_URL`, `LLM_BASE_URL`, `FAST_MODEL` or `SMART_MODEL`. They are all automatic.
 
-## Cost and plan notes
-- `starter` plan with a 5 GB disk: about $7/month plus about $1.25/month for the disk. The disk keeps interviews and recordings across restarts and deploys.
-- **Free plan:** change `plan: starter` to `plan: free` and delete the `disk:` block. It works for a click-through demo (set `LLM_MOCK=1` to run it with no API keys), but every restart wipes all interviews, and the service sleeps after 15 minutes idle (the first request then takes about a minute).
-- Keep it to one instance and one worker. The interview locks live in process memory.
+## 4. Check it
+Open the service URL. The top line of the HR page shows the models in use and warnings (yellow warnings about free models are expected; red means something is broken). Then load the sample data, generate a plan, create a link and take the interview in Chrome.
 
-## Railway or Fly instead
-Both run the same `Dockerfile`. Mount a volume at `/data` and set the same environment variables. On Railway, `PUBLIC_URL` is picked up from `RAILWAY_PUBLIC_DOMAIN`; on Fly, set `PUBLIC_URL` yourself.
+## What free costs you (read this)
+- **Data:** free endpoints may log or train on prompts, and that includes resumes and interview transcripts. Test with your own or sample data only. For real candidates use paid models: set `FAST_MODEL=openai/gpt-4.1-mini` and `SMART_MODEL=openai/gpt-4.1` in Render (no code change) and add credit.
+- **Storage:** Render free has no disk. Interviews are wiped when the service sleeps (after 15 minutes idle) or redeploys, so read the report straight away.
+- **Speed and reliability:** free models are shared and get rate-limited. Each live turn tries 3 models in turn, and if all fail the interviewer uses a safe fallback, which the report counts. Scoring uses two different models and flags any disagreement.
+- **Free list changes:** OpenRouter adds and removes free models most weeks. At startup the server checks which ones exist and swaps in available ones. The HR page tells you when it did.
+
+## Keep to one instance
+The interview locks live in process memory. Don't scale the service beyond one instance.

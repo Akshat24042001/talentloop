@@ -19,13 +19,7 @@ services:
         generateValue: true  # read it in Render -> Environment; the HR page asks for it
       - key: VAPI_PUBLIC_KEY
         sync: false
-      - key: LLM_API_KEY
+      - key: LLM_API_KEY      # OpenRouter key (sk-or-...) uses free models automatically; an OpenAI key uses GPT-4.1
         sync: false
-      - key: LLM_BASE_URL
-        sync: false
-      - key: FAST_MODEL
-        value: gpt-4.1-mini
-      - key: SMART_MODEL
-        value: gpt-4.1
       - key: LLM_MOCK
         value: "0"

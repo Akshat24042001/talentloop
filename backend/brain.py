@@ -20,7 +20,7 @@ log = logging.getLogger("brain")
 END_PHRASE = "this concludes our interview"
 CLOSING = ("That brings us to the end. Thank you for your time today. "
            "The HR team will review this and get back to you. Thank you, " + END_PHRASE + ".")
-TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "7"))
+TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "8"))
 END_BUFFER_SEC = 40          # below this remaining time, wrap up
 MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "3")) + 1
 QUESTION_TYPES = ("warmup", "hr_mandatory", "resume_probe", "jd_skill", "behavioral")
@@ -507,13 +507,17 @@ def proctoring_summary(events: list[dict]) -> dict:
     return {"counts": counts, "hidden_seconds": int(hidden_secs), "flags": flags}
 
 
-async def _score_once(rec: dict, transcript: str) -> dict:
+async def _score_once(rec: dict, transcript: str, model: str) -> dict:
     if llm.MOCK:
         return _mock_score(rec)
     plan_view = {k: rec["plan"][k] for k in ("role", "competencies", "questions", "resume_claims_to_verify")}
     user = prompts.SCORE_USER_TEMPLATE.format(plan=json.dumps(plan_view, ensure_ascii=False), transcript=transcript)
-    return await llm.complete_json(prompts.SCORE_SYSTEM, user, llm.SMART_MODEL, temperature=0.1, max_tokens=5000,
-                                   timeout=180)
+    out = await llm.complete_json(prompts.SCORE_SYSTEM, user, model, temperature=0.1, max_tokens=6000,
+                                  timeout=240)
+    if not isinstance(out.get("questions"), list) or not out["questions"]:
+        raise ValueError(f"{model} returned a report without per-question scores")
+    out["_model"] = model
+    return out
 
 
 def _coerce_score(v):
@@ -529,9 +533,14 @@ async def score_interview(rec: dict) -> dict:
     plan = rec["plan"]
     st = rec["state"]
     transcript = build_transcript(rec)
-    passes = max(1, int(os.getenv("SCORING_PASSES", "1")))
-    results = await asyncio.gather(*[_score_once(rec, transcript) for _ in range(passes)])
-    results = [r if isinstance(r, dict) else {} for r in results]
+    passes = max(1, int(os.getenv("SCORING_PASSES") or llm.default_scoring_passes()))
+    models = llm.scoring_models(passes)
+    raw = await asyncio.gather(*[_score_once(rec, transcript, m) for m in models], return_exceptions=True)
+    results = [r for r in raw if isinstance(r, dict)]
+    failed_passes = [f"{m}: {r}" for m, r in zip(models, raw) if not isinstance(r, dict)]
+    if not results:
+        raise RuntimeError("All scoring passes failed: " + " | ".join(failed_passes)[:500])
+    passes = len(results)
     for r in results:
         r["questions"] = [qr for qr in (r.get("questions") or []) if isinstance(qr, dict)]
         for qr in r["questions"]:
@@ -539,6 +548,11 @@ async def score_interview(rec: dict) -> dict:
             qr["score"] = _coerce_score(qr.get("score"))
     rep = results[0]
     review = [str(x) for x in (rep.get("human_review_reasons") or [])]
+    if failed_passes:
+        review.append(f"{len(failed_passes)} scoring model(s) failed; report is based on {passes} model(s)")
+    recs = [r.get("recommendation") for r in results if r.get("recommendation") in RECOMMENDATIONS]
+    if len(set(recs)) > 1:
+        review.append(f"Scoring models disagree on the recommendation ({', '.join(recs)}). Read the answers yourself.")
     qmap = {q["id"]: q for q in plan["questions"]}
 
     # drop questions the model invented, add ones it forgot
@@ -635,6 +649,7 @@ async def score_interview(rec: dict) -> dict:
         "questions_asked": len(asked), "questions_planned": len(plan["questions"]),
         "evidence_verified": f"{n_ok}/{n_ev}",
         "scoring_passes": passes,
+        "scoring_models": [r.get("_model") for r in results if r.get("_model")],
         "avg_turn_latency_ms": _avg([e.get("judge_ms") for e in st["log"] if e.get("judge_ms") is not None]),
     }
     rep["proctoring"] = proctor

@@ -69,6 +69,9 @@ async function init(){
     if (h.public_url) PUBLIC_BASE = h.public_url.replace(/\/$/,'');
     const bits = [];
     bits.push(h.mock ? '<span class="warn">LLM_MOCK=1 (fake AI, for testing flow only)</span>' : `Live turns: ${esc(h.fast_model)} · Plan/scoring: ${esc(h.smart_model)}`);
+    if (h.free_models) bits.push('<span class="warn">Free AI models: slower, rate-limited (50 requests/day without $10 OpenRouter credit), and the provider may train on interview data. Fine for testing, not for real candidates.</span>');
+    if (h.model_note) bits.push(`<span class="warn">${esc(h.model_note)}</span>`);
+    if (!h.mock && !h.llm_key_set) bits.push('<span class="bad">LLM_API_KEY missing</span>');
     bits.push(h.public_url ? `Public URL: ${esc(h.public_url)}` : '<span class="bad">PUBLIC_URL not set: Vapi cannot reach this server</span>');
     bits.push(h.vapi_key_set ? 'Vapi key set' : '<span class="bad">VAPI_PUBLIC_KEY missing</span>');
     if (h.admin_weak) bits.push('<span class="bad">ADMIN_KEY empty or weak: anyone with your tunnel URL can read resumes and reports</span>');
