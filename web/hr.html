@@ -17,6 +17,7 @@
       <div><label>Company</label><input id="company" placeholder="RAC IT Solutions"></div>
       <div><label>Role</label><input id="role" placeholder="Java Backend Developer"></div>
       <div><label>Candidate name</label><input id="cand" placeholder="Full name"></div>
+      <div><label>Candidate email</label><input id="email" type="email" placeholder="name@example.com"></div>
       <div><label>Length</label>
         <select id="dur"><option>10</option><option selected>15</option><option>20</option><option>30</option></select></div>
     </div>
@@ -43,6 +44,18 @@
       <textarea id="planJson" class="mono" style="min-height:360px"></textarea>
       <div class="actions"><button id="applyJson">Apply JSON edits</button></div>
     </details>
+    <h3 style="margin-top:14px">Interview settings</h3>
+    <div class="row">
+      <div><label><input type="checkbox" id="reqShare" style="width:auto"> Require entire-screen sharing</label>
+        <span class="small muted">For coding or tool tasks. Blocks phones.</span></div>
+      <div><label>Rejoin window after a drop (seconds)</label><input id="rejoin" type="number" min="10" max="900" value="30"></div>
+      <div><label>Link opens at <span class="muted small">(optional)</span></label><input id="openAt" type="datetime-local"></div>
+      <div><label>Link valid for (hours)</label><input id="validH" type="number" min="1" max="720" value="72"></div>
+    </div>
+    <div class="row">
+      <div><label><input type="checkbox" id="faceOn" checked style="width:auto"> Face check (no face / extra people)</label></div>
+      <div><label><input type="checkbox" id="snapOn" checked style="width:auto"> Camera snapshots every minute</label></div>
+    </div>
     <div class="actions"><button class="primary" id="createBtn">Create candidate link</button></div>
     <div id="err2"></div>
     <div id="linkOut" class="hidden">
@@ -55,6 +68,13 @@
   <div class="card">
     <h2>Interviews <button id="refresh" style="float:right;padding:4px 10px">Refresh</button></h2>
     <div id="calib" class="small muted"></div>
+    <div class="row" style="margin:10px 0">
+      <div><input id="q" placeholder="Search name, role, email"></div>
+      <div><select id="fStatus"><option value="">All statuses</option><option>created</option><option>in_progress</option><option>completed</option><option>incomplete</option><option>scored</option></select></div>
+      <div><select id="fRisk"><option value="">Any integrity risk</option><option>high</option><option>medium</option><option>low</option></select></div>
+      <div><select id="sortBy"><option value="new">Newest first</option><option value="score">Best AI score</option><option value="risk">Highest risk</option></select></div>
+    </div>
+    <div class="actions" style="margin-top:0"><a class="btn" id="csvBtn">Export all to CSV</a></div>
     <div id="list" class="small muted">Loading...</div>
   </div>
 </div>
@@ -74,6 +94,9 @@ async function init(){
     if (!h.mock && !h.llm_key_set) bits.push('<span class="bad">LLM_API_KEY missing</span>');
     bits.push(h.public_url ? `Public URL: ${esc(h.public_url)}` : '<span class="bad">PUBLIC_URL not set: Vapi cannot reach this server</span>');
     bits.push(h.vapi_key_set ? 'Vapi key set' : '<span class="bad">VAPI_PUBLIC_KEY missing</span>');
+    if (!h.storage.s3 && !h.storage.persistent_disk) bits.push('<span class="bad">Storage is temporary: on Render free every restart wipes interviews and recordings. Set S3_* (see DEPLOY.md).</span>');
+    else if (h.storage.s3) bits.push(h.storage.s3_error ? `<span class="bad">Storage error: ${esc(h.storage.s3_error)}</span>` : '<span class="ok">Storage: S3 (persistent)</span>');
+    if (!h.ffmpeg) bits.push('<span class="warn">ffmpeg missing: recordings will not be seekable</span>');
     if (h.admin_weak) bits.push('<span class="bad">ADMIN_KEY empty or weak: anyone with your tunnel URL can read resumes and reports</span>');
     $('health').innerHTML = bits.join(' · ');
   }catch(e){ $('health').textContent = 'Server not reachable: ' + e.message; }
@@ -133,7 +156,10 @@ $('applyJson').onclick = () => { try{ PLAN = JSON.parse($('planJson').value); sh
 $('createBtn').onclick = async () => {
   $('err2').innerHTML = '';
   try{
-    const r = await api('/api/interviews', {method:'POST', json:{plan: PLAN, inputs: window.INPUTS, expires_hours: 72}});
+    const openAt = $('openAt').value ? new Date($('openAt').value).getTime()/1000 : null;
+    const settings = {candidate_email: $('email').value.trim(), require_screen_share: $('reqShare').checked,
+      reconnect_window_sec: +$('rejoin').value || 30, available_from: openAt, face_detection: $('faceOn').checked, snapshots: $('snapOn').checked};
+    const r = await api('/api/interviews', {method:'POST', json:{plan: PLAN, inputs: window.INPUTS, expires_hours: +$('validH').value || 72, settings}});
     $('candLink').value = PUBLIC_BASE + r.candidate_path;
     $('reportLink').href = r.report_path;
     $('linkOut').classList.remove('hidden');
@@ -142,18 +168,36 @@ $('createBtn').onclick = async () => {
 };
 $('copyBtn').onclick = () => { navigator.clipboard.writeText($('candLink').value); $('copyBtn').textContent='Copied'; };
 
+let ROWS = [];
 async function loadList(){
   try{
     const [rows, cal] = await Promise.all([api('/api/interviews'), api('/api/calibration')]);
+    ROWS = rows;
     $('calib').innerHTML = cal.pairs ? `Calibration: AI within ±1 of HR on <b>${cal.within_1}%</b> of ${cal.pairs} scored answers · exact ${cal.exact}% · AI minus HR avg ${cal.ai_minus_hr_avg}` : 'Calibration: no HR scores entered yet. Score interviews on the report page to measure AI vs HR agreement.';
-    if (!rows.length){ $('list').textContent = 'No interviews yet.'; return; }
-    $('list').innerHTML = `<table><tr><th>Candidate</th><th>Role</th><th>Status</th><th>AI rec.</th><th>Score</th><th></th></tr>` +
-      rows.map(r=>`<tr><td>${esc(r.candidate)}</td><td>${esc(r.role)}</td><td>${esc(r.status)}</td>
-        <td class="${REC_CLASS[r.recommendation]||''}">${esc(REC_LABEL[r.recommendation]||'')}</td>
-        <td>${r.overall ?? ''}</td>
-        <td><a href="/report.html?id=${r.id}">Report</a> · <a href="#" onclick="navigator.clipboard.writeText('${PUBLIC_BASE}/interview.html?id=${r.id}');this.textContent='copied';return false">Copy link</a></td></tr>`).join('') + '</table>';
+    $('csvBtn').href = '/api/interviews.csv' + (adminKey() ? '?key=' + encodeURIComponent(adminKey()) : '');
+    renderList();
   }catch(e){ $('list').textContent = e.message; }
 }
+function renderList(){
+  const q = $('q').value.toLowerCase(), fs = $('fStatus').value, fr = $('fRisk').value, sort = $('sortBy').value;
+  const rank = {high: 3, medium: 2, low: 1};
+  let rows = ROWS.filter(r => (!fs || r.status === fs) && (!fr || r.risk === fr) &&
+    (!q || [r.candidate, r.role, r.email].join(' ').toLowerCase().includes(q)));
+  if (sort === 'score') rows.sort((a,b) => (b.overall ?? -1) - (a.overall ?? -1));
+  if (sort === 'risk') rows.sort((a,b) => (rank[b.risk]||0) - (rank[a.risk]||0));
+  if (!rows.length){ $('list').textContent = ROWS.length ? 'No interviews match the filters.' : 'No interviews yet.'; return; }
+  $('list').innerHTML = `<table><tr><th>Candidate</th><th>Role</th><th>Status</th><th>AI rec.</th><th>Score</th><th>Integrity</th><th>HR</th><th></th></tr>` +
+    rows.map(r=>`<tr><td>${esc(r.candidate)}<div class="muted">${esc(r.email||'')}</div></td><td>${esc(r.role)}</td>
+      <td>${esc(r.status)}${r.ended_early?' <span class="warn">(early)</span>':''}</td>
+      <td class="${REC_CLASS[r.recommendation]||''}">${esc(REC_LABEL[r.recommendation]||'')}</td>
+      <td>${esc(r.overall ?? '')}</td>
+      <td class="${r.risk==='high'?'bad':r.risk==='medium'?'warn':'ok'}">${esc(r.risk||'')}</td>
+      <td>${esc((r.decision||'').replace('_',' '))}</td>
+      <td><a href="/report.html?id=${encodeURIComponent(r.id)}">Report</a> · <a href="#" data-copy="${esc(r.id)}">Copy link</a></td></tr>`).join('') + '</table>';
+  document.querySelectorAll('[data-copy]').forEach(a => a.onclick = e => { e.preventDefault();
+    navigator.clipboard.writeText(`${PUBLIC_BASE}/interview.html?id=${a.dataset.copy}`); a.textContent = 'copied'; });
+}
+['q','fStatus','fRisk','sortBy'].forEach(id => $(id).addEventListener('input', renderList));
 $('refresh').onclick = loadList;
 init();
 </script>

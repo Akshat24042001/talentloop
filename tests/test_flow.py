@@ -15,7 +15,8 @@ from pathlib import Path  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from backend import brain, store  # noqa: E402
-from backend.main import _recording_url_ok, app  # noqa: E402
+from backend.main import app  # noqa: E402
+from backend.media import public_https_url  # noqa: E402
 
 S = Path(__file__).resolve().parent.parent / "web" / "samples"
 c = TestClient(app)
@@ -62,7 +63,10 @@ def main():
     assert a["model"]["url"].startswith(f"https://example.trycloudflare.com/llm/{iid}/")
     assert a["endCallPhrases"] == ["this concludes our interview"]
     assert a["transcriber"]["language"] == "en-IN"
-    assert a["silenceTimeoutSeconds"] >= 60, "Vapi's 30 s default would hang up on a thinking candidate"
+    ends = [h for h in a["hooks"] if any(x.get("type") == "tool" for x in h["do"])]
+    assert ends and ends[0]["options"]["timeoutSeconds"] >= 60, "a thinking candidate must not be hung up on"
+    assert "silenceTimeoutSeconds" not in a and "messagePlan" not in a, "fields removed from Vapi's API"
+    assert a["voice"] == {"provider": "vapi", "voiceId": "Naina", "version": "2", "language": "en"}
     assert a["server"]["url"].endswith(path.split("/")[3])
     print("FIRST:", a["firstMessage"][:90], "...")
 
@@ -121,10 +125,11 @@ def main():
 
     # forged webhook: wrong token rejected; SSRF host rejected
     assert c.post(f"/webhook/vapi/{iid}/wrongtoken", json={"message": {}}).status_code == 403
-    assert not _recording_url_ok("http://169.254.169.254/latest/meta-data")
-    assert not _recording_url_ok("https://evil.example.com/x.wav")
-    assert not _recording_url_ok("https://vapi.ai.evil.com/x.wav")
-    assert _recording_url_ok("https://storage.vapi.ai/abc-mono.wav")
+    assert not public_https_url("http://169.254.169.254/latest/meta-data")   # not https
+    assert not public_https_url("https://169.254.169.254/latest/meta-data")  # cloud metadata
+    assert not public_https_url("https://127.0.0.1/x") and not public_https_url("https://10.1.2.3/x")
+    assert not public_https_url("https://[::1]/x") and not public_https_url("https://192.168.1.5/x")
+    assert public_https_url("https://8.8.8.8/recording.wav")
 
     # events, webhook (real token) -> scoring kicks off even if the browser never calls /complete
     c.post(f"/api/interviews/{iid}/events", json=[{"type": "tab_hidden", "ts": 1000}, {"type": "tab_visible", "ts": 41000}])
@@ -140,7 +145,7 @@ def main():
     print("REVIEW:", rep["human_review_reasons"])
     assert rep["computed"]["questions_asked"] == rep["computed"]["questions_planned"]
     assert rep["computed"]["avg_turn_latency_ms"] is not None
-    assert any("Left the interview tab" in r for r in rep["human_review_reasons"])
+    assert any("Left the interview tab" in r for r in rep["human_review_reasons"]), rep["human_review_reasons"]
     assert [q["q_id"] for q in rep["questions"]] == [q["id"] for q in plan["questions"]]
 
     # HR re-score runs in the background and does not break the report
@@ -183,7 +188,7 @@ def main():
     assert c.post(u + "&seq=0", content=b"AAAA").json().get("duplicate")
     assert c.post(u + "&seq=2", content=b"CCCC").status_code == 409
     assert c.post(u + "&seq=1", content=b"BBBB").status_code == 200
-    assert (store.MEDIA_DIR / iid2 / "candidate_abc123.webm").read_bytes() == b"AAAABBBB"
+    assert (store.MEDIA_DIR / iid2 / "camera_abc123.webm").read_bytes() == b"AAAABBBB"
 
     # --- delete removes interview and media
     assert c.delete(f"/api/interviews/{iid2}").status_code == 200
@@ -214,6 +219,68 @@ def main():
                                                 "type": "weird"}]})
     assert junk["questions"][0]["competency_id"] == "c1" and junk["questions"][0]["type"] == "jd_skill"
     assert junk["competencies"][0]["weight"] == 1.0 and junk["duration_min"] == 20
+
+    # --- HR features: settings, schedule, snapshots, consent, feedback, progress, exports, close, sweeper
+    import asyncio
+    import io
+    import time as _t
+    from backend import main as M
+    future = _t.time() + 3600
+    iid5 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "expires_hours": 2, "settings": {
+        "available_from": future, "require_screen_share": True, "reconnect_window_sec": 5, "candidate_email": "a@b.c"}}).json()["id"]
+    pub = c.get(f"/api/interviews/{iid5}/public").json()
+    assert pub["not_open_yet"] and pub["require_screen_share"] and pub["reconnect_window_sec"] == 10  # clamped to >= 10
+    assert c.post(f"/api/interviews/{iid5}/assistant").status_code == 425, "scheduled link opened early"
+
+    iid6 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"reconnect_window_sec": 10}}).json()["id"]
+    assert c.post(f"/api/interviews/{iid6}/consent", json={"version": "t"}).status_code == 200
+    a6 = c.post(f"/api/interviews/{iid6}/assistant").json()["assistant"]
+    p6 = llm_path(a6)
+    turn(p6, [{"role": "assistant", "content": a6["firstMessage"]}, {"role": "user", "content": ANSWER}])
+    now_ms = _t.time() * 1000
+    c.post(f"/api/interviews/{iid6}/events", json={"sent_at": now_ms, "events": [
+        {"type": "tab_hidden", "ts": now_ms - 40000}, {"type": "tab_visible", "ts": now_ms - 1000},
+        {"type": "paste", "ts": now_ms - 500, "detail": "120 chars"}]})
+    assert c.post(f"/api/interviews/{iid6}/snapshot", content=b"not a jpeg").status_code == 400
+    from PIL import Image
+    buf = io.BytesIO(); Image.new("RGB", (64, 36)).save(buf, "JPEG")
+    assert c.post(f"/api/interviews/{iid6}/snapshot?reason=reference", content=buf.getvalue()).json()["ok"]
+    prog = c.get(f"/api/interviews/{iid6}/progress").json()
+    assert prog["q_num"] == 2 and prog["remaining_sec"] > 0, prog
+    pr = c.get(f"/api/interviews/{iid6}/proctoring").json()["proctoring"]
+    assert pr["durations"]["tab_hidden"] >= 38 and pr["counts"]["paste"] == 1 and pr["risk"] in ("medium", "high"), pr
+    assert c.get(f"/media/{iid6}/snap_001_reference.jpg").status_code == 200
+    assert c.get(f"/media/{iid6}/..%2Fsecret.json").status_code in (400, 404)
+    assert c.get(f"/media/{iid6}/not_listed.webm").status_code == 404
+    for path, ctype in (("report.pdf", "application/pdf"), ("transcript.txt", "text/plain"), ("export.json", "application/json")):
+        r = c.get(f"/api/interviews/{iid6}/{path}")
+        assert r.status_code == 200 and r.headers["content-type"].startswith(ctype) and "attachment" in r.headers["content-disposition"], path
+    exp = c.get(f"/api/interviews/{iid6}/export.json").json()
+    assert "token" not in exp["state"] and exp["proctoring"]["counts"]["paste"] == 1
+    csv_txt = c.get("/api/interviews.csv").text
+    assert csv_txt.startswith("interview_id,") and iid6 in csv_txt
+    # candidate drops and never returns: the sweeper closes and scores it after the window
+    M._presence.pop(iid6, None)
+    import json as _json
+    rec6 = _json.loads((store.INT_DIR / f"{iid6}.json").read_text())
+    rec6["last_seen"] = _t.time() - 500
+    for e in rec6["state"]["log"]:
+        e["ts"] = _t.time() - 500
+    for sn in rec6["snapshots"]:
+        for e in sn["state"]["log"]:
+            e["ts"] = _t.time() - 500
+    (store.INT_DIR / f"{iid6}.json").write_text(_json.dumps(rec6))
+    asyncio.run(M.sweep_once())
+    r6 = c.get(f"/api/interviews/{iid6}").json()
+    assert r6["status"] == "scored" and r6["ended_early"] and r6["report"], r6["status"]
+    assert c.post(f"/api/interviews/{iid6}/assistant").status_code == 409, "abandoned interview reopened"
+    assert c.post(f"/api/interviews/{iid6}/feedback", json={"rating": 9}).json()["ok"]
+    assert c.get(f"/api/interviews/{iid6}").json()["feedback"]["rating"] == 5
+    # HR can close a link that was never used
+    iid7 = c.post("/api/interviews", json={"plan": plan, "inputs": inp}).json()["id"]
+    assert c.post(f"/api/interviews/{iid7}/close").json()["status"] == "cancelled"
+    assert c.post(f"/api/interviews/{iid7}/assistant").status_code == 409
+    print("HR FEATURES: OK")
 
     print("\nALL CHECKS PASSED")
 

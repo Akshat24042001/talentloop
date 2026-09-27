@@ -1,0 +1,352 @@
+"""Real-browser end-to-end test (Chromium + Playwright), no Vapi account needed:  python -m tests.e2e_browser
+
+A stand-in for the Vapi web SDK is served at /vendor/vapi-web.mjs. Like the real SDK it plays the
+interviewer through an <audio> element and sends each candidate turn to our custom-LLM endpoint.
+Chromium runs with a fake camera, microphone and screen. The face detector is also replaced so the test
+can control how many faces are "seen". Everything else is the real app: pages, recording, uploads,
+ffmpeg repair, proctoring, scoring (mock LLM), PDF/ZIP, reconnect window and the sweeper.
+
+Checks the things HR complained about: the video is playable and seekable, it contains BOTH voices,
+screen recording works, the proctoring report exists without AI scoring, downloads work, and a
+candidate cannot rejoin after the window.
+"""
+import json
+import os
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import math
+from pathlib import Path
+
+import httpx
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parent.parent
+PORT = 8799
+BASE = f"http://127.0.0.1:{PORT}"
+KEY = "e2e-admin-key-123456"
+H = {"X-Admin-Key": KEY}
+
+FAKE_VAPI = r"""
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+export default class FakeVapi {
+  constructor(key){ this.h = {}; this.muted = false; this.stopped = false; }
+  on(e, f){ (this.h[e] ||= []).push(f); }
+  emit(e, x){ (this.h[e] || []).forEach(f => f(x)); }
+  isMuted(){ return this.muted; } setMuted(m){ this.muted = m; }
+  getAudioPlayer(){ return this.player || null; }
+  stop(){ this.stopped = true; this.cleanup(); this.emit('call-end'); }
+  cleanup(){ try{ this.osc.stop(); }catch{} this.player && this.player.remove(); }
+  async start(asst){
+    const u = new URL(asst.model.url); this.path = u.pathname + '/chat/completions';
+    const ctx = new AudioContext(); this.osc = ctx.createOscillator(); const d = ctx.createMediaStreamDestination();
+    this.osc.frequency.value = 330; const g = ctx.createGain(); g.gain.value = 0.5; this.osc.connect(g).connect(d); this.osc.start();
+    this.player = document.createElement('audio'); this.player.dataset.participantId = 'assistant';
+    this.player.srcObject = d.stream; document.body.appendChild(this.player); this.player.play().catch(()=>{});
+    window.__asst = asst;
+    setTimeout(() => this.run(asst), 20);
+    return {id: 'call_fake_' + Date.now()};
+  }
+  async say(msgs, text){ msgs.push({role: 'assistant', content: text}); this.emit('speech-start'); this.emit('message', {type:'transcript', role:'assistant', transcriptType:'final', transcript: text}); await sleep(150); this.emit('speech-end'); }
+  async run(asst){
+    this.emit('call-start');
+    const msgs = [{role:'system', content:'x'}];
+    await this.say(msgs, asst.firstMessage);
+    let n = 0;
+    for (const a of (window.__ANSWERS || [])){
+      await sleep(window.__TURN_MS || 1200);
+      if (this.stopped) return;
+      if (window.__DROP_AFTER && ++n > window.__DROP_AFTER){ window.__DROP_AFTER = 0; this.cleanup(); this.emit('call-end'); return; }
+      msgs.push({role:'user', content: a});
+      this.emit('message', {type:'transcript', role:'user', transcriptType:'final', transcript: a});
+      const r = await fetch(this.path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({messages: msgs, stream: true})});
+      if (!r.ok){ window.__llmError = r.status; this.cleanup(); this.emit('call-end'); return; }
+      const text = (await r.text()).split('\n').filter(l => l.startsWith('data: ') && !l.includes('[DONE]'))
+        .map(l => JSON.parse(l.slice(6)).choices[0].delta.content || '').join('');
+      await this.say(msgs, text);
+      if (/concludes our interview/i.test(text)){ await sleep(1500); this.cleanup(); this.emit('call-end'); return; }
+    }
+  }
+}
+"""
+
+# Face detector stand-in: detections controlled by window.__FACES (default 1).
+FAKE_VISION = r"""
+export const FilesetResolver = { forVisionTasks: async () => ({}) };
+export const FaceDetector = { createFromOptions: async () => ({
+  detectForVideo: () => ({ detections: Array.from({length: window.__FACES ?? 1}, () => ({categories: [{score: 0.9}]})) }) }) };
+"""
+
+ANSWERS = ["Hi, I'm Rohan. I have three years of backend experience with Spring Boot at ShipKart, building shipment APIs.",
+           "I want a bigger scale problem. ShipKart is small and I have owned most of the systems already, so I want to grow.",
+           "My notice period is sixty days and it can be negotiated down to about forty five days.",
+           "Yes, I can work from the Prahlad Nagar office three days a week without any problem.",
+           "I built the tracking API, added composite indexes and Redis caching which cut p95 latency from 1.8 seconds to 350 ms.",
+           "I led the migration of notifications to Kafka consumers with retries and a dead letter queue."] * 3
+
+
+def free_port_wait(port, up=True, timeout=30):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        s = socket.socket()
+        ok = s.connect_ex(("127.0.0.1", port)) == 0
+        s.close()
+        if ok == up:
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def ffprobe(path: Path) -> str:
+    import imageio_ffmpeg
+    r = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True)
+    return r.stderr.decode(errors="ignore")
+
+
+def tone_power(path: Path, freq: float, start: float, dur: float = 3.0) -> float:
+    """Goertzel power of `freq` in the recording's audio (mono 8 kHz), relative to total energy."""
+    import imageio_ffmpeg
+    raw = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-loglevel", "error", "-ss", str(start), "-t", str(dur),
+                          "-i", str(path), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True).stdout
+    xs = struct.unpack(f"<{len(raw) // 2}h", raw[: len(raw) // 2 * 2])
+    if not xs:
+        return 0.0
+    k = 2 * math.cos(2 * math.pi * freq / 8000)
+    s1 = s2 = 0.0
+    for x in xs:
+        s0 = x + k * s1 - s2
+        s2, s1 = s1, s0
+    power = s1 * s1 + s2 * s2 - k * s1 * s2
+    energy = sum(x * x for x in xs) or 1
+    return power / (energy * len(xs) / 2)
+
+
+def create(c: httpx.Client, **settings) -> str:
+    s = ROOT / "web" / "samples"
+    inp = {"company": "Demo Tech", "role": "Java Backend Developer", "candidate_name": "Rohan Mehta", "duration_min": 15,
+           "jd": (s / "sample_jd.txt").read_text(), "resume": (s / "sample_resume.txt").read_text(),
+           "questions": [q for q in (s / "sample_questions.txt").read_text().splitlines() if q.strip()]}
+    plan = c.post("/api/plan", json=inp).raise_for_status().json()["plan"]
+    return c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": settings}).raise_for_status().json()["id"]
+
+
+def wait(fn, timeout=60, every=0.5, what="condition"):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        v = fn()
+        if v:
+            return v
+        time.sleep(every)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def main():
+    data = tempfile.mkdtemp()
+    env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test",
+               ADMIN_KEY=KEY, DATA_DIR=data, RECONNECT_WINDOW_SEC="12", SWEEP_EVERY_SEC="3", LOG_LEVEL="WARNING",
+               PYTHONUNBUFFERED="1")
+    srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
+                           stdout=open(Path(data) / "server.log", "w"), stderr=subprocess.STDOUT)
+    assert free_port_wait(PORT), "server did not start"
+    c = httpx.Client(base_url=BASE, headers=H, timeout=60)
+    failures = []
+    try:
+        with sync_playwright() as p:
+            exe = "/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else None
+            browser = p.chromium.launch(executable_path=exe, args=[
+                "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required",
+                "--auto-select-desktop-capture-source=Entire screen", "--enable-usermedia-screen-capturing",
+                "--allow-http-screen-capture"])
+
+            def page_for(iid, answers, **flags):
+                ctx = browser.new_context(permissions=["camera", "microphone"])
+                pg = ctx.new_page()
+                errs = []
+                pg.on("pageerror", lambda e: errs.append(str(e)))
+                pg.route("**/vendor/vapi-web.mjs", lambda r: r.fulfill(status=200, content_type="text/javascript", body=FAKE_VAPI))
+                pg.route("**/vendor/mediapipe/vision_bundle.mjs", lambda r: r.fulfill(status=200, content_type="text/javascript", body=FAKE_VISION))
+                init = f"window.__ANSWERS = {json.dumps(answers)}; window.__TURN_MS = {flags.get('turn_ms', 1200)}; window.__DROP_AFTER = {flags.get('drop_after', 0)}; window.__FACES = 1;"
+                pg.add_init_script(init)
+                pg.goto(f"{BASE}/interview.html?id={iid}")
+                return pg, errs
+
+            def pass_checks(pg, share=False):
+                pg.check("#consent")
+                pg.click("#toCheck")
+                pg.wait_for_selector("#ckCam.ok", timeout=15000)
+                pg.wait_for_selector("#ckMic.ok", timeout=20000)   # the fake mic plays a beep tone
+                pg.wait_for_selector("#ckFace.ok", timeout=15000)
+                if share:
+                    assert pg.is_enabled("#startBtn") is False, "start must wait for screen sharing"
+                    pg.click("#shareBtn")
+                    pg.wait_for_selector("#ckShare.ok", timeout=15000)
+                pg.wait_for_function("!document.getElementById('startBtn').disabled", timeout=15000)
+
+            # ---------------------------------------------------------- 1. full interview, screen share required
+            iid = create(c, require_screen_share=True, candidate_email="rohan@example.com", reconnect_window_sec=12)
+            pg, errs = page_for(iid, ANSWERS, turn_ms=1500)
+            pass_checks(pg, share=True)
+            pg.click("#startBtn")
+            pg.wait_for_selector("#s3:not(.hidden)")
+            pg.wait_for_function("document.getElementById('progText').textContent.includes('Question')", timeout=20000)
+            time.sleep(4)
+            # integrity signals during the call
+            pg.evaluate("document.dispatchEvent(new ClipboardEvent('paste', {clipboardData: new DataTransfer()}))")
+            pg.evaluate("window.__FACES = 2")
+            time.sleep(3)
+            pg.evaluate("window.__FACES = 0")
+            time.sleep(5)
+            pg.evaluate("window.__FACES = 1")
+            pg.click("#muteBtn")
+            assert pg.is_visible("#mutedBanner")
+            time.sleep(1.5)
+            pg.click("#muteBtn")
+            other = pg.context.new_page()
+            other.goto(f"{BASE}/style.css")
+            other.bring_to_front()
+            time.sleep(2)
+            pg.bring_to_front()
+            other.close()
+            pg.wait_for_selector("#s4:not(.hidden)", timeout=180000)
+            pg.wait_for_function("document.getElementById('uploadMsg').textContent.includes('saved') || document.getElementById('uploadMsg').textContent === ''", timeout=60000)
+            pg.wait_for_selector("#fbBox:not(.hidden)", timeout=30000)
+            pg.click("#stars button:nth-child(5)")
+            pg.click("#fbSend")
+            pg.wait_for_function("document.getElementById('fbDone').textContent.includes('Thank')")
+            if errs:
+                failures.append(f"candidate page JS errors: {errs}")
+
+            rec = wait(lambda: (lambda r: r if r.get("report") and all(m.get("finalized") for m in r["media"] if m.get("rid")) else None)(
+                c.get(f"/api/interviews/{iid}").json()), timeout=90, what="scoring + recording finalization")
+            print("status:", rec["status"], "| risk:", rec["proctoring"]["risk"], "|", rec["proctoring"]["reasons"])
+            kinds = {m["kind"] for m in rec["media"]}
+            print("media:", [(m["kind"], m.get("duration_sec"), m.get("playable"), m["bytes"]) for m in rec["media"]])
+            assert rec["status"] == "scored", rec["status"]
+            assert {"candidate_video", "screen_video"} <= kinds, kinds
+            cam = next(m for m in rec["media"] if m["kind"] == "candidate_video")
+            assert cam["playable"] and cam["duration_sec"] and cam["duration_sec"] > 10, cam
+            vid = Path(data) / "media" / iid / cam["file"]
+            info = ffprobe(vid)
+            assert "Video: vp8" in info and "Audio: opus" in info, info[-400:]
+            assert "Duration: N/A" not in info
+            # Both voices in the recording: the interviewer's 330 Hz tone must be present in the audio.
+            p330 = max(tone_power(vid, 330, s) for s in (3, 8, 13))
+            print(f"interviewer voice (330 Hz) share of recording audio: {p330:.2f}")
+            assert p330 > 0.05, "interviewer audio missing from the camera recording"
+            scr = next(m for m in rec["media"] if m["kind"] == "screen_video")
+            assert scr["playable"] and "Video:" in ffprobe(Path(data) / "media" / iid / scr["file"])
+            cnt = rec["proctoring"]["counts"]
+            for k in ("paste", "multiple_faces", "face_missing_start", "mute_on", "screen_share_started", "call_start"):
+                assert cnt.get(k), f"missing proctoring event {k}: {cnt}"
+            assert rec["proctoring"]["risk"] in ("medium", "high")
+            assert any(i["reason"] == "reference" for i in rec["images"]), rec["images"]
+            assert any(i["reason"] in ("multiple_faces", "no_face") for i in rec["images"])
+            assert rec["consent"] and rec["feedback"]["rating"] == 5 and rec["device"].get("screen")
+            assert rec["settings"]["candidate_email"] == "rohan@example.com"
+
+            # HR report page: video plays with a real duration, jump-to-moment works, downloads work
+            hr = browser.new_context().new_page()
+            hr_errs = []
+            hr.on("pageerror", lambda e: hr_errs.append(str(e)))
+            hr.add_init_script(f"sessionStorage.setItem('tl_admin_key', '{KEY}')")
+            hr.goto(f"{BASE}/report.html?id={iid}")
+            hr.wait_for_selector("video[data-file]", timeout=20000)
+            dur = hr.evaluate("""() => new Promise(res => { const v = document.querySelector('video[data-file]');
+                if (v.readyState >= 1) return res(v.duration); v.onloadedmetadata = () => res(v.duration); setTimeout(() => res(v.duration), 8000); })""")
+            print("report page video duration:", dur)
+            assert dur and dur != float("inf") and dur > 10, dur
+            ts = rec["state"]["log"][4]["ts"]
+            hr.evaluate(f"jump({ts})")
+            time.sleep(1)
+            cur = hr.evaluate("document.querySelector('video[data-file]').currentTime")
+            print("jump-to-moment currentTime:", cur)
+            assert cur > 1, cur
+            assert hr.locator("text=Integrity and proctoring").count() and hr.locator(".snaps img").count() >= 2
+            with hr.expect_download() as d:
+                hr.click("text=Download PDF report")
+            pdf = Path(d.value.path()).read_bytes()
+            assert pdf[:5] == b"%PDF-" and len(pdf) > 20000
+            with hr.expect_download() as d:
+                hr.click("text=Download everything (ZIP)")
+            import zipfile
+            names = zipfile.ZipFile(d.value.path()).namelist()
+            print("zip:", [n.split("/", 1)[1] for n in names])
+            assert any(n.endswith("report.pdf") for n in names) and any("/recordings/camera_" in n for n in names)
+            assert any("/snapshots/" in n for n in names)
+            if hr_errs:
+                failures.append(f"report page JS errors: {hr_errs}")
+            hr.goto(f"{BASE}/hr.html")
+            hr.wait_for_selector("text=Rohan Mehta", timeout=15000)
+            hr.fill("#q", "nobody-matches")
+            assert hr.locator("text=No interviews match").count()
+            if hr_errs:
+                failures.append(f"HR page JS errors: {hr_errs}")
+
+            # ---------------------------------------------------------- 2. drop and rejoin inside the window
+            iid2 = create(c, reconnect_window_sec=12)
+            pg2, errs2 = page_for(iid2, ANSWERS, drop_after=2, turn_ms=800)
+            pass_checks(pg2)
+            pg2.click("#startBtn")
+            pg2.wait_for_selector("#reconnectBox:not(.hidden)", timeout=60000)
+            assert "left to rejoin" in pg2.inner_text("#rejoinLeft")
+            time.sleep(2)
+            pg2.click("#reconnectBtn")
+            pg2.wait_for_function("window.__asst && window.__asst.firstMessage.startsWith('Welcome back')", timeout=20000)
+            pg2.wait_for_selector("#s4:not(.hidden)", timeout=120000)
+            r2 = wait(lambda: (lambda r: r if r.get("report") else None)(c.get(f"/api/interviews/{iid2}").json()), 60, what="rejoined interview scored")
+            assert r2["state"]["reconnects"] == 1 and r2["state"]["ended"], r2["state"].get("reconnects")
+            parts = [m for m in r2["media"] if m["kind"] == "candidate_video"]
+            assert len(parts) == 2 and all(m.get("playable") for m in parts), parts
+            print("rejoin inside window: OK, recording parts:", [m.get("duration_sec") for m in parts])
+            if errs2:
+                failures.append(f"rejoin page JS errors: {errs2}")
+
+            # ---------------------------------------------------------- 3. drop, try to rejoin after the window
+            iid3 = create(c, reconnect_window_sec=12)
+            pg3, _ = page_for(iid3, ANSWERS, drop_after=2, turn_ms=800)
+            pass_checks(pg3)
+            pg3.click("#startBtn")
+            pg3.wait_for_selector("#reconnectBox:not(.hidden)", timeout=60000)
+            # the page itself closes the door when the countdown ends
+            pg3.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview closed'", timeout=40000)
+            # and the server refuses a late rejoin even if the page is bypassed (after its 2 s grace)
+            time.sleep(3)
+            late = httpx.post(f"{BASE}/api/interviews/{iid3}/assistant")
+            print("late rejoin:", late.status_code, late.json().get("detail", "")[:80])
+            assert late.status_code in (409, 410), late.status_code
+            r3 = wait(lambda: (lambda r: r if r["status"] in ("incomplete", "scored") and r.get("report") else None)(
+                c.get(f"/api/interviews/{iid3}").json()), 60, what="abandoned interview closed and scored")
+            assert r3.get("ended_early") and any("did not reach its normal end" in x for x in r3["report"]["human_review_reasons"])
+            print("rejoin after window: refused, interview closed and scored:", r3["status"])
+
+            # ---------------------------------------------------------- 4. candidate ends deliberately
+            iid4 = create(c)
+            pg4, _ = page_for(iid4, ANSWERS, turn_ms=1500)
+            pass_checks(pg4)
+            pg4.click("#startBtn")
+            pg4.wait_for_function("document.getElementById('progText').textContent.includes('Question')", timeout=20000)
+            time.sleep(4)
+            pg4.once("dialog", lambda dlg: dlg.accept())
+            pg4.click("#endBtn")
+            pg4.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview ended'", timeout=30000)
+            assert httpx.post(f"{BASE}/api/interviews/{iid4}/assistant").status_code == 409
+            print("deliberate end: closed, no rejoin")
+            browser.close()
+    finally:
+        srv.terminate()
+        srv.wait(10)
+    log = (Path(data) / "server.log").read_text()
+    bad = [ln for ln in log.splitlines() if "Traceback" in ln or " ERROR " in ln]
+    if bad:
+        failures.append("server errors:\n" + "\n".join(bad[:10]) + "\n" + log[-3000:])
+    if failures:
+        print("\nFAILURES:\n" + "\n".join(failures))
+        sys.exit(1)
+    print("\nBROWSER E2E PASSED")
+
+
+if __name__ == "__main__":
+    main()

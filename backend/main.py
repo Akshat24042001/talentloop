@@ -1,26 +1,28 @@
-"""TalentLoop AI Interview PoC server.
+"""TalentLoop AI Interview server.
 
-Run:  uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Run:  uvicorn backend.main:app --host 0.0.0.0 --port 8000   (one worker: locks live in process memory)
 """
+import asyncio
 import io
 import json
 import logging
 import os
 import secrets
+import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-import httpx  # noqa: E402
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile  # noqa: E402
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse  # noqa: E402
+from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse, RedirectResponse,  # noqa: E402
+                               Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from starlette.background import BackgroundTask  # noqa: E402
 
-from . import brain, llm, store  # noqa: E402
+from . import brain, exports, llm, media, proctor, store  # noqa: E402
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -29,19 +31,31 @@ log = logging.getLogger("app")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
 WEAK_ADMIN = ADMIN_KEY in ("", "change-me") or len(ADMIN_KEY) < 12
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-MEDIA_CAP_BYTES = int(os.getenv("MEDIA_CAP_MB", "700")) * 1024 * 1024
-RECORDING_HOSTS = [h.strip().lower() for h in os.getenv("RECORDING_HOSTS", "vapi.ai").split(",") if h.strip()]
-MAX_EVENTS = 3000
+MEDIA_CAP_BYTES = int(os.getenv("MEDIA_CAP_MB", "900")) * 1024 * 1024
+MAX_EVENTS = 5000
+MAX_IMAGES = 300
+RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "30"))
+RECONNECT_GRACE_SEC = 2          # network latency allowance on top of the window
+RETENTION_DAYS = float(os.getenv("RETENTION_DAYS", "0") or 0)   # 0 = keep forever
+SWEEP_EVERY_SEC = float(os.getenv("SWEEP_EVERY_SEC", "30"))
+CLOSED = ("completed", "incomplete", "scored")
 
 if WEAK_ADMIN:
-    log.warning("ADMIN_KEY is empty or weak. Anyone who finds your tunnel URL can read every resume and report.")
+    log.warning("ADMIN_KEY is empty or weak. Anyone who finds your URL can read every resume and report.")
 
-app = FastAPI(title="TalentLoop AI Interview PoC")
+app = FastAPI(title="TalentLoop AI Interview")
+_presence: dict[str, float] = {}     # interview id -> last heartbeat from a live call (memory only)
+_sweeping: set[str] = set()
 
 
 @app.on_event("startup")
-async def _check_models():
+async def _startup():
+    n = await asyncio.to_thread(store.restore_all)
+    if n:
+        log.info("restored %d interviews from S3", n)
     await llm.resolve_models()
+    if SWEEP_EVERY_SEC > 0:
+        asyncio.create_task(_sweeper())
 
 
 def require_admin(req: Request):
@@ -59,7 +73,34 @@ def get_rec(iid: str) -> dict:
         rec = None
     if not rec:
         raise HTTPException(404, "Interview not found")
+    rec.setdefault("settings", {})
+    rec.setdefault("sessions", [])
+    rec.setdefault("images", [])
     return rec
+
+
+def client_ip(req: Request) -> str:
+    fwd = req.headers.get("x-forwarded-for", "")
+    return (fwd.split(",")[0].strip() if fwd else (req.client.host if req.client else "")) or "?"
+
+
+def server_event(rec: dict, typ: str, detail: str = "") -> None:
+    rec.setdefault("events", []).append({"type": typ, "ts": None, "server_ts": time.time(), "detail": detail[:200],
+                                         "source": "server"})
+
+
+def _spoke(rec: dict) -> bool:
+    return any(e["role"] == "candidate" for e in (rec.get("state") or {}).get("log", []))
+
+
+def last_activity(rec: dict) -> float:
+    st = rec.get("state") or {}
+    ts = [e.get("ts") or 0 for e in st.get("log", [])[-3:]]
+    return max([_presence.get(rec["id"], 0), rec.get("last_seen", 0)] + ts)
+
+
+def reconnect_window(rec: dict) -> int:
+    return int(rec.get("settings", {}).get("reconnect_window_sec") or RECONNECT_WINDOW_SEC)
 
 
 # ---------------------------------------------------------------------------
@@ -75,10 +116,14 @@ def health():
     return {"ok": True, "mock": llm.MOCK, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
             "llm_provider": "openrouter" if llm.OPENROUTER else ("custom" if llm.BASE_URL else "openai"),
             "llm_key_set": bool(llm.API_KEY), "fast_chain": llm.FAST_CHAIN, "smart_chain": llm.SMART_CHAIN,
-            "free_models": any(m.endswith(":free") for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
+            "free_models": any(m.endswith(":free") or m == "openrouter/free" for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
             "model_note": llm.MODEL_CHECK["note"],
             "public_url": public_url(), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
-            "admin_protected": bool(ADMIN_KEY), "admin_weak": WEAK_ADMIN}
+            "vapi_private_key_set": bool(os.getenv("VAPI_PRIVATE_KEY")),
+            "admin_protected": bool(ADMIN_KEY), "admin_weak": WEAK_ADMIN,
+            "storage": {"s3": store.S3_ENABLED, "s3_error": store.S3_STATUS["last_error"],
+                        "persistent_disk": os.getenv("PERSISTENT_DISK", "") == "1"},
+            "ffmpeg": bool(media.ffmpeg_exe()), "reconnect_window_sec": RECONNECT_WINDOW_SEC}
 
 
 @app.post("/api/extract")
@@ -123,9 +168,22 @@ async def make_plan(req: Request):
             "ms": int((time.time() - t0) * 1000)}
 
 
+def _settings(body: dict) -> dict:
+    s = body.get("settings") or {}
+    out = {"candidate_email": str(s.get("candidate_email") or "")[:200],
+           "require_screen_share": bool(s.get("require_screen_share")),
+           "reconnect_window_sec": max(10, min(900, int(s.get("reconnect_window_sec") or RECONNECT_WINDOW_SEC))),
+           "face_detection": s.get("face_detection", True) is not False,
+           "snapshots": s.get("snapshots", True) is not False,
+           "hr_note": str(s.get("hr_note") or "")[:500]}
+    af = s.get("available_from")
+    out["available_from"] = float(af) if isinstance(af, (int, float)) and af > 0 else None
+    return out
+
+
 @app.post("/api/interviews")
 async def create_interview(req: Request):
-    """Body: {plan, inputs:{jd,resume,questions,...}, expires_hours}. This is also the API
+    """Body: {plan, inputs:{jd,resume,questions,...}, expires_hours, settings}. This is also the API
     TalentLoop's main app would call with its payload."""
     require_admin(req)
     body = await req.json()
@@ -138,58 +196,139 @@ async def create_interview(req: Request):
     except Exception as e:
         raise HTTPException(400, f"Invalid plan: {e}")
     iid = secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
-    rec = {"id": iid, "created_at": time.time(),
-           "expires_at": time.time() + float(body.get("expires_hours", 72)) * 3600,
-           "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": {},
-           "events": [], "media": [], "vapi": {}, "report": None, "hr": {}, "scoring": None}
+    now = time.time()
+    settings = _settings(body)
+    starts = settings["available_from"] or now
+    rec = {"id": iid, "created_at": now,
+           "expires_at": starts + max(0.5, float(body.get("expires_hours") or 72)) * 3600,
+           "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
+           "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
+           "scoring": None, "settings": settings}
     store.save(rec)
     return {"id": iid, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/report.html?id={iid}"}
+
+
+def _row(r: dict) -> dict:
+    rep = r.get("report") or {}
+    pr = proctor.summary(r) if r.get("state") else {}
+    return {"id": r["id"], "created_at": r["created_at"], "status": r["status"],
+            "candidate": r["plan"].get("candidate_name"), "role": r["plan"].get("role"),
+            "email": (r.get("settings") or {}).get("candidate_email", ""),
+            "recommendation": rep.get("recommendation"), "overall": (rep.get("computed") or {}).get("overall"),
+            "risk": pr.get("risk"), "decision": (r.get("hr") or {}).get("decision"),
+            "ended_early": bool(r.get("ended_early")), "expires_at": r.get("expires_at")}
 
 
 @app.get("/api/interviews")
 def list_interviews(req: Request):
     require_admin(req)
-    out = []
-    for r in store.list_all():
-        rep = r.get("report") or {}
-        out.append({"id": r["id"], "created_at": r["created_at"], "status": r["status"],
-                    "candidate": r["plan"].get("candidate_name"), "role": r["plan"].get("role"),
-                    "recommendation": rep.get("recommendation"),
-                    "overall": (rep.get("computed") or {}).get("overall")})
-    return out
+    return [_row(r) for r in store.list_all()]
+
+
+@app.get("/api/interviews.csv")
+def interviews_csv(req: Request):
+    require_admin(req)
+    return Response(exports.interviews_csv(store.list_all()), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="interviews_{time.strftime("%Y%m%d")}.csv"'})
 
 
 @app.get("/api/interviews/{iid}")
 def get_interview(iid: str, req: Request):
     require_admin(req)
     rec = get_rec(iid)
-    rec.pop("snapshots", None)
+    out = exports.public_record(rec)
     if rec.get("state"):
-        rec["state"].pop("token", None)
-        rec["state"].pop("tokens", None)
-    return rec
+        out["proctoring"] = proctor.summary(rec)
+        out["stats"] = proctor.stats(rec)
+        out["started_at"] = proctor.interview_start(rec)
+    out["reconnect_window_sec"] = reconnect_window(rec)
+    return out
+
+
+@app.get("/api/interviews/{iid}/proctoring")
+def get_proctoring(iid: str, req: Request):
+    require_admin(req)
+    rec = get_rec(iid)
+    return {"proctoring": proctor.summary(rec), "stats": proctor.stats(rec) if rec.get("state") else None}
+
+
+@app.get("/api/interviews/{iid}/report.pdf")
+async def report_pdf(iid: str, req: Request):
+    require_admin(req)
+    rec = get_rec(iid)
+    pdf = await asyncio.to_thread(exports.report_pdf, rec)
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{exports.base_name(rec)}_report.pdf"'})
+
+
+@app.get("/api/interviews/{iid}/transcript.txt")
+def transcript_txt(iid: str, req: Request):
+    require_admin(req)
+    rec = get_rec(iid)
+    return PlainTextResponse(exports.transcript_text(rec), headers={
+        "Content-Disposition": f'attachment; filename="{exports.base_name(rec)}_transcript.txt"'})
+
+
+@app.get("/api/interviews/{iid}/export.json")
+def export_json(iid: str, req: Request):
+    require_admin(req)
+    rec = get_rec(iid)
+    data = exports.public_record(rec)
+    if rec.get("state"):
+        data["proctoring"] = proctor.summary(rec)
+        data["stats"] = proctor.stats(rec)
+    return Response(json.dumps(data, indent=1, ensure_ascii=False), media_type="application/json", headers={
+        "Content-Disposition": f'attachment; filename="{exports.base_name(rec)}.json"'})
+
+
+@app.get("/api/interviews/{iid}/bundle.zip")
+async def bundle(iid: str, req: Request):
+    require_admin(req)
+    rec = get_rec(iid)
+    fd, tmp = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    await asyncio.to_thread(exports.bundle_zip, rec, Path(tmp))
+    return FileResponse(tmp, media_type="application/zip", filename=f"{exports.base_name(rec)}.zip",
+                        background=BackgroundTask(lambda: os.unlink(tmp)))
 
 
 @app.delete("/api/interviews/{iid}")
 async def delete_interview(iid: str, req: Request):
-    """The consent screen promises deletion on request. This deletes our copy.
+    """The consent screen promises deletion on request. This deletes our copy (and the S3 copy).
     Vapi and the LLM provider keep their own copies under their retention policies."""
     require_admin(req)
     async with store.lock(iid):
         get_rec(iid)
-        store.delete(iid)
+        await asyncio.to_thread(store.delete, iid)
+    _presence.pop(iid, None)
     return {"ok": True}
 
 
 @app.post("/api/interviews/{iid}/score")
 async def rescore(iid: str, req: Request, bg: BackgroundTasks):
-    """Runs in the background: scoring can take longer than the 100 s a Cloudflare tunnel allows."""
+    """Runs in the background: scoring can take longer than a proxy's request timeout."""
     require_admin(req)
     rec = get_rec(iid)
     if not rec.get("state"):
         raise HTTPException(400, "Interview has not started")
     bg.add_task(run_scoring, iid, True)
     return {"ok": True, "status": "scoring"}
+
+
+@app.post("/api/interviews/{iid}/close")
+async def close_interview(iid: str, req: Request, bg: BackgroundTasks):
+    """HR closes an interview the candidate abandoned, without waiting for the sweeper."""
+    require_admin(req)
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if rec["status"] in ("created", "in_progress"):
+            rec["status"] = "incomplete" if rec.get("state") else "cancelled"
+            rec["ended_early"] = bool(rec.get("state"))
+            server_event(rec, "closed_by_hr")
+            store.save(rec)
+    if rec.get("state"):
+        bg.add_task(_finish_up, iid)
+    return {"ok": True, "status": rec["status"]}
 
 
 @app.post("/api/interviews/{iid}/hr")
@@ -200,7 +339,7 @@ async def save_hr_review(iid: str, req: Request):
     async with store.lock(iid):
         rec = get_rec(iid)
         rec["hr"] = {"scores": body.get("scores", {}), "decision": body.get("decision"),
-                     "notes": body.get("notes", ""), "at": time.time()}
+                     "notes": str(body.get("notes", ""))[:5000], "at": time.time()}
         store.save(rec)
     return {"ok": True}
 
@@ -226,21 +365,36 @@ def calibration(req: Request):
 
 
 @app.get("/media/{iid}/{fname}")
-def get_media(iid: str, fname: str, req: Request):
+async def get_media(iid: str, fname: str, req: Request):
     require_admin(req)
-    get_rec(iid)
-    p = store.MEDIA_DIR / iid / Path(fname).name
-    if not p.exists():
+    rec = get_rec(iid)
+    try:
+        name = store.safe_name(fname)
+    except ValueError:
+        raise HTTPException(400, "bad file name")
+    known = {m["file"] for m in rec.get("media", [])} | {s["file"] for s in rec.get("images", [])}
+    if name not in known:
         raise HTTPException(404)
-    return FileResponse(p)
+    p = await asyncio.to_thread(store.media_path, iid, name)
+    if not p:
+        raise HTTPException(404, "File not found. On a host without persistent storage it may have been wiped by a restart.")
+    if req.query_params.get("download"):
+        return FileResponse(p, filename=f"{exports.base_name(rec)}_{name}")
+    return FileResponse(p)  # supports Range requests, so the video scrub bar works
 
 
 # ---------------------------------------------------------------------------
 # Candidate side
 # ---------------------------------------------------------------------------
 def _check_open(rec: dict):
-    if rec["status"] in ("completed", "scored"):
+    if rec["status"] == "incomplete":
+        raise HTTPException(409, "This interview was closed because the connection was not restored in time. "
+                                 "Please contact HR.")
+    if rec["status"] in CLOSED or rec["status"] == "cancelled":
         raise HTTPException(409, "This interview has already been completed. Thank you.")
+    af = rec.get("settings", {}).get("available_from")
+    if af and time.time() < af:
+        raise HTTPException(425, "This interview is not open yet.")
     if time.time() > rec.get("expires_at", 1e18):
         raise HTTPException(410, "This interview link has expired. Please contact HR.")
 
@@ -249,22 +403,67 @@ def _check_open(rec: dict):
 def public_info(iid: str):
     rec = get_rec(iid)
     p = rec["plan"]
-    st = rec.get("state") or {}
+    s = rec["settings"]
+    resuming = rec["status"] == "in_progress" and _spoke(rec)
+    deadline = last_activity(rec) + reconnect_window(rec) if resuming else None
     return {"candidate_name": p.get("candidate_name"), "role": p.get("role"), "company": p.get("company"),
-            "duration_min": p["duration_min"], "status": rec["status"],
+            "duration_min": p["duration_min"], "status": rec["status"], "questions": len(p["questions"]),
             "expired": time.time() > rec.get("expires_at", 1e18),
-            "resuming": rec["status"] == "in_progress" and any(e["role"] == "candidate" for e in st.get("log", []))}
+            "available_from": s.get("available_from"), "not_open_yet": bool(s.get("available_from") and time.time() < s["available_from"]),
+            "require_screen_share": bool(s.get("require_screen_share")),
+            "face_detection": s.get("face_detection", True), "snapshots": s.get("snapshots", True),
+            "reconnect_window_sec": reconnect_window(rec), "resuming": resuming,
+            "reconnect_seconds_left": max(0, int(deadline - time.time())) if deadline else None,
+            "server_time": time.time()}
+
+
+@app.post("/api/interviews/{iid}/consent")
+async def consent(iid: str, req: Request):
+    body = await req.json()
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        rec.setdefault("consents", []).append({"at": time.time(), "ip": client_ip(req),
+                                               "ua": req.headers.get("user-agent", "")[:300],
+                                               "version": str(body.get("version", ""))[:40]})
+        rec["consent"] = rec["consents"][0]
+        store.save(rec)
+    return {"ok": True}
+
+
+@app.post("/api/interviews/{iid}/device")
+async def device_info(iid: str, req: Request):
+    body = await req.json()
+    allowed = ("platform", "screen", "window", "extended_display", "timezone", "language", "cores", "memory_gb",
+               "touch", "browser", "camera", "microphone", "connection")
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        rec["device"] = {k: str(body.get(k))[:200] for k in allowed if k in body}
+        store.save(rec)
+    return {"ok": True}
 
 
 @app.post("/api/interviews/{iid}/assistant")
-async def assistant_for_call(iid: str):
-    """Called by the candidate page right before vapi.start(). Opens a new session."""
+async def assistant_for_call(iid: str, req: Request, bg: BackgroundTasks):
+    """Called by the candidate page right before vapi.start(). Opens a new call session.
+    A candidate who spoke and then dropped can rejoin only within the reconnect window."""
     key = os.getenv("VAPI_PUBLIC_KEY", "").strip()
     if not key:
         raise HTTPException(500, "VAPI_PUBLIC_KEY not set on server")
+    ip, ua = client_ip(req), req.headers.get("user-agent", "")[:300]
     async with store.lock(iid):
         rec = get_rec(iid)
         _check_open(rec)
+        st = rec.get("state")
+        if st and not st.get("ended") and _spoke(rec):
+            gap = time.time() - last_activity(rec)
+            if gap > reconnect_window(rec) + RECONNECT_GRACE_SEC:
+                rec["status"] = "incomplete"
+                rec["ended_early"] = True
+                server_event(rec, "reconnect_denied", f"tried to rejoin {int(gap)}s after dropping")
+                store.save(rec)
+                bg.add_task(_finish_up, iid)
+                raise HTTPException(410, f"The {reconnect_window(rec)}-second window to rejoin has passed, so this "
+                                         "interview is now closed. Please contact HR if this was a technical problem.")
         try:
             first = brain.start_session(rec)
         except ValueError as e:
@@ -273,8 +472,20 @@ async def assistant_for_call(iid: str):
             assistant = build_assistant(iid, rec["plan"], first, rec["state"]["token"])
         except RuntimeError as e:
             raise HTTPException(500, str(e))
+        prev = rec["sessions"][-1] if rec["sessions"] else None
+        if prev and prev.get("spoke"):
+            if prev.get("ua") != ua:
+                server_event(rec, "device_changed", f"{prev.get('ua', '')[:80]} -> {ua[:80]}")
+            if prev.get("ip") != ip:
+                server_event(rec, "ip_changed", f"{prev.get('ip')} -> {ip}")
+        for s in rec["sessions"]:
+            s["spoke"] = s.get("spoke") or _spoke(rec)
+        rec["sessions"].append({"n": rec["state"]["session"], "at": time.time(), "ip": ip, "ua": ua})
+        server_event(rec, "session_start", f"session {rec['state']['session']} from {ip}")
+        rec["last_seen"] = time.time()
         store.save(rec)
-    return {"publicKey": key, "assistant": assistant}
+    _presence[iid] = time.time()
+    return {"publicKey": key, "assistant": assistant, "reconnect_window_sec": reconnect_window(rec)}
 
 
 @app.post("/api/interviews/{iid}/started")
@@ -282,42 +493,117 @@ async def call_started(iid: str, req: Request):
     body = await req.json()
     async with store.lock(iid):
         rec = get_rec(iid)
-        rec.setdefault("vapi", {}).setdefault("call_ids", []).append(body.get("call_id"))
+        cid = str(body.get("call_id") or "")[:80]
+        if cid:
+            rec.setdefault("vapi", {}).setdefault("call_ids", []).append(cid)
         store.save(rec)
     return {"ok": True}
+
+
+@app.post("/api/interviews/{iid}/heartbeat")
+async def heartbeat(iid: str):
+    """Every few seconds while the call is live. Only live-call signals (this, and interview turns)
+    count as presence; other uploads after a drop must not keep the reconnect window open."""
+    rec = get_rec(iid)
+    now = time.time()
+    if rec["status"] == "in_progress":
+        _presence[iid] = now
+        if now - rec.get("last_seen", 0) > 20:  # persist occasionally, survives a server restart
+            async with store.lock(iid):
+                r = get_rec(iid)
+                r["last_seen"] = now
+                store.save(r)
+    return {"ok": True, "status": rec["status"]}
+
+
+@app.get("/api/interviews/{iid}/progress")
+def progress(iid: str):
+    rec = get_rec(iid)
+    st = rec.get("state") or {}
+    p = rec["plan"]
+    out = {"status": rec["status"], "q_total": len(p["questions"]), "q_num": None, "remaining_sec": None,
+           "ended": bool(st.get("ended"))}
+    if st:
+        out["q_num"] = st["q_idx"] + 1
+        active = st.get("active_before", 0) + (time.time() - st.get("session_started", time.time()))
+        out["remaining_sec"] = max(0, int(p["duration_min"] * 60 - active))
+    return out
 
 
 @app.post("/api/interviews/{iid}/events")
 async def add_events(iid: str, req: Request):
     body = await req.json()
-    evs = body if isinstance(body, list) else [body]
+    now_ms = time.time() * 1000
+    if isinstance(body, dict) and "events" in body:
+        evs, sent_at = body.get("events") or [], body.get("sent_at")
+    else:
+        evs, sent_at = (body if isinstance(body, list) else [body]), None
+    offset = (now_ms - sent_at) if isinstance(sent_at, (int, float)) else None
     async with store.lock(iid):
         rec = get_rec(iid)
+        if offset is not None:
+            rec["clock_offset_ms"] = offset
         room = MAX_EVENTS - len(rec["events"])
-        for e in [e for e in evs if isinstance(e, dict)][:max(0, min(200, room))]:
-            ts = e.get("ts")
-            rec["events"].append({"type": str(e.get("type"))[:40], "ts": ts if isinstance(ts, (int, float)) else None,
-                                  "detail": str(e.get("detail", ""))[:200]})
+        for e in [e for e in evs if isinstance(e, dict)][:max(0, min(300, room))]:
+            ts = e.get("ts") if isinstance(e.get("ts"), (int, float)) else None
+            ev = {"type": str(e.get("type"))[:40], "ts": ts, "detail": str(e.get("detail", ""))[:200]}
+            if ts is not None and offset is not None:
+                ev["server_ts"] = (ts + offset) / 1000
+            rec["events"].append(ev)
         store.save(rec)
     return {"ok": True}
 
 
+@app.post("/api/interviews/{iid}/snapshot")
+async def snapshot(iid: str, req: Request, reason: str = "periodic"):
+    data = await req.body()
+    if not data.startswith(b"\xff\xd8") or len(data) > 400 * 1024:
+        raise HTTPException(400, "JPEG under 400 KB expected")
+    reason = "".join(c for c in reason if c.isalnum() or c == "_")[:30] or "periodic"
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if rec["status"] in CLOSED and time.time() - rec.get("last_seen", 0) > 120:
+            raise HTTPException(409, "Interview closed")
+        if len(rec["images"]) >= MAX_IMAGES:
+            return {"ok": False, "reason": "limit"}
+        fname = f"snap_{len(rec['images']) + 1:03d}_{reason}.jpg"
+        d = store.MEDIA_DIR / iid
+        d.mkdir(parents=True, exist_ok=True)
+        (d / fname).write_bytes(data)
+        rec["images"].append({"file": fname, "at": time.time(), "reason": reason, "bytes": len(data)})
+        store.save(rec)
+    if store.S3_ENABLED:
+        asyncio.get_running_loop().run_in_executor(None, _quiet_upload, iid, fname)
+    return {"ok": True}
+
+
+def _quiet_upload(iid: str, fname: str):
+    try:
+        store.upload_media(iid, fname)
+    except Exception:
+        pass
+
+
 @app.post("/api/interviews/{iid}/media/chunk")
-async def upload_media_chunk(iid: str, req: Request, rid: str, seq: int, ext: str = "webm"):
-    """The browser uploads its camera recording in 5-second pieces DURING the interview, so a
-    closed tab or a dead laptop loses seconds, not the whole video. Pieces must arrive in order;
-    MediaRecorder pieces concatenated in order form a valid file."""
+async def upload_media_chunk(iid: str, req: Request, rid: str, seq: int, ext: str = "webm", kind: str = "camera",
+                             chunk_sec: float = 5):
+    """The browser uploads recordings in 5-second pieces DURING the interview, so a closed tab or a dead
+    laptop loses seconds, not the whole video. Pieces must arrive in order; MediaRecorder pieces
+    concatenated in order form one stream, which is remuxed into a seekable file when the call ends."""
     if not rid.isalnum() or len(rid) > 24 or seq < 0:
         raise HTTPException(400, "bad chunk id")
+    kind = "screen" if kind == "screen" else "camera"
     data = await req.body()
-    if len(data) > 20 * 1024 * 1024:
+    if len(data) > 25 * 1024 * 1024:
         raise HTTPException(413, "Chunk too large")
-    fname = f"candidate_{rid}.{'mp4' if ext == 'mp4' else 'webm'}"
+    fname = f"{kind}_{rid}.{'mp4' if ext == 'mp4' else 'webm'}"
     async with store.lock(iid):
         rec = get_rec(iid)
         if time.time() > rec.get("expires_at", 1e18) + 86400:
             raise HTTPException(410, "Interview expired")
         entry = next((m for m in rec["media"] if m.get("rid") == rid), None)
+        if entry and (entry.get("finalized") or entry.get("finalizing")):
+            raise HTTPException(409, "recording already finalized")
         total = sum(m.get("bytes", 0) for m in rec["media"])
         if total + len(data) > MEDIA_CAP_BYTES:
             raise HTTPException(413, "Recording storage limit reached")
@@ -330,39 +616,73 @@ async def upload_media_chunk(iid: str, req: Request, rid: str, seq: int, ext: st
         d.mkdir(parents=True, exist_ok=True)
         with open(d / fname, "ab") as f:
             f.write(data)
+        now = time.time()
         if not entry:
-            entry = {"kind": "candidate_video", "file": fname, "bytes": 0, "rid": rid, "next_seq": 0}
+            entry = {"kind": "candidate_video" if kind == "camera" else "screen_video", "file": fname, "bytes": 0,
+                     "rid": rid, "next_seq": 0, "started_at": now - max(0.5, min(30, chunk_sec)),
+                     "session": (rec.get("state") or {}).get("session")}
             rec["media"].append(entry)
         entry["bytes"] += len(data)
         entry["next_seq"] = seq + 1
+        entry["last_chunk_at"] = now
         store.save(rec)
     return {"ok": True}
 
 
 @app.post("/api/interviews/{iid}/complete")
-async def complete(iid: str, bg: BackgroundTasks):
+async def complete(iid: str, bg: BackgroundTasks, req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
     async with store.lock(iid):
         rec = get_rec(iid)
         if rec["status"] == "in_progress" and rec.get("state") and rec["state"].get("ended"):
             rec["status"] = "completed"
+        elif rec["status"] == "in_progress" and isinstance(body, dict) and body.get("ended_by_candidate"):
+            rec["status"] = "incomplete"       # a deliberate "End interview" closes it; no rejoin
+            rec["ended_early"] = True
+            server_event(rec, "ended_by_candidate")
         store.save(rec)
-    rec = get_rec(iid)
-    # Score only when the interview properly ended. Dropped calls can reconnect instead.
-    if rec["status"] == "completed" and not rec.get("report"):
+    # The browser has finished uploading, so its recordings can be finalized now.
+    bg.add_task(media.finalize_media, iid)
+    if rec["status"] in ("completed", "incomplete") and not rec.get("report"):
         bg.add_task(run_scoring, iid)
-    return {"ok": True, "status": rec["status"]}
+    left = None
+    if rec["status"] == "in_progress" and _spoke(rec):
+        left = max(0, int(last_activity(rec) + reconnect_window(rec) - time.time()))
+    return {"ok": True, "status": rec["status"], "reconnect_window_sec": reconnect_window(rec),
+            "reconnect_seconds_left": left}
+
+
+@app.post("/api/interviews/{iid}/feedback")
+async def feedback(iid: str, req: Request):
+    body = await req.json()
+    try:
+        rating = max(1, min(5, int(body.get("rating"))))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "rating 1-5 required")
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if rec["status"] == "created":
+            raise HTTPException(409, "Interview not taken")
+        if rec.get("feedback"):
+            return {"ok": True, "duplicate": True}
+        rec["feedback"] = {"rating": rating, "comment": str(body.get("comment", ""))[:1000], "at": time.time()}
+        store.save(rec)
+    return {"ok": True}
 
 
 async def run_scoring(iid: str, force: bool = False) -> None:
-    """Background scoring with a guard, so the browser's /complete, the Vapi webhook and an HR
-    click don't pay for three identical scoring runs. Failures are saved for the report page."""
+    """Background scoring with a guard, so the browser's /complete, the Vapi webhook, the sweeper and
+    an HR click don't pay for several identical scoring runs. Failures are saved for the report page."""
     async with store.lock(iid):
         try:
             rec = get_rec(iid)
         except HTTPException:
             return
         sc = rec.get("scoring") or {}
-        if not rec.get("state") or (rec.get("report") and not force):
+        if not rec.get("state") or not _spoke(rec) or (rec.get("report") and not force):
             return
         if sc.get("state") == "running" and time.time() - sc.get("at", 0) < 600:
             return
@@ -381,12 +701,103 @@ async def run_scoring(iid: str, force: bool = False) -> None:
             return
         if report:
             rec["report"] = report
-            if rec["status"] != "in_progress":  # HR may score a dropped call; the candidate can still reconnect
+            if rec["status"] in ("completed", "incomplete"):
                 rec["status"] = "scored"
             rec["scoring"] = None
         else:
             rec["scoring"] = {"state": "failed", "at": time.time(), "error": err}
         store.save(rec)
+
+
+async def _finish_up(iid: str):
+    await media.finalize_media(iid)
+    await run_scoring(iid)
+
+
+# ---------------------------------------------------------------------------
+# Background sweeper: abandoned calls, unfinished recordings, Vapi cloud video, retention
+# ---------------------------------------------------------------------------
+async def sweep_once() -> None:
+    now = time.time()
+    for rec in store.list_all():
+        iid = rec["id"]
+        if iid in _sweeping:
+            continue
+        _sweeping.add(iid)
+        try:
+            rec.setdefault("settings", {})
+            if RETENTION_DAYS and now - rec.get("created_at", now) > RETENTION_DAYS * 86400:
+                async with store.lock(iid):
+                    await asyncio.to_thread(store.delete, iid)
+                log.info("[%s] deleted by retention policy", iid)
+                continue
+            st = rec.get("state") or {}
+            if rec["status"] == "in_progress" and not st.get("ended") and _spoke(rec):
+                if now - last_activity(rec) > reconnect_window(rec) + 60:
+                    async with store.lock(iid):
+                        r = get_rec(iid)
+                        if r["status"] == "in_progress":
+                            r["status"] = "incomplete"
+                            r["ended_early"] = True
+                            server_event(r, "abandoned", "candidate did not rejoin within the window")
+                            store.save(r)
+                    log.info("[%s] marked incomplete (candidate did not return)", iid)
+                    await _finish_up(iid)
+                    continue
+            if rec["status"] in CLOSED:
+                if any(m.get("rid") and not m.get("finalized") for m in rec.get("media", [])):
+                    await media.finalize_media(iid, only_idle_sec=45)
+                if rec["status"] in ("completed", "incomplete") and not rec.get("report") and \
+                        (rec.get("scoring") or {}).get("state") != "failed":
+                    await run_scoring(iid)
+                await _fetch_vapi_video(rec)
+        except Exception:
+            log.exception("[%s] sweep failed", iid)
+        finally:
+            _sweeping.discard(iid)
+
+
+async def _fetch_vapi_video(rec: dict) -> None:
+    """With VAPI_PRIVATE_KEY set, pull Vapi's cloud video/audio once it is ready (the webhook usually
+    arrives before the video is processed)."""
+    v = rec.get("vapi") or {}
+    if not os.getenv("VAPI_PRIVATE_KEY") or not v.get("call_ids"):
+        return
+    tries = v.get("fetch_tries", 0)
+    if tries >= 6 or time.time() - v.get("last_fetch", 0) < 60 * (tries + 1):
+        return
+    have = set(v.get("downloaded", []))
+    got_any = False
+    for cid in v["call_ids"]:
+        call = await media.fetch_vapi_call(cid)
+        art = (call or {}).get("artifact") or {}
+        for kind, url in (("call_video", art.get("videoRecordingUrl")), ("call_audio", art.get("recordingUrl"))):
+            if url and url not in have:
+                m = await media.download(rec["id"], url, kind, kind)
+                if m:
+                    have.add(url)
+                    got_any = True
+                    async with store.lock(rec["id"]):
+                        r = get_rec(rec["id"])
+                        r["media"].append(m)
+                        r.setdefault("vapi", {})["downloaded"] = sorted(have)
+                        store.save(r)
+    async with store.lock(rec["id"]):
+        r = get_rec(rec["id"])
+        vv = r.setdefault("vapi", {})
+        vv["fetch_tries"] = 6 if (got_any and any("video" in m["kind"] for m in r["media"] if m.get("source") == "vapi")) \
+            else tries + 1
+        vv["last_fetch"] = time.time()
+        store.save(r)
+
+
+async def _sweeper():
+    while True:
+        await asyncio.sleep(SWEEP_EVERY_SEC)
+        try:
+            await sweep_once()
+        except Exception:
+            log.exception("sweeper failed")
 
 
 # ---------------------------------------------------------------------------
@@ -423,8 +834,10 @@ async def custom_llm(iid: str, token: str, req: Request):
             log.warning("[%s] rejected LLM request with stale or wrong token", iid)
             raise HTTPException(403, "This call session is no longer active")
         prep = brain.prepare_turn(rec, messages)
+        rec["last_seen"] = time.time()
         store.save(rec)
         plan = rec["plan"]
+    _presence[iid] = time.time()
     if "reply" in prep:
         say = prep["reply"]
     else:
@@ -460,61 +873,46 @@ async def vapi_webhook(iid: str, token: str, req: Request, bg: BackgroundTasks):
         raise HTTPException(403, "bad token")
     if msg.get("type") == "end-of-call-report":
         art = msg.get("artifact") or {}
-        url = art.get("recordingUrl") or msg.get("recordingUrl") or (art.get("recording") or {}).get("mono", {}).get("combinedUrl")
+        audio = art.get("recordingUrl") or msg.get("recordingUrl") or \
+            ((art.get("recording") or {}).get("mono") or {}).get("combinedUrl")
+        video = art.get("videoRecordingUrl")
         async with store.lock(iid):
             rec = get_rec(iid)
-            rec.setdefault("vapi", {})["end_report"] = {
-                "endedReason": msg.get("endedReason"), "recordingUrl": url,
-                "durationSeconds": msg.get("durationSeconds"), "cost": msg.get("cost"),
-                "transcript": (art.get("transcript") or msg.get("transcript") or "")[:60000]}
+            v = rec.setdefault("vapi", {})
+            v.setdefault("end_reports", []).append({
+                "endedReason": msg.get("endedReason"), "recordingUrl": audio, "videoRecordingUrl": video,
+                "durationSeconds": msg.get("durationSeconds"), "cost": msg.get("cost"), "at": time.time(),
+                "transcript": (art.get("transcript") or msg.get("transcript") or "")[:60000]})
+            v["end_report"] = v["end_reports"][-1]
+            call_id = ((msg.get("call") or {}).get("id") or "")[:80]
+            if call_id and call_id not in v.get("call_ids", []):
+                v.setdefault("call_ids", []).append(call_id)
             ended = bool((rec.get("state") or {}).get("ended"))
             if ended and rec["status"] == "in_progress":
                 rec["status"] = "completed"
             store.save(rec)
-        if url and _recording_url_ok(url):
-            bg.add_task(download_recording, iid, url)
-        elif url:
-            log.warning("[%s] ignored recording URL on unexpected host: %s", iid, url[:120])
+        for kind, url in (("call_audio", audio), ("call_video", video)):
+            if url:
+                bg.add_task(_download_and_attach, iid, url, kind)
         # The candidate may close the tab before the browser calls /complete. Score from here too.
         if ended:
-            bg.add_task(run_scoring, iid)
+            bg.add_task(_finish_up, iid)
     return {"ok": True}
 
 
-def _recording_url_ok(url: str) -> bool:
-    """Only fetch recordings from Vapi's storage. Without this, a forged webhook could make the
-    server fetch internal URLs (SSRF)."""
-    try:
-        u = urlparse(url)
-    except ValueError:
-        return False
-    host = (u.hostname or "").lower()
-    return u.scheme == "https" and any(host == h or host.endswith("." + h) for h in RECORDING_HOSTS)
-
-
-async def download_recording(iid: str, url: str):
-    """Vapi keeps recordings only for a limited time on self-serve plans. Copy ours immediately."""
-    try:
-        d = store.MEDIA_DIR / iid
-        d.mkdir(parents=True, exist_ok=True)
-        ext = ".wav" if ".wav" in url else ".mp3" if ".mp3" in url else ".audio"
-        fname = f"call_audio_{int(time.time())}{ext}"
-        size = 0
-        async with httpx.AsyncClient(timeout=120, follow_redirects=False) as c:
-            async with c.stream("GET", url) as r:
-                r.raise_for_status()
-                with open(d / fname, "wb") as f:
-                    async for chunk in r.aiter_bytes():
-                        size += len(chunk)
-                        if size > 300 * 1024 * 1024:
-                            raise ValueError("recording larger than 300 MB")
-                        f.write(chunk)
-        async with store.lock(iid):
-            rec = get_rec(iid)
-            rec["media"].append({"kind": "call_audio", "file": fname, "bytes": size})
-            store.save(rec)
-    except Exception as e:
-        log.warning("recording download failed for %s: %s", iid, e)
+async def _download_and_attach(iid: str, url: str, kind: str):
+    rec = get_rec(iid)
+    if url in (rec.get("vapi") or {}).get("downloaded", []):
+        return
+    m = await media.download(iid, url, kind, kind)
+    if not m:
+        return
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        rec["media"].append(m)
+        v = rec.setdefault("vapi", {})
+        v["downloaded"] = sorted(set(v.get("downloaded", [])) | {url})
+        store.save(rec)
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

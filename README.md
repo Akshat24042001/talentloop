@@ -94,14 +94,45 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 - `STT_LANGUAGE`: `en-IN` default. Try `multi` if candidates code-switch into Hindi.
 - `SCORING_PASSES=2`: scores twice and flags unstable scores. Costs twice as much.
 
-## Honest limitations of this PoC
+## What HR gets
 
-- **Data leaves India.** Audio goes through Vapi, Deepgram, the TTS provider and the LLM provider. The consent screen says so. Fully on-prem is not possible at this quality today; say that to RAC upfront.
-- **Cheating is detectable, not preventable.** You get tab switches, fullscreen exits and video. Resume-probe follow-ups are the real defence. There is no face detection yet.
-- **English only.** Hindi and Gujarati interviews need different STT and TTS choices and fresh testing.
-- **Storage is JSON files** on one machine, and there is no HR login beyond `ADMIN_KEY`. That's fine for a pilot, not for production.
-- **Recordings on Vapi are temporary.** This server copies the call audio when the end-of-call webhook arrives. The candidate's camera video is uploaded from the browser at the end.
-- **Latency.** Each turn waits for the silence window plus about 1 second of LLM time. That's acceptable for an interview, but measure it.
+**Recordings**
+- Candidate camera video **with both voices** (the candidate's mic and the AI interviewer mixed in the browser), uploaded in 5-second pieces during the call and repaired with ffmpeg afterwards, so it plays, shows its length and can be scrubbed.
+- Candidate screen recording when screen sharing is on.
+- Vapi's call audio, plus Vapi's cloud video as a backup when `VAPI_PRIVATE_KEY` is set.
+- Click any transcript line, evidence quote or flagged event on the report to jump the video to that moment.
+
+**Integrity (proctoring) report, available immediately, even if AI scoring fails**
+- Risk level (low/medium/high) with plain-English reasons, and a timeline of every event linked to the question being asked.
+- Tab switches and time away, other windows focused, full-screen exits, copy/paste/cut, right-click, shortcuts, Print Screen, suspected developer tools, a shrunk window, a second monitor.
+- Face checks in the browser (MediaPipe, self-hosted): no face, more than one person. A snapshot is taken each time, plus a reference photo at the start and one every minute.
+- Microphone muted (count and duration), voice detected while muted, camera or mic switched off, lost connection.
+- Required entire-screen sharing (optional per interview): refuses windows and tabs, and records and blocks with an overlay when sharing stops.
+- Every session's IP address and browser; a rejoin from a different device or network is flagged.
+
+**Interview flow**
+- Rejoin window after a drop (default 30 s, set per interview). After it, the server refuses to reopen the interview, closes it and scores what was done. A deliberate "End interview" can't be undone.
+- Links can be scheduled (open-from time) and expire.
+- The candidate sees progress (Question 3 of 7, time left), live captions of the AI and of what it heard them say, a mute button, a speaker test, and a system check (camera, mic, face, screen) before starting.
+- Natural voice: Vapi "Naina" (Indian English, Vapi's Version 2 model), plus a warmer interviewer script and conversational acknowledgements.
+- Silence handling: gentle check-ins, then a polite hang-up after 2 minutes of silence.
+- Optional questions are skipped automatically when time is short, so HR's mandatory questions are always asked.
+
+**Reports and data**
+- Download a **PDF report** (summary, integrity, snapshots, per-question scores with verified quotes, resume claims, sessions and consent, full transcript), the transcript (TXT), all data (JSON), or **everything in one ZIP** (PDF + transcript + data + all videos and snapshots). There's also a CSV export of all interviews.
+- Per-question time, words and follow-ups, the candidate's share of talk time, and AI fallback count.
+- HR scores per question, decision and notes, and calibration (AI vs HR agreement).
+- Consent record (time, IP, browser), candidate feedback rating, a delete-everything button and an optional retention period (`RETENTION_DAYS`).
+- Storage survives Render free-tier restarts via any S3-compatible bucket (Backblaze B2 free).
+
+## Honest limitations
+
+- **Data leaves India.** Audio goes through Vapi, Deepgram, the TTS provider and the LLM provider. The consent screen says so.
+- **Cheating is detectable, not preventable.** A second phone out of camera view or a helper speaking quietly can't be fully caught by any browser. Voice-while-muted, face checks and resume-probe follow-ups are the practical defence. HR must watch flagged moments before concluding anything.
+- **Browser limits.** Screen-share and multi-monitor checks need desktop Chrome or Edge. Safari/Firefox can take the interview, but some signals are missing.
+- **English only.** Hindi and Gujarati interviews need different STT choices and testing (the PDF already renders Hindi/Gujarati names).
+- **One server process.** Locks live in memory, so run one instance. Storage is JSON files mirrored to S3; fine for a pilot, not for thousands of interviews.
+- **The Vapi config passes through the candidate's browser.** See `REVIEW.md` for the private-key hardening.
 
 ## Review status
 

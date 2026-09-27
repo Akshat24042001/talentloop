@@ -39,6 +39,22 @@ After the fixes, the logic is sound in tests. **It has still never run against a
 | 20 | Low | Unescaped LLM values in the report HTML, and average latency showing "-" in mock mode. | Escaped. Fixed. |
 | 21 | Low | The plan LLM could drop or merge HR questions without anyone noticing. | `/api/plan` returns warnings (HR question count mismatch, over-budget time, long questions, no warm-up) and the HR page shows them in red. |
 
+## Round 3: HR review (recordings, proctoring, downloads, anti-cheat)
+
+| # | Severity | Problem found | Fix |
+|---|---|---|---|
+| 22 | Critical | **Two Vapi fields the config sent (`silenceTimeoutSeconds`, `messagePlan`) are not in Vapi's current API.** A strict API rejects unknown fields, so calls could fail to start. Found by checking the config against Vapi's official OpenAPI spec. | Replaced with `hooks` (`customer.speech.timeout` with `say` and `endCall`). `tools/validate_vapi.py` now checks every field against the spec, and it catches the old config. |
+| 23 | Critical | **Recordings unplayable or unseekable.** MediaRecorder writes WebM with no duration or index, so players show 0:00 or "Infinity" and seeking fails. The video also had **no interviewer voice**, only the candidate's mic. | ffmpeg remux (no re-encode) after the call. The interviewer's `<audio>` is mixed into the recording. Verified in Chromium: 16.7 s duration, seekable, and the interviewer tone is present in the audio track. |
+| 24 | Critical | **Render free wipes the disk** on sleep or redeploy, so interviews and videos vanished. | S3-compatible mirror (Backblaze B2 free). Restores on startup, and media is fetched back on demand. Tested with an in-memory S3 and a wiped disk. |
+| 25 | High | Proctoring report only existed after AI scoring succeeded. | It's computed live from events on every report view, in the PDF, and in the ZIP. |
+| 26 | High | A candidate could rejoin hours later. | Server-side rejoin window from the last live heartbeat (default 30 s, set per interview). A sweeper closes and scores abandoned interviews. The page countdown uses the server's clock. |
+| 27 | Medium | No way to download anything for records. | PDF report (Hindi/Gujarati names shaped correctly), TXT, JSON, ZIP of everything, CSV of all interviews. |
+| 28 | Medium | The voice sounded robotic (Azure Neerja, scripted phrases). | Vapi "Naina" V2 (Indian English, Vapi's newest voice model), a warmer script, and acknowledgements that reference what the candidate said. |
+
+Verified end-to-end in real Chromium (`tests/e2e_browser.py`): full interview with screen share, face and paste events, mute, PDF and ZIP downloads, jump-to-moment playback, rejoin inside the window, a late rejoin refused, and a deliberate end locked.
+
+Still unverifiable from here: a live Vapi call. Do the checklist below on your first real call.
+
 ## Still open (not fixed, your call)
 
 1. **The whole Vapi assistant config passes through the candidate's browser.** That includes the LLM URL and the session token. A technical candidate can open devtools, copy the token and send made-up turns to your server. The token stops stale calls and outsiders, but it doesn't stop the candidate. The real fix: create the assistant server-side with the Vapi **private** key (`POST /assistant`), store the custom-LLM credential and the `server.secret` in Vapi, and give the browser only the `assistantId`. I didn't build this because I can't test it against Vapi from here.
@@ -53,10 +69,13 @@ After the fixes, the logic is sound in tests. **It has still never run against a
 
 ## Verify on the first real Vapi call
 
-- [ ] Vapi accepts the config. If it rejects a field, devtools names it. The fields added in this review are `silenceTimeoutSeconds` and `messagePlan.idleMessages`/`idleTimeoutSeconds`/`idleMessageMaxSpokenCount`.
+- [ ] Vapi accepts the config (`python -m tools.validate_vapi` checks it against the live spec first). If it rejects a field, devtools names it.
+- [ ] The interviewer voice is Naina and sounds natural. If not, set `VOICE_ID` to Sagar, Elliot or another voice in the Vapi dashboard's Voice Library.
+- [ ] The report's camera video plays, and you hear both the interviewer and yourself.
 - [ ] The server log never shows `could not match Vapi history to a snapshot`. If it does, Vapi stores assistant text differently than expected, so send me an example request body.
 - [ ] Interrupt the AI mid-question, then keep talking after a pause. The transcript should show no skipped questions.
 - [ ] Stay silent for 30 s. You should hear "Take your time...", not a hang-up.
+- [ ] Close the tab mid-interview, reopen the link within 30 s: it should say "Welcome back". Try again after 30 s: it must refuse.
 - [ ] Close the tab right after the goodbye. The report should still appear (webhook-triggered scoring) with most of the video.
 - [ ] Check the `recordingUrl` host in the saved `end_report`. If it isn't `*.vapi.ai`, add it to `RECORDING_HOSTS`.
 

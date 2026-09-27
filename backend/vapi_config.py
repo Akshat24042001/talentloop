@@ -69,25 +69,51 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dic
             "model": "talentloop-interview-brain",
             "messages": [{"role": "system", "content": "Interview is orchestrated by the custom LLM server."}],
             "temperature": 0.3,
+            # Free LLMs can be slow; our server itself falls back after TURN_TIMEOUT_SEC.
+            "timeoutSeconds": 25,
         },
-        "voice": {"provider": _env("VOICE_PROVIDER", "azure"), "voiceId": _env("VOICE_ID", "en-IN-NeerjaNeural")},
+        "voice": build_voice(),
         "transcriber": transcriber,
         "startSpeakingPlan": start_plan,
         "stopSpeakingPlan": {"numWords": 3, "voiceSeconds": 0.3, "backoffSeconds": 1},
         "backgroundSpeechDenoisingPlan": {"smartDenoisingPlan": {"enabled": True}},
         "endCallPhrases": [END_PHRASE],
         "maxDurationSeconds": int(plan["duration_min"]) * 60 + 300,
-        # Vapi's default hangs up after 30 s of silence. A candidate thinking about a hard question
-        # would get disconnected. Nudge gently instead and only hang up after a long silence.
-        "silenceTimeoutSeconds": int(_env("SILENCE_TIMEOUT_SEC", "120")),
-        "messagePlan": {
-            "idleMessages": ["Take your time. Let me know when you're ready to answer.",
-                             "Are you still there? You can also say skip if you'd like to move on."],
-            "idleTimeoutSeconds": float(_env("IDLE_TIMEOUT_SEC", "25")),
-            "idleMessageMaxSpokenCount": 2,
-        },
-        "artifactPlan": {"recordingEnabled": True},
+        # Silence handling (Vapi moved this from silenceTimeoutSeconds/messagePlan to hooks).
+        # Gentle nudges first; hang up only after a long silence (e.g. the candidate walked away).
+        "hooks": [
+            {"name": "idle_nudge", "on": "customer.speech.timeout",
+             "options": {"timeoutSeconds": float(_env("IDLE_TIMEOUT_SEC", "25")), "triggerMaxCount": 2,
+                         "triggerResetMode": "onUserSpeech"},
+             "do": [{"type": "say", "exact": ["Take your time. Just let me know when you're ready.",
+                                               "No rush. Are you still with me?"]}]},
+            {"name": "silence_end", "on": "customer.speech.timeout",
+             "options": {"timeoutSeconds": float(_env("SILENCE_TIMEOUT_SEC", "120")), "triggerMaxCount": 1,
+                         "triggerResetMode": "never"},
+             "do": [{"type": "say", "exact": "I haven't heard anything for a while, so I'll pause the interview "
+                                             "here. If this was a connection problem, please rejoin right away."},
+                    {"type": "tool", "tool": {"type": "endCall"}}]},
+        ],
+        "artifactPlan": {"recordingEnabled": True,
+                         # Vapi's own cloud video (camera + both voices), a server-side backup of our recording.
+                         "videoRecordingEnabled": _env("VAPI_VIDEO_RECORDING", "1") == "1"},
         "server": {"url": f"{public}/webhook/vapi/{iid}/{token}"},
         "serverMessages": ["end-of-call-report"],
         "metadata": {"interview_id": iid},
     }
+
+
+def build_voice() -> dict:
+    """Default: Vapi's own 'Naina' voice on their Version 2 model (female, Indian accent, the most
+    natural option in Vapi's current catalogue, included in Vapi's price). Override with
+    VOICE_PROVIDER / VOICE_ID (e.g. azure + en-IN-NeerjaNeural, or an 11labs voice)."""
+    provider = _env("VOICE_PROVIDER", "vapi")
+    voice_id = _env("VOICE_ID", "Naina" if provider == "vapi" else "")
+    v = {"provider": provider, "voiceId": voice_id}
+    if provider == "vapi":
+        v["version"] = _env("VOICE_VERSION", "2")   # the spec defines version as the string "1" | "2" | "latest"
+        v["language"] = "en"                         # V2 auto-detects language otherwise; pin English
+    speed = _env("VOICE_SPEED")
+    if speed:
+        v["speed"] = float(speed)
+    return v

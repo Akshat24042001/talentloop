@@ -14,12 +14,13 @@ import secrets
 import time
 
 from . import llm, prompts
+from . import proctor as proctor_mod
 
 log = logging.getLogger("brain")
 
 END_PHRASE = "this concludes our interview"
-CLOSING = ("That brings us to the end. Thank you for your time today. "
-           "The HR team will review this and get back to you. Thank you, " + END_PHRASE + ".")
+CLOSING = ("That's everything I wanted to ask. Thanks so much for your time today, I really enjoyed the conversation. "
+           "The HR team will go through it and get back to you soon. Take care, and " + END_PHRASE + ".")
 TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "8"))
 END_BUFFER_SEC = 40          # below this remaining time, wrap up
 MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "3")) + 1
@@ -139,10 +140,11 @@ def _first_name(plan: dict) -> str:
 
 def opening_message(plan: dict) -> str:
     q0 = plan["questions"][0]["ask"]
-    return (f"Hi {_first_name(plan)}, welcome. I'm the AI interviewer for the {plan.get('role', 'open')} role"
-            f"{' at ' + plan['company'] if plan.get('company') else ''}. This will take about {plan['duration_min']} minutes. "
-            "Take your time with each answer, I will wait while you think. "
-            "If you want a question repeated, just say so. Let's begin. " + q0)
+    company = f" at {plan['company']}" if plan.get("company") else ""
+    return (f"Hi {_first_name(plan)}, thanks for joining! I'm the AI interviewer for the {plan.get('role', 'open')} "
+            f"role{company}. We'll talk for about {plan['duration_min']} minutes. There are no trick questions, "
+            "so just answer the way you normally would, and take a moment to think whenever you need to. "
+            "If you'd like me to repeat anything, just ask. Okay, let's get started. " + q0)
 
 
 def _snap(st: dict) -> dict:
@@ -188,7 +190,7 @@ def start_session(rec: dict) -> str:
     st["last_say"] = first
     st["ai_n"] = 1
     st["log"].append({"role": "ai", "text": first, "q_id": plan["questions"][st["q_idx"]]["id"],
-                      "action": action, "t": round(st["active_before"])})
+                      "action": action, "t": round(st["active_before"]), "ts": now})
     rec["state"] = st
     rec["snapshots"] = [_snap(st)]
     rec["committed_seq"] = st["seq"]
@@ -303,6 +305,7 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str]) -> dict:
         facts=json.dumps(plan.get("company_facts", [])[:8]),
         question=q["ask"], covers=json.dumps(q["good_answer_covers"]),
         already=json.dumps(ctx["already"]), fu_used=st["fu_used"], fu_max=q["max_followups"],
+        next_q=(plan["questions"][st["q_idx"] + 1]["ask"] if st["q_idx"] + 1 < len(plan["questions"]) else "(none, this is the last question)"),
         recent=_recent(st), said=said[:2500],
     )
     return await asyncio.wait_for(
@@ -342,7 +345,7 @@ def prepare_turn(rec: dict, messages: list[dict]) -> dict:
     active = st["active_before"] + (time.time() - st["session_started"])
     allowed, progress = _allowed_actions(st, plan, active)
     rec["turn_seq"] = rec.get("turn_seq", 0) + 1
-    return {"st": st, "said": said, "active": active, "allowed": allowed, "progress": progress,
+    return {"st": st, "said": said, "active": active, "allowed": allowed, "progress": progress, "ts": time.time(),
             "req": rec["turn_seq"], "ai_n": sum(1 for m in messages if m.get("role") == "assistant" and _content(m)) + 1}
 
 
@@ -415,9 +418,11 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
     if failed:
         st["judge_failures"] = st.get("judge_failures", 0) + 1
 
-    st["log"].append({"role": "candidate", "text": said, "q_id": q["id"], "t": round(active)})
+    now = time.time()
+    st["log"].append({"role": "candidate", "text": said, "q_id": q["id"], "t": round(active),
+                      "ts": prep.get("ts", now)})
     st["log"].append({"role": "ai", "text": say, "q_id": qs[st["q_idx"]]["id"], "action": action,
-                      "t": round(active), "judge_ms": latency_ms, **({"fallback": True} if failed else {})})
+                      "t": round(active), "ts": now, "judge_ms": latency_ms, **({"fallback": True} if failed else {})})
     st["last_active"] = active
     st["last_say"] = say
     st["ai_n"] = prep["ai_n"]
@@ -486,25 +491,8 @@ def _verify_quote(quote: str, cand_lines: list[str]) -> str:
     return "approx" if best >= 0.8 else "unverified"
 
 
-def proctoring_summary(events: list[dict]) -> dict:
-    counts: dict[str, int] = {}
-    hidden_secs, hidden_at = 0.0, None
-    for ev in sorted(events, key=lambda e: e.get("ts", 0)):
-        typ = ev.get("type", "?")
-        counts[typ] = counts.get(typ, 0) + 1
-        if typ == "tab_hidden":
-            hidden_at = ev.get("ts")
-        elif typ == "tab_visible" and hidden_at:
-            hidden_secs += max(0, (ev.get("ts", 0) - hidden_at) / 1000)
-            hidden_at = None
-    flags = []
-    if counts.get("tab_hidden", 0) >= 3 or hidden_secs > 30:
-        flags.append(f"Left the interview tab {counts.get('tab_hidden', 0)} times ({int(hidden_secs)}s total)")
-    if counts.get("fullscreen_exit", 0) >= 2:
-        flags.append(f"Exited fullscreen {counts['fullscreen_exit']} times")
-    if counts.get("no_face", 0) >= 3:
-        flags.append("Camera showed no face several times")
-    return {"counts": counts, "hidden_seconds": int(hidden_secs), "flags": flags}
+def proctoring_summary(rec: dict) -> dict:
+    return proctor_mod.summary(rec)
 
 
 async def _score_once(rec: dict, transcript: str, model: str) -> dict:
@@ -640,8 +628,9 @@ async def score_interview(rec: dict) -> dict:
     if st.get("reconnects"):
         review.append(f"Call reconnected {st['reconnects']} time(s)")
 
-    proctor = proctoring_summary(rec.get("events", []))
-    review += proctor["flags"]
+    proctor = proctor_mod.summary(rec)
+    if proctor["reasons"]:
+        review.append(f"Integrity risk {proctor['risk'].upper()}: " + "; ".join(proctor["reasons"]))
 
     rep["computed"] = {
         "overall": overall,

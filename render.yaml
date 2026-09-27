@@ -23,3 +23,14 @@ services:
         sync: false
       - key: LLM_MOCK
         value: "0"
+      # Persistent storage for interviews and recordings (Backblaze B2 free, see DEPLOY.md).
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: RECONNECT_WINDOW_SEC
+        value: "30"
