@@ -60,6 +60,19 @@ async def _startup():
         asyncio.create_task(_sweeper())
 
 
+@app.middleware("http")
+async def _no_stale_pages(req: Request, call_next):
+    """Pages, scripts, styles and samples must be revalidated on every load (cheap: ETag -> 304). Without a
+    Cache-Control header browsers guess a lifetime and can pair a new page with an old script after a deploy,
+    which breaks the page."""
+    resp = await call_next(req)
+    p = req.url.path
+    if req.method == "GET" and (p == "/" or p.endswith((".html", ".js", ".mjs", ".css", ".json"))) \
+            and not p.startswith(("/api/", "/media/", "/vendor/")):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 def require_admin(req: Request):
     if not ADMIN_KEY:
         return

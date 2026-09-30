@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>New interview · TalentLoop</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=e797113-2">
 <style>
   .steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
   .steps span{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--muted);padding:6px 12px;border-radius:99px;background:var(--card);border:1px solid var(--line)}
@@ -106,14 +106,25 @@
   </div>
 </div>
 
-<script src="/common.js"></script>
+<script src="/common.js?v=e797113-2"></script>
 <script>
 renderNav('new');
 document.querySelectorAll('.filebtn span').forEach(sp => sp.insertAdjacentHTML('beforebegin', icon('file', 15)));
 let PLAN = null, INPUTS = null, PLAN_WARN = [], PUBLIC_BASE = location.origin, SAMPLES = [];
 function step(n){ [1, 2, 3].forEach(i => { $('st' + i).className = i < n ? 'done' : i === n ? 'on' : ''; }); }
 
+async function loadSamples(){
+  // Public static file: load it first, so the admin-key prompt or a slow health check can't hold it up.
+  try{
+    const r = await fetch('/samples/index.json', {cache: 'no-cache'});
+    if (!r.ok) throw new Error(r.status);
+    SAMPLES = await r.json();
+    $('sampleSel').innerHTML = SAMPLES.map(s => `<option value="${esc(s.id)}">${esc(s.role)} · ${esc(s.candidate)}</option>`).join('');
+  }catch{ $('sampleSel').innerHTML = '<option value="">No samples available</option>'; }
+}
+
 async function init(){
+  loadSamples();
   try{
     const h = await api('/api/health');
     if (h.public_url) PUBLIC_BASE = h.public_url.replace(/\/$/, '');
@@ -126,10 +137,6 @@ async function init(){
     if (!h.ffmpeg) bits.push('<span class="chip warn">ffmpeg missing: recordings will not be seekable</span>');
     $('health').innerHTML = bits.join(' ');
   }catch(e){ $('health').innerHTML = `<span class="chip bad">Server not reachable: ${esc(e.message)}</span>`; }
-  try{
-    SAMPLES = await (await fetch('/samples/index.json')).json();
-    $('sampleSel').innerHTML = SAMPLES.map(s => `<option value="${esc(s.id)}">${esc(s.role)} · ${esc(s.candidate)}</option>`).join('');
-  }catch{ $('sampleSel').innerHTML = '<option value="">No samples available</option>'; }
 }
 
 $('sampleBtn').onclick = async () => {

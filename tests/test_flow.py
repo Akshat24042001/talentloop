@@ -283,6 +283,15 @@ def main():
     iid7 = c.post("/api/interviews", json={"plan": plan, "inputs": inp}).json()["id"]
     assert c.post(f"/api/interviews/{iid7}/close").json()["status"] == "cancelled"
     assert c.post(f"/api/interviews/{iid7}/assistant").status_code == 409
+    # after a deploy, a browser must never pair a new page with an old cached script
+    import re as _re
+    for pg in ("/hr.html", "/dashboard.html", "/report.html", "/interview.html"):
+        r = c.get(pg)
+        assert r.headers.get("cache-control") == "no-cache", (pg, r.headers.get("cache-control"))
+        assert not _re.search(r'(src|href)="/(common|charts)\.js"|href="/style\.css"', r.text), f"{pg} loads an unversioned asset"
+    assert c.get("/common.js").headers.get("cache-control") == "no-cache"
+    idx = c.get("/samples/index.json").json()
+    assert len(idx) >= 7 and all(c.get("/samples/" + s[k]).status_code == 200 for s in idx for k in ("jd", "resume", "questions"))
     print("HR FEATURES: OK")
     integrity_checks(inp, plan)
     no_question_loop()
