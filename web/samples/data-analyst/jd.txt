@@ -1,0 +1,21 @@
+Data Analyst (1-3 years) - Bengaluru (Hybrid)
+
+About the role
+We help 60+ retail brands understand sales, inventory and customer behaviour. You will turn raw transaction data into dashboards and recommendations that category managers act on every week.
+
+Must have
+- Strong SQL: joins, window functions, CTEs, query performance on large tables
+- Excel or Google Sheets at an advanced level (pivots, lookups)
+- A BI tool: Power BI or Tableau, including data modelling
+- Python or R for analysis (pandas, basic statistics)
+- Clear communication of findings to non-technical stakeholders
+
+Good to have
+- A/B testing and experiment analysis
+- dbt, BigQuery or Snowflake
+- Retail or e-commerce domain experience
+
+Details
+- 2 days a week in office at Koramangala, Bengaluru
+- Analytics team of 5, reporting to the Analytics Manager
+- Interview process: AI first round, SQL case study, stakeholder round

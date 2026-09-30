@@ -1,0 +1,23 @@
+Priya Shah
+Pune | priya.shah@example.com
+
+Summary
+Frontend engineer with 3.5 years building React and TypeScript dashboards for fintech and logistics products.
+
+Experience
+Frontend Engineer, LedgerLeaf Fintech (Aug 2023 - Present)
+- Rebuilt the invoicing dashboard in React 18 + TypeScript for 900 SME customers
+- Cut initial bundle from 1.9 MB to 640 KB with route-based code splitting and tree-shaking, improving LCP from 4.1s to 1.8s
+- Built a reusable table component with virtualised rows (10k+ rows) used across 7 screens
+- Introduced React Query for server state; removed 40% of Redux boilerplate
+
+Junior Frontend Developer, Trackwise Logistics (Jun 2021 - Jul 2023)
+- Built shipment tracking screens with Redux Toolkit and Mapbox
+- Wrote 300+ unit tests with Jest and React Testing Library, coverage from 35% to 70%
+- Fixed accessibility issues found in an audit (keyboard navigation, colour contrast)
+
+Skills
+React, TypeScript, Redux Toolkit, React Query, Next.js (basic), Tailwind CSS, Storybook, Jest, RTL, Cypress, Git
+
+Education
+B.E. Information Technology, Savitribai Phule Pune University, 2021

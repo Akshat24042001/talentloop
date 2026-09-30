@@ -1,0 +1,21 @@
+Siddharth Rao
+Hyderabad | siddharth.rao@example.com
+
+Summary
+DevOps engineer with 4 years automating AWS and Kubernetes infrastructure for SaaS companies.
+
+Experience
+DevOps Engineer, Stackrise SaaS (May 2022 - Present)
+- Migrated 28 services from EC2 to EKS with Helm and ArgoCD; deployment time from 45 to 8 minutes
+- Wrote Terraform modules for VPC, EKS and RDS used by 4 teams
+- Reduced AWS bill by 31% with rightsizing, Savings Plans and spot node groups
+- Set up Prometheus, Grafana and PagerDuty alerting; MTTR down from 70 to 25 minutes
+
+System Engineer, Infoline Services (Jul 2020 - Apr 2022)
+- Managed Linux servers and Jenkins pipelines for 12 applications
+
+Skills
+AWS, Kubernetes (EKS), Terraform, Helm, ArgoCD, GitHub Actions, Jenkins, Docker, Prometheus, Grafana, Bash, Python
+
+Certifications
+AWS Certified Solutions Architect - Associate; CKA

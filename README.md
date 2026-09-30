@@ -20,7 +20,7 @@ Vapi handles the hard real-time parts: browser audio, speech-to-text, text-to-sp
 ## How it works
 
 ```
-HR page ──> /api/plan (SMART_MODEL) ──> HR reviews/edits plan ──> candidate link
+New interview ──> /api/plan (SMART_MODEL) ──> HR reviews/edits plan ──> candidate link
                                                                      │
 Candidate browser (interview.html) ── Vapi web SDK ── Vapi cloud (STT, TTS, turn-taking)
                                                          │  every candidate turn
@@ -44,7 +44,7 @@ The interviewer's possible actions each turn are: follow up, next question, repe
 3. Start a tunnel: `cloudflared tunnel --url http://localhost:8000`, then copy the `https://....trycloudflare.com` URL.
 4. `cp .env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `ADMIN_KEY`.
 5. `uvicorn backend.main:app --host 0.0.0.0 --port 8000` (one worker only: interview locks live in process memory)
-6. Open `http://localhost:8000` (the HR page). The top line must show no red warnings.
+6. Open `http://localhost:8000` (the Interviews dashboard; **New interview** creates one). No red warnings should show at the top.
 
 Quick checks before spending money:
 - `LLM_MOCK=1 python -m tests.test_flow` tests the whole flow with a fake AI. It should print `ALL CHECKS PASSED`.
@@ -56,7 +56,7 @@ Note: cloudflared quick-tunnel URLs change every restart. Update `PUBLIC_URL` an
 
 **Saturday night (setup and first call)**
 - Get the tests passing, then do a text rehearsal with the sample data. Read every AI line. Is it natural? Are the follow-ups sharp?
-- Do one real voice call yourself: HR page → sample data → generate → create link → open the link in Chrome.
+- Do one real voice call yourself: New interview → pick a sample role → generate → create link → open the link in Chrome.
 - If Vapi rejects the call config, open browser devtools. The error names the field. The likeliest culprit is the voice: set `VOICE_PROVIDER`/`VOICE_ID` to any voice from your Vapi dashboard.
 
 **Sunday (real people)**
@@ -73,14 +73,14 @@ Note: cloudflared quick-tunnel URLs change every restart. Update `PUBLIC_URL` an
 | All planned questions asked | Report: questions asked x/y | 100% when on time |
 | Follow-ups relevant, not repetitive | Read the transcript | Your judgment, honestly |
 | Turn latency | Report: avg live turn latency (LLM only) | < 1500 ms |
-| AI vs your score | HR page: calibration line | ≥ 80% within ±1 |
+| AI vs your score | Dashboard: agreement line | ≥ 80% within ±1 |
 | Evidence verified | Report: x/y verified | ≥ 90% |
 
 If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and restart.
 
 ## Showing it to people (demo script)
 
-1. On the HR page, paste their JD, resume and questions → **Generate**. Show the plan: "HR approves exactly what gets asked."
+1. On the New interview page, paste their JD, resume and questions (or pick one of the 7 sample roles) → **Generate**. Show the plan: "HR approves exactly what gets asked."
 2. **Create the link** and have someone take the interview live on their own laptop.
 3. Deliberately test it in front of them. Give a vague answer (watch the follow-up), say "can you repeat that", and ask "what's the salary?".
 4. Open the report: recommendation, per-question scores, evidence quotes with timestamps, resume claims checked, flags.
@@ -104,7 +104,10 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 
 **Integrity (proctoring) report, available immediately, even if AI scoring fails**
 - Risk level (low/medium/high) with plain-English reasons, and a timeline of every event linked to the question being asked.
-- Tab switches and time away, other windows focused, full-screen exits, copy/paste/cut, right-click, shortcuts, Print Screen, suspected developer tools, a shrunk window, a second monitor.
+- **Leaving the interview is confronted, not just logged.** When the candidate switches tab, window or app (or plugs in a second monitor), the AI interviewer says a warning out loud and the page shows it. After the HR-set number of warnings (default 2), the interviewer ends the interview and it is marked **Disqualified**. The count lives on the server, so reloading doesn't reset it, and a disqualified link can't be rejoined. The next link for the same email warns HR.
+- **Screenshot of the screen at the moment of switching** (when screen sharing is on), paired with a camera photo, shown as "Flagged moments" on the report.
+- **One screen only** (optional per interview): a second monitor blocks the start (`screen.isExtended`, Chrome/Edge) and counts as leaving if connected mid-interview.
+- Tab switches and time away, other windows focused, full-screen exits, copy/paste/cut, right-click, shortcuts, Print Screen, suspected developer tools, a shrunk window.
 - Face checks in the browser (MediaPipe, self-hosted): no face, more than one person. A snapshot is taken each time, plus a reference photo at the start and one every minute.
 - Microphone muted (count and duration), voice detected while muted, camera or mic switched off, lost connection.
 - Required entire-screen sharing (optional per interview): refuses windows and tabs, and records and blocks with an overlay when sharing stops.
@@ -113,13 +116,16 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 **Interview flow**
 - Rejoin window after a drop (default 30 s, set per interview). After it, the server refuses to reopen the interview, closes it and scores what was done. A deliberate "End interview" can't be undone.
 - Links can be scheduled (open-from time) and expire.
-- The candidate sees progress (Question 3 of 7, time left), live captions of the AI and of what it heard them say, a mute button, a speaker test, and a system check (camera, mic, face, screen) before starting.
+- A video-call interface: AI interviewer tile with a voice visualiser, the candidate's camera, their shared screen live, the **current question on screen** (follow-ups show which question they belong to), live captions, and icon controls (mic, camera locked on, screen share, captions, hang up). Works on phones when screen sharing isn't required.
+- The candidate is **never told the length or the number of questions**, before or during the interview.
+- Camera, microphone and screen sharing all stop when the interview ends.
 - Natural voice: Vapi "Naina" (Indian English, Vapi's Version 2 model), plus a warmer interviewer script and conversational acknowledgements.
 - Silence handling: gentle check-ins, then a polite hang-up after 2 minutes of silence.
 - Optional questions are skipped automatically when time is short, so HR's mandatory questions are always asked.
 
 **Reports and data**
 - Download a **PDF report** (summary, integrity, snapshots, per-question scores with verified quotes, resume claims, sessions and consent, full transcript), the transcript (TXT), all data (JSON), or **everything in one ZIP** (PDF + transcript + data + all videos and snapshots). There's also a CSV export of all interviews.
+- Charts: score by question (AI vs your score), competencies, time per question, and an integrity timeline with the interviewer's warnings. Questions are named by their text, never by an id like "q3".
 - Per-question time, words and follow-ups, the candidate's share of talk time, and AI fallback count.
 - HR scores per question, decision and notes, and calibration (AI vs HR agreement).
 - Consent record (time, IP, browser), candidate feedback rating, a delete-everything button and an optional retention period (`RETENTION_DAYS`).
@@ -144,5 +150,6 @@ Read `REVIEW.md` before running real candidates. Hosting: see `DEPLOY.md`. It li
 - `backend/prompts.py`: all prompts. Tune here first.
 - `backend/vapi_config.py`: voice, STT, turn-taking and end-call settings.
 - `backend/main.py`: API, custom LLM endpoint and webhook.
-- `web/hr.html`, `web/interview.html`, `web/report.html`: the three screens.
-- `tools/rehearse.py`: typed rehearsal. `tests/test_flow.py`: end-to-end test.
+- `web/dashboard.html` (all interviews), `web/hr.html` (new interview), `web/interview.html` (candidate call), `web/report.html` (report); `web/charts.js` draws the charts.
+- `web/samples/`: sample JD, resume and HR questions for 7 roles (`index.json` lists them).
+- `tools/rehearse.py`: typed rehearsal. `tests/test_flow.py`: end-to-end API test. `tests/e2e_browser.py`: real-Chromium test (warnings, disqualification, second screen, recordings).

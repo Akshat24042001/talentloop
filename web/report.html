@@ -2,57 +2,95 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Interview report</title>
+<title>Interview report · TalentLoop</title>
 <link rel="stylesheet" href="/style.css">
 <style>
+  .head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .head h1{font-size:26px}
+  .head .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:13px;color:var(--muted)}
+  .dl{display:flex;flex-wrap:wrap;gap:8px}
+  .dq{display:flex;gap:14px;align-items:flex-start;background:var(--bad-soft);color:var(--bad);border:1px solid color-mix(in srgb,var(--bad) 35%,transparent);border-radius:var(--r);padding:16px 18px;margin-bottom:16px}
+  .dq b{display:block;font-size:16px;margin-bottom:2px} .dq p{margin:4px 0 0;color:var(--ink)} .dq svg{flex:none;margin-top:2px}
+  .dq ol{margin:8px 0 0;padding-left:20px;color:var(--ink);font-size:14px}
+  .summary{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:16px} @media (max-width:900px){.summary{grid-template-columns:1fr}}
+  .hero .k{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
+  .hero .rec{font-size:34px;font-weight:800;line-height:1.1;margin:6px 0 2px}
+  .hero .num{font-size:44px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums} .hero .num small{font-size:18px;color:var(--muted);font-weight:600}
+  .meterbar{height:8px;border-radius:0 4px 4px 0;background:var(--track);margin:10px 0 6px;position:relative}
+  .meterbar i{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;background:var(--series-1)}
+  .kv2{display:grid;grid-template-columns:1fr auto;gap:8px 12px;font-size:14px}
+  .kv2 span:nth-child(odd){color:var(--muted)} .kv2 span:nth-child(even){font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+  .risk{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:99px;font-weight:800;font-size:15px}
+  .risk.low{background:var(--ok-soft);color:var(--ok)} .risk.medium{background:var(--warn-soft);color:var(--warn)} .risk.high{background:var(--bad-soft);color:var(--bad)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:860px){.grid2{grid-template-columns:1fr}}
+  .flag{display:flex;gap:8px;align-items:flex-start;background:var(--warn-soft);color:var(--warn);padding:9px 12px;border-radius:10px;margin:6px 0;font-size:14px}
+  .flag svg{flex:none;margin-top:2px}
+  .flag.bad{background:var(--bad-soft);color:var(--bad)}
+  ul.clean{margin:0;padding-left:18px} ul.clean li{margin:4px 0}
   .ev{border-left:3px solid var(--line);padding:4px 10px;margin:6px 0;font-size:14px}
   .ev.exact,.ev.approx{border-color:var(--ok)} .ev.unverified{border-color:var(--bad)} .ev.other_question{border-color:var(--warn)}
-  .score{font-size:22px;font-weight:700}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:760px){.grid2{grid-template-columns:1fr}}
-  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-  .tx{font-size:13px;max-height:520px;overflow:auto}
-  .tx div{padding:3px 0}
-  .flag{background:#fff7e6;color:#7a4b00;padding:10px 12px;border-radius:8px;margin:6px 0;font-size:14px}
-  .risk{display:inline-block;padding:4px 12px;border-radius:99px;font-weight:700;font-size:15px}
-  .risk.low{background:#e7f6ef;color:var(--ok)} .risk.medium{background:#fff4e0;color:var(--warn)} .risk.high{background:#fdecea;color:var(--bad)}
-  .stat{border:1px solid var(--line);border-radius:10px;padding:10px}
-  .stat b{display:block;font-size:20px}
+  .score{font-size:24px;font-weight:800}
+  .tiles3{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .tiles3 .stat .v{font-size:19px}
   .t{cursor:pointer;color:var(--brand);font-variant-numeric:tabular-nums;white-space:nowrap}
   .t:hover{text-decoration:underline}
-  tr.high td{color:var(--bad)} tr.medium td:first-child{color:var(--warn)}
-  .snaps{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-  .snaps figure{margin:0} .snaps img{width:100%;border-radius:6px;display:block;background:#000}
+  tr.high td:nth-child(3){color:var(--bad);font-weight:600} tr.medium td:nth-child(3){color:var(--warn)}
+  .qref{max-width:280px;font-size:13px}
+  .moments{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+  .moment{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+  .moment .shot{position:relative;aspect-ratio:16/10;background:#000}
+  .moment .shot>a>img{width:100%;height:100%;object-fit:contain;display:block}
+  .moment .inset{position:absolute;right:8px;bottom:8px;width:32%;border-radius:8px;overflow:hidden;border:2px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  .moment .inset img{width:100%;display:block}
+  .moment .cap{padding:8px 10px;font-size:13px}
+  .moment .cap b{display:block}
+  .moment.cam-only .shot>a>img{object-fit:cover}
+  .snaps{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .snaps figure{margin:0} .snaps img{width:100%;border-radius:6px;display:block;background:#000;aspect-ratio:4/3;object-fit:cover}
   .snaps figcaption{font-size:12px;color:var(--muted)}
-  .snaps figure.flagged img{outline:3px solid var(--bad)}
-  .dl{display:flex;flex-wrap:wrap;gap:8px}
   .players{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media(max-width:760px){.players{grid-template-columns:1fr}}
-  .players video{width:100%;border-radius:8px;background:#000}
-  .kv{display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:14px}
-  .sticky{position:sticky;top:0;z-index:5}
-  @media (prefers-color-scheme: dark){.flag{background:#3a2c10;color:#ffd58a}.risk.low{background:#10301f}.risk.medium{background:#3a2c10}.risk.high{background:#3a1616}}
-  @media print{.actions,.dl,button,select,textarea,video,audio{display:none!important}.card{break-inside:avoid}}
+  .players video{width:100%;border-radius:10px;background:#000;display:block}
+  .kv{display:grid;grid-template-columns:170px 1fr;gap:6px 12px;font-size:14px} @media(max-width:600px){.kv{grid-template-columns:1fr}}
+  .tx{font-size:14px;max-height:620px;overflow:auto}
+  .tx .line{padding:5px 0;display:grid;grid-template-columns:62px 1fr;gap:8px}
+  .tx .qhead{margin:14px 0 4px;padding:8px 10px;background:var(--brand-soft);border-radius:8px;font-weight:600;font-size:13px}
+  .tx .ai b{color:var(--muted)} .tx .warnline{background:var(--bad-soft);border-radius:8px;padding:6px 8px}
+  .qcard-h{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start}
+  .qnum{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--brand)}
+  .qask{font-size:16px;font-weight:650;margin:4px 0 8px}
+  .hrbox{min-width:140px}
+  .section-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  @media print{.topnav,.dl,.actions,button,select,textarea,video,audio,.chart-tip{display:none!important}.card{break-inside:avoid;box-shadow:none}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <p class="small"><a href="/hr.html">&larr; All interviews</a></p>
+  <p class="small" style="margin:0 0 12px"><a href="/dashboard.html">&larr; All interviews</a></p>
   <div id="root">Loading...</div>
 </div>
 <script src="/common.js"></script>
+<script src="/charts.js"></script>
 <script>
+renderNav('dashboard');
 const iid = new URLSearchParams(location.search).get('id');
-let REC = null, timer = null, PARTS = [];
+let REC = null, timer = null, PARTS = [], QIDX = {};
+const TYPE_LABEL = {warmup: 'Warm-up', hr_mandatory: 'HR question', resume_probe: 'Resume deep-dive', jd_skill: 'Skill check', behavioral: 'Behavioral'};
+const REASON_LABEL = {reference: 'Start of interview', periodic: 'Routine', tab_hidden: 'Left the interview tab', window_blur: 'Switched to another window',
+  tab_hidden_away: 'Still away from the interview', window_blur_away: 'Still in another window', tab_return: 'Came back', multi_monitor: 'Second screen connected',
+  no_face: 'No face on camera', multiple_faces: 'More than one face', share_stopped: 'Screen sharing stopped', voice_while_muted: 'Voice while muted'};
 
-function mmss(t){ if (t == null) return '-'; t = Math.round(t); const neg = t < 0; t = Math.abs(t); return (neg?'-':'') + String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0'); }
-function when(ts){ return ts ? new Date(ts*1000).toLocaleString() : '-'; }
-function apiUrl(path){ return path + (adminKey() ? (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(adminKey()) : ''); }
+function mmss(t){ if (t == null) return '-'; t = Math.round(t); const neg = t < 0; t = Math.abs(t); return (neg ? '-' : '') + String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
 function dlUrl(f){ const u = mediaUrl(iid, f); return u + (u.includes('?') ? '&' : '?') + 'download=1'; }
-function mb(b){ return b ? (b/1e6).toFixed(1) + ' MB' : ''; }
-function norm(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+function mb(b){ return b ? (b / 1e6).toFixed(1) + ' MB' : ''; }
+function norm(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+function short(s, n = 70){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; }
+function qInfo(qid){ return QIDX[qid] || null; }
+function qRef(qid, n = 60){ const q = qInfo(qid); return q ? `Q${q.n} · ${short(q.ask, n)}` : '-'; }
 
 async function load(){
   try{ REC = await api(`/api/interviews/${iid}`); }catch(e){ $('root').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
-  const keepScroll = scrollY; render(); scrollTo(0, keepScroll);
+  const keepScroll = scrollY; const openDetails = [...document.querySelectorAll('details[open]')].map(d => d.id).filter(Boolean);
+  render(); openDetails.forEach(id => $(id) && ($(id).open = true)); scrollTo(0, keepScroll);
   clearTimeout(timer);
   const sc = REC.scoring || {};
   if (sc.state === 'running' || REC.status === 'in_progress' || ((REC.status === 'completed' || REC.status === 'incomplete') && !REC.report && sc.state !== 'failed'))
@@ -61,88 +99,171 @@ async function load(){
 
 // Jump every video part to the moment `ts` (server time, seconds) and play the camera part.
 function jump(ts){
-  if (!ts || !PARTS.length){ return; }
+  if (!ts || !PARTS.length) return;
   const cams = PARTS.filter(p => p.kind === 'candidate_video');
-  const pick = (list) => { let best = null; for (const p of list){ if (p.started_at <= ts + 1 && (!best || p.started_at > best.started_at)) best = p; } return best || list[0]; };
+  const pick = list => { let best = null; for (const p of list){ if (p.started_at <= ts + 1 && (!best || p.started_at > best.started_at)) best = p; } return best || list[0]; };
   const c = pick(cams.length ? cams : PARTS);
   document.querySelectorAll('video[data-file]').forEach(v => {
     const p = PARTS.find(x => x.file === v.dataset.file); if (!p) return;
-    if (p === c || (p.kind === 'screen_video' && p.session === c.session)){ v.currentTime = Math.max(0, ts - p.started_at - 1); if (p === c){ v.play().catch(()=>{}); } }
+    if (p === c || (p.kind === 'screen_video' && p.session === c.session)){ v.currentTime = Math.max(0, ts - p.started_at - 1); if (p === c) v.play().catch(() => {}); }
   });
-  $('recordings').scrollIntoView({behavior:'smooth', block:'start'});
+  $('recordings').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
-function tlink(ts, label){ return ts ? `<span class="t" onclick="jump(${ts})" title="Play the recording from here">${esc(label)}</span>` : esc(label); }
+function tlink(ts, label){ return ts ? `<span class="t" onclick="jump(${+ts})" title="Play the recording from here">${esc(label)}</span>` : esc(label); }
+
+function merged(st){
+  const log = (st.log || []).map(e => Object.assign({}, e));
+  for (const w of REC.warnings || []){
+    const prev = log.filter(e => (e.ts || 0) <= w.at);
+    log.push({role: 'ai', text: w.say, q_id: w.q_id, ts: w.at, t: prev.length ? prev[prev.length - 1].t : 0, action: w.action === 'terminate' ? 'integrity_termination' : 'integrity_warning'});
+  }
+  return log.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+}
 
 function render(){
-  const p = REC.plan, rep = REC.report, st = REC.state || {log:[], notes:{}}, pr = REC.proctoring, stats = REC.stats || {};
+  const p = REC.plan, rep = REC.report, st = REC.state || {log: [], notes: {}}, pr = REC.proctoring, stats = REC.stats || {};
   const hr = REC.hr || {}; const hrs = hr.scores || {}, set = REC.settings || {};
   const start = REC.started_at;
-  PARTS = (REC.media || []).filter(m => m.kind === 'candidate_video' || m.kind === 'screen_video').sort((a,b) => (a.started_at||0) - (b.started_at||0));
+  QIDX = Object.fromEntries(p.questions.map((q, i) => [q.id, Object.assign({n: i + 1}, q)]));
+  PARTS = (REC.media || []).filter(m => m.kind === 'candidate_video' || m.kind === 'screen_video').sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
   const qstat = Object.fromEntries((stats.per_question || []).map(x => [x.q_id, x]));
-  const logTs = st.log.filter(e => e.role === 'candidate');
+  const logTs = (st.log || []).filter(e => e.role === 'candidate');
+  const qres = Object.fromEntries(((rep && rep.questions) || []).map(q => [q.q_id, q]));
+  const dq = REC.disqualified, warns = REC.warnings || [];
 
-  let h = `<div class="card"><h1>${esc(p.candidate_name || 'Candidate')} · ${esc(p.role)}</h1>
-    <p class="muted small">${esc(p.company||'')} · ${esc(set.candidate_email || '')} · status: <b>${esc(REC.status)}</b>${REC.ended_early?' (ended early)':''} · created ${when(REC.created_at)} · link expires ${when(REC.expires_at)}</p>
-    <div class="dl">
-      <a class="btn primary" href="${apiUrl(`/api/interviews/${iid}/report.pdf`)}">Download PDF report</a>
-      <a class="btn" href="${apiUrl(`/api/interviews/${iid}/bundle.zip`)}">Download everything (ZIP)</a>
-      <a class="btn" href="${apiUrl(`/api/interviews/${iid}/transcript.txt`)}">Transcript (TXT)</a>
-      <a class="btn" href="${apiUrl(`/api/interviews/${iid}/export.json`)}">Data (JSON)</a>
-      <button onclick="window.print()">Print</button>
-    </div>
+  // ---- header
+  let h = `<div class="card"><div class="head"><div>
+      <h1>${esc(p.candidate_name || 'Candidate')}</h1>
+      <div class="meta"><span><b style="color:var(--ink)">${esc(p.role || '')}</b>${p.company ? ' · ' + esc(p.company) : ''}</span>
+        ${set.candidate_email ? `<span>· ${esc(set.candidate_email)}</span>` : ''}
+        <span class="chip ${STATUS_CLASS[REC.status] || ''}">${esc(STATUS_LABEL[REC.status] || REC.status)}</span>
+        ${dq ? `<span class="chip bad">${icon('alert', 12)} Disqualified</span>` : REC.ended_early ? '<span class="chip warn">Ended early</span>' : ''}</div>
+      <div class="meta">${start ? `Interviewed ${esc(when(start))}` : `Created ${esc(when(REC.created_at))} · link expires ${esc(when(REC.expires_at))}`}</div></div>
+      <div class="dl">
+        <a class="btn primary" href="${withKey(`/api/interviews/${iid}/report.pdf`)}">${icon('download', 16)}Download PDF report</a>
+        <a class="btn" href="${withKey(`/api/interviews/${iid}/bundle.zip`)}">Download everything (ZIP)</a>
+      </div></div>
     <div class="actions">
-      <button id="scoreBtn" ${REC.state?'':'disabled'}>${rep?'Re-score with AI':'Score now'}</button>
-      ${REC.status==='in_progress'||REC.status==='created'?'<button id="closeBtn">Close interview</button>':''}
-      <button id="copyLink">Copy candidate link</button>
-      <button id="delBtn">Delete all data</button>
+      <a class="btn sm" href="${withKey(`/api/interviews/${iid}/transcript.txt`)}">Transcript (TXT)</a>
+      <a class="btn sm" href="${withKey(`/api/interviews/${iid}/export.json`)}">Data (JSON)</a>
+      <button class="sm" onclick="window.print()">Print</button>
+      <button class="sm" id="scoreBtn" ${REC.state ? '' : 'disabled'}>${icon('sparkle', 15)}${rep ? 'Re-score with AI' : 'Score now'}</button>
+      ${REC.status === 'in_progress' || REC.status === 'created' ? '<button class="sm" id="closeBtn">Close interview</button>' : ''}
+      <button class="sm" id="copyLink">${icon('link', 15)}Copy candidate link</button>
+      <button class="sm ghost bad" id="delBtn">Delete all data</button>
     </div>
-    ${(REC.scoring||{}).state==='running'?'<p class="small muted">AI scoring in progress, this page refreshes automatically...</p>':''}
-    ${(REC.scoring||{}).state==='failed'?`<div class="err">AI scoring failed: ${esc(REC.scoring.error)}. Click "Score now" to retry. The integrity report and recordings below do not depend on it.</div>`:''}</div>`;
+    ${(REC.scoring || {}).state === 'running' ? '<p class="small muted">AI scoring in progress, this page refreshes automatically...</p>' : ''}
+    ${(REC.scoring || {}).state === 'failed' ? `<div class="err">AI scoring failed: ${esc(REC.scoring.error)}. Click "Score now" to retry. The integrity report and recordings below do not depend on it.</div>` : ''}</div>`;
+
+  // ---- disqualification
+  if (dq) h += `<div class="dq">${icon('alert', 26)}<div><b>Interview stopped: rules broken after ${warns.length - 1} warning${warns.length - 1 === 1 ? '' : 's'}</b>
+      <p>${esc(dq.reason || '')}</p>
+      <ol>${warns.map(w => `<li>${tlink(w.at, mmss(start ? w.at - start : null))} · ${esc({tab_hidden: 'Left the interview tab', window_blur: 'Switched to another window', multi_monitor: 'Second screen connected'}[w.type] || w.type)}${w.q_id ? ` during <i>${esc(qRef(w.q_id, 50))}</i>` : ''}: “${esc(w.say)}”</li>`).join('')}</ol></div></div>`;
+  else if (warns.length) h += `<div class="flag" style="margin-bottom:16px">${icon('alert', 16)}<span>The interviewer warned the candidate ${warns.length} time${warns.length > 1 ? 's' : ''} for leaving the interview. See the flagged moments below.</span></div>`;
 
   // ---- summary
+  const c = (rep && rep.computed) || {};
+  const overall = typeof c.overall === 'number' ? c.overall : null;
+  h += `<div class="summary">
+    <div class="card hero"><div class="k">AI recommendation <span style="text-transform:none;font-weight:500">(HR decides)</span></div>
+      ${rep ? `<div class="rec ${REC_CLASS[rep.recommendation] || ''}">${esc(REC_LABEL[rep.recommendation] || rep.recommendation)}</div>
+        <div class="small muted">Confidence: ${esc(rep.confidence || '-')}</div>` : `<div class="rec muted" style="font-size:22px">${REC.status === 'in_progress' ? 'Interview in progress' : REC.status === 'created' ? 'Not taken yet' : 'Not scored yet'}</div>`}
+      <div class="k" style="margin-top:16px">Overall score</div>
+      <div class="num">${overall != null ? overall.toFixed(1) : '-'}<small> / 5</small></div>
+      <div class="meterbar" role="img" aria-label="Overall ${overall ?? 'not scored'} out of 5"><i style="width:${overall != null ? overall / 5 * 100 : 0}%"></i></div>
+      <div class="small muted">Weighted by competency, computed from the per-question scores.</div></div>
+    <div class="card"><h3>Interview facts</h3><div class="kv2">
+      <span>Questions answered</span><span>${esc(c.questions_asked ?? (stats.per_question || []).length)} of ${esc(c.questions_planned ?? p.questions.length)}</span>
+      <span>Evidence quotes verified</span><span>${esc(c.evidence_verified ?? '-')}</span>
+      <span>Active time</span><span>${esc(stats.active_minutes ?? '-')} min</span>
+      <span>Candidate talk share</span><span>${stats.candidate_talk_share != null ? esc(stats.candidate_talk_share) + '%' : '-'}</span>
+      <span>Average answer</span><span>${stats.avg_answer_words != null ? esc(stats.avg_answer_words) + ' words' : '-'}</span>
+      <span>AI turn time</span><span>${c.avg_turn_latency_ms != null ? esc(c.avg_turn_latency_ms) + ' ms' : '-'}</span>
+      <span>Reconnects</span><span>${esc(stats.reconnects ?? 0)}</span></div></div>
+    <div class="card"><h3>Integrity</h3>
+      ${pr ? `<span class="risk ${pr.risk}">${pr.risk === 'low' ? '' : icon('alert', 15)}${esc(pr.risk.toUpperCase())} RISK</span>
+        <ul class="clean small" style="margin-top:10px">${pr.reasons.slice(0, 4).map(r => `<li>${esc(r)}</li>`).join('') || '<li class="ok">No integrity concerns detected.</li>'}</ul>
+        ${pr.reasons.length > 4 ? `<p class="small muted">+${pr.reasons.length - 4} more below</p>` : ''}` : '<p class="small muted">Available once the interview starts.</p>'}</div>
+  </div>`;
+
   if (rep){
-    const c = rep.computed || {};
-    h += `<div class="card"><div class="grid2">
-      <div><div class="muted small">AI recommendation (HR decides)</div>
-        <div class="big ${REC_CLASS[rep.recommendation]||''}">${esc(REC_LABEL[rep.recommendation]||rep.recommendation)}</div>
-        <div class="small">Confidence: ${esc(rep.confidence)} · Overall ${esc(c.overall ?? '-')} / 5</div></div>
-      <div class="small">Questions asked: ${esc(c.questions_asked)}/${esc(c.questions_planned)}<br>
-        Evidence quotes verified against transcript: ${esc(c.evidence_verified)}<br>
-        Avg AI turn time: ${esc(c.avg_turn_latency_ms ?? '-')} ms<br>
-        Scoring: ${esc(c.scoring_passes)} pass(es)${(c.scoring_models||[]).length?` (${c.scoring_models.map(esc).join(', ')})`:''}</div></div>
-      <p>${esc(rep.summary)}</p>
-      ${(rep.human_review_reasons||[]).map(r=>`<div class="flag">&#9888; ${esc(r)}</div>`).join('')}
-    </div>
-    <div class="card grid2">
-      <div><h3>Strengths</h3><ul>${(rep.strengths||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ul></div>
-      <div><h3>Concerns</h3><ul>${(rep.concerns||[]).map(s=>`<li>${esc(s)}</li>`).join('')}${(rep.red_flags||[]).map(s=>`<li class="bad">${esc(s)}</li>`).join('')}</ul></div>
-    </div>`;
-  } else {
-    h += `<div class="card muted">${REC.status==='in_progress' ? 'Interview in progress. Transcript and integrity signals below update live.' : REC.status==='created' ? 'Interview not taken yet.' : 'AI report not available yet.'}</div>`;
+    h += `<div class="card"><h2>Summary</h2><p style="margin-top:0">${esc(rep.summary)}</p>
+      ${(rep.human_review_reasons || []).map(r => `<div class="flag ${/^DISQUALIFIED/.test(r) ? 'bad' : ''}">${icon('alert', 15)}<span>${esc(r)}</span></div>`).join('')}
+      <div class="grid2" style="margin-top:14px">
+        <div><h3 class="ok">Strengths</h3><ul class="clean">${(rep.strengths || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li class="muted">None noted</li>'}</ul></div>
+        <div><h3 class="warn">Concerns</h3><ul class="clean">${(rep.concerns || []).map(s => `<li>${esc(s)}</li>`).join('')}${(rep.red_flags || []).map(s => `<li class="bad"><b>Red flag:</b> ${esc(s)}</li>`).join('') || ((rep.concerns || []).length ? '' : '<li class="muted">None noted</li>')}</ul></div>
+      </div></div>`;
   }
 
-  // ---- integrity (always, independent of AI scoring)
+  // ---- charts
+  const scored = p.questions.filter(q => q.scored);
+  const scoreRows = scored.map(q => { const r = qres[q.id] || {}, info = qInfo(q.id);
+    return {label: `Q${info.n} · ${TYPE_LABEL[q.type] || q.type}`, sub: q.ask, value: r.score ?? null, marker: hrs[q.id] ? +hrs[q.id] : null,
+      display: r.score != null ? `${r.score}/5` : '-',
+      tip: `<b>Q${info.n}.</b> ${esc(q.ask)}<br><span>AI score: ${r.score ?? 'not scored'}${hrs[q.id] ? ` · HR score: ${esc(hrs[q.id])}` : ''}</span>`}; });
+  const compNames = Object.fromEntries((p.competencies || []).map(cc => [cc.id, cc]));
+  const byComp = {};
+  (rep && rep.questions || []).forEach(qr => { const q = qInfo(qr.q_id); if (q && q.scored && qr.score != null) (byComp[q.competency_id] ||= []).push(qr.score); });
+  const compRows = (p.competencies || []).map(cc => { const v = byComp[cc.id]; const avg = v ? v.reduce((a, b) => a + b, 0) / v.length : null;
+    return {label: cc.name, sub: `weight ${Math.round((cc.weight || 0) * 100)}%`, value: avg, display: avg != null ? avg.toFixed(1) : '-',
+      tip: `<b>${esc(cc.name)}</b><br><span>${v ? `${v.length} scored answer${v.length > 1 ? 's' : ''}, average ${avg.toFixed(1)}/5` : 'no scored answers'} · weight ${Math.round((cc.weight || 0) * 100)}%</span>`}; });
+  const timeRows = (stats.per_question || []).map(x => { const info = qInfo(x.q_id) || {n: '?', ask: ''};
+    return {label: `Q${info.n}`, sub: info.ask, value: x.seconds, display: mmss(x.seconds),
+      tip: `<b>Q${info.n}.</b> ${esc(info.ask)}<br><span>${mmss(x.seconds)} · ${x.answer_words} words · ${x.followups} follow-up${x.followups === 1 ? '' : 's'}${x.repeats ? ` · asked to repeat ${x.repeats}×` : ''}</span>`}; });
+  if (rep || timeRows.length){
+    h += `<div class="grid2">
+      <div class="card"><div class="section-h"><h2>Score by question</h2><span class="small muted">1 to 5</span></div>
+        ${rep ? hbarChart(scoreRows, {max: 5, valueLabel: 'AI score', markerLabel: Object.keys(hrs).length ? 'Your score' : null}) : '<p class="small muted">Appears once the AI has scored the interview.</p>'}</div>
+      <div class="card"><div class="section-h"><h2>Competencies</h2><span class="small muted">average of scored answers</span></div>
+        ${rep ? hbarChart(compRows, {max: 5}) : '<p class="small muted">Appears once the AI has scored the interview.</p>'}
+        <h3 style="margin-top:18px">Time spent per question</h3>${hbarChart(timeRows, {empty: 'No answers yet.'})}</div>
+    </div>`;
+  }
+
+  // ---- integrity
   if (pr){
     const d = pr.durations || {}, cnt = pr.counts || {};
-    const tiles = [['Integrity risk', `<span class="risk ${pr.risk}">${esc(pr.risk.toUpperCase())}</span>`],
-      ['Left the tab', `${cnt.tab_hidden||0}× · ${d.tab_hidden||0}s`], ['Other window focused', `${cnt.window_blur||0}× · ${d.window_blur||0}s`],
-      ['No face on camera', `${cnt.face_missing_start||0}× · ${d.face_missing_start||0}s`], ['Multiple faces', `${cnt.multiple_faces||0}×`],
-      ['Muted', `${cnt.mute_on||0}× · ${d.mute_on||0}s`], ['Paste / copy', `${cnt.paste||0} / ${cnt.copy||0}`],
-      ['Screen share stopped', `${cnt.screen_share_stopped||0}× · ${d.screen_share_stopped||0}s`], ['Full screen exits', `${cnt.fullscreen_exit||0}`],
-      ['Connection lost', `${cnt.network_offline||0}× · ${d.network_offline||0}s`], ['Reconnects', `${stats.reconnects||0}`]];
+    const tiles = [['Interviewer warnings', set.enforce_focus === false ? 'off' : dq ? `${warns.length - 1} · then stopped` : `${warns.length} (limit ${set.max_warnings ?? 2})`],
+      ['Left the tab', `${cnt.tab_hidden || 0}× · ${d.tab_hidden || 0}s`], ['Other window focused', `${cnt.window_blur || 0}× · ${d.window_blur || 0}s`],
+      ['Second screen', `${cnt.multi_monitor || 0}×`],
+      ['No face on camera', `${cnt.face_missing_start || 0}× · ${d.face_missing_start || 0}s`], ['Multiple faces', `${cnt.multiple_faces || 0}×`],
+      ['Muted', `${cnt.mute_on || 0}× · ${d.mute_on || 0}s`], ['Paste / copy', `${cnt.paste || 0} / ${cnt.copy || 0}`],
+      ['Screen share stopped', `${cnt.screen_share_stopped || 0}× · ${d.screen_share_stopped || 0}s`], ['Full screen exits', `${cnt.fullscreen_exit || 0}`],
+      ['Connection lost', `${cnt.network_offline || 0}× · ${d.network_offline || 0}s`], ['Reconnects', `${stats.reconnects || 0}`]];
+    const flagged = pr.timeline.filter(x => x.severity !== 'info' && x.t != null && !['integrity_warning', 'disqualified'].includes(x.type));
+    const duration = start ? Math.max(...[(st.log || []).map(e => e.ts || 0), pr.timeline.map(x => x.at || 0)].flat()) - start : 0;
     h += `<div class="card"><h2>Integrity and proctoring</h2>
-      <div class="grid3">${tiles.map(([k,v])=>`<div class="stat"><span class="small muted">${k}</span><b>${v}</b></div>`).join('')}</div>
-      ${pr.reasons.length ? `<ul>${pr.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>` : '<p class="small ok">No integrity concerns detected.</p>'}
-      <p class="small muted">Signals, not proof. Click a time to watch that moment in the recording.</p>
-      <details ${pr.timeline.some(x=>x.severity!=='info')?'open':''}><summary><b>Event timeline</b> <span class="small muted">(${pr.timeline.length})</span></summary>
-      <table><tr><th>When</th><th>Question</th><th>Event</th><th>Detail</th></tr>
-      ${pr.timeline.map(x=>`<tr class="${x.severity}"><td>${tlink(x.at, mmss(x.t))}</td><td>${esc(x.q_id||'-')}</td><td>${esc(x.label)}${x.duration?` (${x.duration}s)`:''}</td><td class="small">${esc(x.detail||'')}</td></tr>`).join('')}
-      </table></details>`;
-    const imgs = REC.images || [];
-    if (imgs.length) h += `<h3 style="margin-top:14px">Camera snapshots <span class="small muted">(${imgs.length})</span></h3><div class="snaps">${imgs.map(s=>`
-      <figure class="${['periodic','reference'].includes(s.reason)?'':'flagged'}"><a href="${mediaUrl(iid,s.file)}" target="_blank"><img loading="lazy" src="${mediaUrl(iid,s.file)}"></a>
-      <figcaption>${esc(s.reason)} · ${tlink(s.at, mmss(start ? s.at - start : null))}</figcaption></figure>`).join('')}</div>`;
-    h += `</div>`;
+      <div class="tiles3">${tiles.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
+      <h3>When it happened</h3>
+      ${timelineChart(flagged.map(x => ({t: x.t, severity: x.severity, label: x.label + (x.duration ? ` (${x.duration}s)` : ''), q: x.q_id ? qRef(x.q_id) : '', detail: x.detail})),
+        duration, warns.map(w => ({t: start ? w.at - start : 0, label: `Interviewer warning ${w.n}${w.action === 'terminate' ? ' (interview stopped)' : ''}`})))}
+      ${pr.reasons.length ? `<ul class="clean" style="margin-top:12px">${pr.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : '<p class="small ok">No integrity concerns detected.</p>'}
+      <p class="small muted">Signals, not proof. Click a time to watch that moment in the recording.</p>`;
+    // flagged moments: the screen as it was, with the camera photo taken at the same moment
+    const imgs = (REC.images || []).slice().sort((a, b) => a.at - b.at);
+    const used = new Set(), moments = [];
+    imgs.filter(s => !['periodic', 'reference', 'tab_return'].includes(s.reason)).forEach(s => {
+      if (used.has(s.file)) return; used.add(s.file);
+      const partner = imgs.find(o => !used.has(o.file) && (o.source || 'camera') !== (s.source || 'camera') && Math.abs(o.at - s.at) < 4 && o.reason.replace('_away', '') === s.reason.replace('_away', ''));
+      if (partner) used.add(partner.file);
+      const scr = (s.source === 'screen') ? s : (partner && partner.source === 'screen' ? partner : null);
+      const cam = (s.source || 'camera') === 'camera' ? s : (partner && (partner.source || 'camera') === 'camera' ? partner : null);
+      moments.push({at: s.at, reason: s.reason, scr, cam});
+    });
+    if (moments.length) h += `<h3 style="margin-top:18px">Flagged moments <span class="small muted">(${moments.length})</span></h3>
+      <p class="small muted" style="margin-top:-4px">What was on the candidate's screen at that moment, with the camera photo taken at the same time.</p>
+      <div class="moments">${moments.map(m => { const main = m.scr || m.cam;
+        return `<div class="moment ${m.scr ? '' : 'cam-only'}"><div class="shot"><a href="${mediaUrl(iid, main.file)}" target="_blank" rel="noopener"><img loading="lazy" src="${mediaUrl(iid, main.file)}" alt="${esc(REASON_LABEL[m.reason] || m.reason)}"></a>
+          ${m.scr && m.cam ? `<a class="inset" href="${mediaUrl(iid, m.cam.file)}" target="_blank" rel="noopener"><img loading="lazy" src="${mediaUrl(iid, m.cam.file)}" alt="camera"></a>` : ''}</div>
+          <div class="cap"><b>${esc(REASON_LABEL[m.reason] || m.reason.replace(/_/g, ' '))}</b>${tlink(m.at, mmss(start ? m.at - start : null))}${(() => { const q = pr.timeline.find(x => x.at && Math.abs(x.at - m.at) < 5 && x.q_id); return q ? ` · <span class="muted">${esc(qRef(q.q_id, 40))}</span>` : ''; })()}</div></div>`; }).join('')}</div>`;
+    const routine = imgs.filter(s => ['periodic', 'reference', 'tab_return'].includes(s.reason));
+    if (routine.length) h += `<details id="routineSnaps" style="margin-top:14px"><summary><b>Routine snapshots</b> <span class="small muted">(${routine.length})</span></summary><div class="snaps" style="margin-top:10px">${routine.map(s => `
+      <figure><a href="${mediaUrl(iid, s.file)}" target="_blank" rel="noopener"><img loading="lazy" src="${mediaUrl(iid, s.file)}" alt=""></a>
+      <figcaption>${s.source === 'screen' ? 'Screen' : 'Camera'} · ${esc(REASON_LABEL[s.reason] || s.reason)} · ${tlink(s.at, mmss(start ? s.at - start : null))}</figcaption></figure>`).join('')}</div></details>`;
+    h += `<details id="evTimeline" ${pr.timeline.some(x => x.severity !== 'info') ? 'open' : ''} style="margin-top:14px"><summary><b>Event timeline</b> <span class="small muted">(${pr.timeline.length})</span></summary>
+      <div class="table-wrap"><table><thead><tr><th>When</th><th>During question</th><th>Event</th><th>Detail</th></tr></thead><tbody>
+      ${pr.timeline.map(x => `<tr class="${x.severity}"><td>${tlink(x.at, mmss(x.t))}</td><td class="qref" title="${esc(qInfo(x.q_id)?.ask || '')}">${esc(qRef(x.q_id, 50))}</td><td>${esc(x.label)}${x.duration ? ` (${x.duration}s)` : ''}</td><td class="small">${esc(x.detail || '')}</td></tr>`).join('')}
+      </tbody></table></div></details></div>`;
   }
 
   // ---- recordings
@@ -150,82 +271,82 @@ function render(){
   h += `<div class="card" id="recordings"><h2>Recordings</h2>`;
   if (!media.length) h += `<p class="muted small">No recordings yet.</p>`;
   const vids = media.filter(m => m.kind !== 'call_audio');
-  if (vids.length) h += `<div class="players">${vids.map(m=>`<div>
-      <div class="small"><b>${m.kind==='candidate_video'?'Candidate camera + both voices':m.kind==='screen_video'?'Candidate screen':m.kind==='call_video'?'Vapi cloud video':esc(m.kind)}</b>${m.session?` · session ${esc(m.session)}`:''}
-      ${m.duration_sec?` · ${mmss(m.duration_sec)}`:''} ${m.finalized?'':'<span class="warn">(still uploading)</span>'} ${m.finalized && m.playable===false?'<span class="warn">(could not be repaired, download to play)</span>':''}</div>
-      <video controls preload="metadata" data-file="${esc(m.file)}" src="${mediaUrl(iid,m.file)}"></video>
+  if (vids.length) h += `<div class="players">${vids.map(m => `<div>
+      <div class="small" style="margin-bottom:4px"><b>${m.kind === 'candidate_video' ? 'Candidate camera + both voices' : m.kind === 'screen_video' ? 'Candidate screen' : m.kind === 'call_video' ? 'Vapi cloud video' : esc(m.kind)}</b>${m.session ? ` · session ${esc(m.session)}` : ''}
+      ${m.duration_sec ? ` · ${mmss(m.duration_sec)}` : ''} ${m.finalized ? '' : '<span class="warn">(still uploading)</span>'} ${m.finalized && m.playable === false ? '<span class="warn">(could not be repaired, download to play)</span>' : ''}</div>
+      <video controls preload="metadata" data-file="${esc(m.file)}" src="${mediaUrl(iid, m.file)}"></video>
       <div class="small"><a href="${dlUrl(m.file)}">Download</a> ${mb(m.bytes)}</div></div>`).join('')}</div>`;
-  media.filter(m=>m.kind==='call_audio').forEach(m => { h += `<div style="margin-top:10px"><div class="small"><b>Call audio from Vapi</b> ${mb(m.bytes)} · <a href="${dlUrl(m.file)}">Download</a></div><audio controls preload="none" src="${mediaUrl(iid,m.file)}" style="width:100%"></audio></div>`; });
+  media.filter(m => m.kind === 'call_audio').forEach(m => { h += `<div style="margin-top:10px"><div class="small"><b>Call audio from Vapi</b> ${mb(m.bytes)} · <a href="${dlUrl(m.file)}">Download</a></div><audio controls preload="none" src="${mediaUrl(iid, m.file)}" style="width:100%"></audio></div>`; });
   h += `<p class="small muted">The camera recording includes the candidate's microphone and the interviewer's voice. It keeps recording while the candidate is muted.</p></div>`;
 
   // ---- per question
-  const qres = Object.fromEntries(((rep&&rep.questions)||[]).map(q=>[q.q_id,q]));
-  h += `<div class="card"><h2>Answers</h2><p class="small muted">Enter your own score per question. This measures whether the AI scores like your team does.</p>`;
+  h += `<div class="card"><div class="section-h"><h2>Answers</h2><span class="small muted">Add your own score to measure AI vs HR agreement</span></div>`;
   p.questions.forEach((q, i) => {
-    const r = qres[q.id] || {}; const notes = (st.notes||{})[q.id] || []; const qs = qstat[q.id] || {};
+    const r = qres[q.id] || {}; const notes = (st.notes || {})[q.id] || []; const qs = qstat[q.id] || {};
     const flags = (pr && pr.per_question && pr.per_question[q.id]) || null;
-    const firstAsk = st.log.find(e => e.role === 'ai' && e.q_id === q.id);
-    h += `<div class="q"><div class="meta"><span class="chip">Q${i+1} · ${esc(q.type)}</span>${q.scored?'':'<span class="chip">not scored</span>'}
-        ${qs.seconds!=null?`<span class="chip">${mmss(qs.seconds)} · ${qs.answer_words} words · ${qs.followups} follow-ups</span>`:''}
-        ${(stats.skipped||[]).includes(q.id)?'<span class="chip warn">skipped for time</span>':''}
-        ${firstAsk?tlink(firstAsk.ts, '▶ watch'):''}</div>
-      <b>${esc(q.ask)}</b>
-      <div class="grid2" style="margin-top:8px"><div>
-        <div class="score">${esc(r.score ?? '-')}<span class="small muted"> / 5 AI</span></div>
-        ${(r.evidence||[]).map(e=>{ const hit = logTs.find(x => norm(x.text).includes(norm(e.quote).slice(0,40)));
-          return `<div class="ev ${esc(e.verified)}">"${esc(e.quote)}" <span class="muted small">${hit?tlink(hit.ts,'['+(e.t||'')+']'):'['+esc(e.t)+']'} ${e.verified==='unverified'?'<b class="bad">not found in transcript</b>':e.verified==='other_question'?'<b class="warn">said in a different answer</b>':'verified'}</span></div>`; }).join('')}
-        ${r.rationale?`<p class="small">${esc(r.rationale)}</p>`:''}
-        ${(r.missed_points||[]).length?`<p class="small warn">Missed: ${r.missed_points.map(esc).join(' · ')}</p>`:''}
-        ${notes.length?`<p class="small muted">Live notes: ${notes.map(esc).join(' | ')}</p>`:''}
-        ${flags?`<p class="small bad">Integrity during this question: ${Object.entries(flags.types).map(([k,v])=>esc(k)+' ×'+v).join(', ')}</p>`:''}
-      </div><div>${q.scored?`<label>HR score</label><select data-q="${esc(q.id)}" class="hrs">
-        <option value="">-</option>${[1,2,3,4,5].map(n=>`<option ${String(hrs[q.id])===String(n)?'selected':''}>${n}</option>`).join('')}</select>`:''}</div></div></div>`;
+    const firstAsk = (st.log || []).find(e => e.role === 'ai' && e.q_id === q.id);
+    h += `<div class="q"><div class="qcard-h"><div style="flex:1;min-width:240px">
+        <div class="qnum">Question ${i + 1} · ${esc(TYPE_LABEL[q.type] || q.type)}${q.scored ? '' : ' · not scored'}</div>
+        <div class="qask">${esc(q.ask)}</div>
+        <div class="meta">${qs.seconds != null ? `<span class="chip gray">${mmss(qs.seconds)} · ${qs.answer_words} words · ${qs.followups} follow-up${qs.followups === 1 ? '' : 's'}</span>` : ''}
+          ${(stats.skipped || []).includes(q.id) ? '<span class="chip warn">skipped for time</span>' : ''}
+          ${qs.seconds == null && !(stats.skipped || []).includes(q.id) && REC.state ? '<span class="chip gray">not reached</span>' : ''}
+          ${firstAsk ? tlink(firstAsk.ts, '▶ watch this answer') : ''}</div></div>
+        <div class="hrbox"><div class="score">${esc(r.score ?? '-')}<span class="small muted"> / 5 AI</span></div>
+          ${q.scored ? `<label style="margin-top:6px">Your score</label><select data-q="${esc(q.id)}" class="hrs">
+            <option value="">-</option>${[1, 2, 3, 4, 5].map(n => `<option ${String(hrs[q.id]) === String(n) ? 'selected' : ''}>${n}</option>`).join('')}</select>` : ''}</div></div>
+        ${(r.evidence || []).map(e => { const hit = logTs.find(x => norm(x.text).includes(norm(e.quote).slice(0, 40)));
+          return `<div class="ev ${esc(e.verified)}">"${esc(e.quote)}" <span class="muted small">${hit ? tlink(hit.ts, '[' + (e.t || '') + ']') : '[' + esc(e.t) + ']'} ${e.verified === 'unverified' ? '<b class="bad">not found in transcript</b>' : e.verified === 'other_question' ? '<b class="warn">said in a different answer</b>' : 'verified'}</span></div>`; }).join('')}
+        ${r.rationale ? `<p class="small">${esc(r.rationale)}</p>` : ''}
+        ${(r.missed_points || []).length ? `<p class="small warn">Missed: ${r.missed_points.map(esc).join(' · ')}</p>` : ''}
+        ${notes.length ? `<p class="small muted">Interviewer notes: ${notes.map(esc).join(' | ')}</p>` : ''}
+        ${flags ? `<p class="small bad">Integrity during this question: ${Object.entries(flags.types).map(([k, v]) => esc(k) + ' ×' + v).join(', ')}</p>` : ''}
+      </div>`;
   });
-  h += `<label>HR decision</label><select id="decision"><option value="">-</option>
-      ${['next_round','hold','reject'].map(d=>`<option ${hr.decision===d?'selected':''} value="${d}">${d.replace('_',' ')}</option>`).join('')}</select>
-    <label>Notes</label><textarea id="notes" style="min-height:70px">${esc(hr.notes||'')}</textarea>
+  h += `<div class="grid2" style="margin-top:12px"><div><label for="decision">Your decision</label><select id="decision"><option value="">-</option>
+      ${['next_round', 'hold', 'reject'].map(d => `<option ${hr.decision === d ? 'selected' : ''} value="${d}">${d.replace('_', ' ')}</option>`).join('')}</select></div>
+      <div><label for="notes">Notes</label><textarea id="notes" style="min-height:44px">${esc(hr.notes || '')}</textarea></div></div>
     <div class="actions"><button class="primary" id="saveHr">Save HR review</button><span id="savedMsg" class="small ok"></span></div></div>`;
 
-  if (rep && (rep.resume_claims||[]).length) h += `<div class="card"><h3>Resume claims</h3><table>
-      <tr><th>Claim</th><th>Status</th><th>Note</th></tr>${rep.resume_claims.map(r=>`<tr><td>${esc(r.claim)}</td>
-      <td class="${r.status==='supported'?'ok':r.status==='contradicted'?'bad':'warn'}">${esc(r.status)}</td><td>${esc(r.note)}</td></tr>`).join('')}</table></div>`;
-
-  // ---- engagement stats
-  if (REC.stats) h += `<div class="card"><h3>Conversation stats</h3><div class="grid3">
-      <div class="stat"><span class="small muted">Active time</span><b>${esc(stats.active_minutes)} min</b></div>
-      <div class="stat"><span class="small muted">Candidate talk share</span><b>${esc(stats.candidate_talk_share ?? '-')}%</b></div>
-      <div class="stat"><span class="small muted">Avg answer length</span><b>${esc(stats.avg_answer_words ?? '-')} words</b></div>
-      <div class="stat"><span class="small muted">AI fallbacks</span><b>${esc(stats.judge_failures)}</b></div></div></div>`;
+  if (rep && (rep.resume_claims || []).length) h += `<div class="card"><h2>Resume claims</h2><div class="table-wrap"><table>
+      <thead><tr><th>Claim</th><th>Status</th><th>Note</th></tr></thead><tbody>${rep.resume_claims.map(r => `<tr><td>${esc(r.claim)}</td>
+      <td><span class="chip ${r.status === 'supported' ? 'ok' : r.status === 'contradicted' ? 'bad' : r.status === 'weak' ? 'warn' : 'gray'}">${esc((r.status || '').replace('_', ' '))}</span></td><td>${esc(r.note)}</td></tr>`).join('')}</tbody></table></div></div>`;
 
   // ---- session / device / consent / feedback
   const dev = REC.device || {}, cons = REC.consent;
-  h += `<div class="card small"><h3>Sessions, device and consent</h3><div class="kv">
-      <span class="muted">Consent</span><span>${cons?`given ${when(cons.at)} from ${esc(cons.ip)}`:'<span class="bad">not recorded</span>'}</span>
-      ${(REC.sessions||[]).map(s=>`<span class="muted">Session ${esc(s.n)}</span><span>${when(s.at)} · IP ${esc(s.ip)} · ${esc((s.ua||'').slice(0,100))}</span>`).join('')}
-      ${Object.entries(dev).map(([k,v])=>`<span class="muted">${esc(k)}</span><span>${esc(v)}</span>`).join('')}
-      <span class="muted">Candidate feedback</span><span>${REC.feedback?`${'★'.repeat(REC.feedback.rating)} ${esc(REC.feedback.comment||'')}`:'-'}</span>
-      <span class="muted">Settings</span><span>screen share ${set.require_screen_share?'required':'optional'} · rejoin window ${esc(REC.reconnect_window_sec)}s · face check ${set.face_detection===false?'off':'on'}</span>
+  h += `<div class="card small"><h2>Sessions, device and consent</h2><div class="kv">
+      <span class="muted">Consent</span><span>${cons ? `given ${esc(when(cons.at))} from ${esc(cons.ip)}` : '<span class="bad">not recorded</span>'}</span>
+      ${(REC.sessions || []).map(s => `<span class="muted">Session ${esc(s.n)}</span><span>${esc(when(s.at))} · IP ${esc(s.ip)} · ${esc((s.ua || '').slice(0, 100))}</span>`).join('')}
+      ${Object.entries(dev).map(([k, v]) => `<span class="muted">${esc(k.replace(/_/g, ' '))}</span><span>${esc(v)}</span>`).join('')}
+      <span class="muted">Candidate feedback</span><span>${REC.feedback ? `${'★'.repeat(REC.feedback.rating)} ${esc(REC.feedback.comment || '')}` : '-'}</span>
+      <span class="muted">Settings</span><span>warnings ${set.enforce_focus === false ? 'off' : `on (${set.max_warnings ?? 2} before stopping)`} · one screen ${set.block_multi_monitor === false ? 'not enforced' : 'enforced'} · screen share ${set.require_screen_share ? 'required' : 'optional'} · rejoin window ${esc(REC.reconnect_window_sec)}s · face check ${set.face_detection === false ? 'off' : 'on'}</span>
     </div></div>`;
 
   // ---- transcript
-  h += `<div class="card"><details ${rep?'':'open'}><summary><b>Transcript</b> <span class="small muted">(${st.log.length} turns, click a time to watch)</span></summary><div class="tx">${
-    st.log.map(e=>`<div>${tlink(e.ts, '['+mmss(e.t)+']')} <b>${e.role==='ai'?'AI':'Candidate'}:</b> ${esc(e.text)}${e.action&&e.role==='ai'?` <span class="chip">${esc(e.action)}</span>`:''}${e.fallback?' <span class="chip warn">fallback</span>':''}</div>`).join('')
-  }</div></details></div>`;
+  let lastQ = null;
+  const tx = merged(st).map(e => {
+    let out = '';
+    if (e.role === 'ai' && e.q_id !== lastQ && ['open', 'resume', 'next_question'].includes(e.action)){ lastQ = e.q_id; const q = qInfo(e.q_id);
+      if (q) out += `<div class="qhead">Question ${q.n}: ${esc(q.ask)}</div>`; }
+    const warn = /^integrity/.test(e.action || '');
+    return out + `<div class="line ${e.role === 'ai' ? 'ai' : ''} ${warn ? 'warnline' : ''}"><span>${tlink(e.ts, '[' + mmss(e.t) + ']')}</span><span><b>${e.role === 'ai' ? 'Interviewer' : 'Candidate'}:</b> ${esc(e.text)}${warn ? ` <span class="chip bad">${e.action === 'integrity_termination' ? 'interview stopped' : 'warning'}</span>` : ''}${e.fallback ? ' <span class="chip warn">fallback</span>' : ''}</span></div>`;
+  }).join('');
+  h += `<div class="card"><details id="txDetails" ${rep ? '' : 'open'}><summary><b>Transcript</b> <span class="small muted">(${(st.log || []).length} turns, click a time to watch)</span></summary><div class="tx">${tx || '<p class="muted">No transcript yet.</p>'}</div></details></div>`;
 
   $('root').innerHTML = h;
   const sb = $('scoreBtn'); if (sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Scoring (30-120s)...';
-    try{ await api(`/api/interviews/${iid}/score`, {method:'POST'}); }catch(e){ alert(e.message); } setTimeout(load, 1500); };
+    try{ await api(`/api/interviews/${iid}/score`, {method: 'POST'}); }catch(e){ alert(e.message); } setTimeout(load, 1500); };
   const cb = $('closeBtn'); if (cb) cb.onclick = async () => { if (!confirm('Close this interview? The candidate will not be able to continue.')) return;
-    await api(`/api/interviews/${iid}/close`, {method:'POST'}); load(); };
-  $('copyLink').onclick = () => { navigator.clipboard.writeText(location.origin + '/interview.html?id=' + iid); $('copyLink').textContent = 'Copied'; };
+    await api(`/api/interviews/${iid}/close`, {method: 'POST'}); load(); };
+  $('copyLink').onclick = () => copyText(location.origin + '/interview.html?id=' + iid, 'Candidate link copied');
   $('saveHr').onclick = async () => {
-    const scores = {}; document.querySelectorAll('.hrs').forEach(s=>{ if (s.value) scores[s.dataset.q] = +s.value; });
-    await api(`/api/interviews/${iid}/hr`, {method:'POST', json:{scores, decision: $('decision').value, notes: $('notes').value}});
-    $('savedMsg').textContent = 'Saved';
+    const scores = {}; document.querySelectorAll('.hrs').forEach(s => { if (s.value) scores[s.dataset.q] = +s.value; });
+    await api(`/api/interviews/${iid}/hr`, {method: 'POST', json: {scores, decision: $('decision').value, notes: $('notes').value}});
+    $('savedMsg').textContent = 'Saved'; toast('HR review saved'); load();
   };
   $('delBtn').onclick = async () => {
     if (!confirm('Permanently delete this interview, its transcript, report, snapshots and recordings from this server and its storage? Vapi and the AI provider keep their own copies under their retention policies.')) return;
-    try{ await api(`/api/interviews/${iid}`, {method:'DELETE'}); location.href = '/hr.html'; }catch(e){ alert(e.message); } };
+    try{ await api(`/api/interviews/${iid}`, {method: 'DELETE'}); location.href = '/dashboard.html'; }catch(e){ alert(e.message); } };
 }
 load();
 </script>

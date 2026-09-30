@@ -1,0 +1,21 @@
+Arjun Nair
+Bengaluru | arjun.nair@example.com
+
+Summary
+Data analyst with 2 years of experience in e-commerce analytics, SQL and Power BI.
+
+Experience
+Data Analyst, CartNest E-commerce (Jan 2024 - Present)
+- Built a weekly category performance dashboard in Power BI used by 25 category managers
+- Wrote SQL with window functions to compute cohort retention for 1.2M customers on BigQuery
+- Analysed a checkout A/B test; the winning variant lifted conversion by 3.4%
+- Automated a manual Excel report with Python (pandas), saving about 6 hours a week
+
+Analytics Intern, Quantify Consulting (Jul 2023 - Dec 2023)
+- Cleaned and merged survey data for a retail client; built Tableau views for the final presentation
+
+Skills
+SQL (BigQuery, PostgreSQL), Power BI (DAX), Tableau, Python (pandas, matplotlib), Excel, Google Sheets, basic statistics
+
+Education
+B.Sc. Statistics, Christ University, 2023

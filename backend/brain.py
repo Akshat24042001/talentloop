@@ -142,9 +142,50 @@ def opening_message(plan: dict) -> str:
     q0 = plan["questions"][0]["ask"]
     company = f" at {plan['company']}" if plan.get("company") else ""
     return (f"Hi {_first_name(plan)}, thanks for joining! I'm the AI interviewer for the {plan.get('role', 'open')} "
-            f"role{company}. We'll talk for about {plan['duration_min']} minutes. There are no trick questions, "
+            f"role{company}. There are no trick questions, "
             "so just answer the way you normally would, and take a moment to think whenever you need to. "
             "If you'd like me to repeat anything, just ask. Okay, let's get started. " + q0)
+
+
+def _display(q: dict, text: str | None = None, kind: str = "question") -> dict:
+    """What the candidate's screen shows while the interviewer asks it."""
+    return {"q_id": q["id"], "main": q["ask"], "text": text or q["ask"], "kind": kind}
+
+
+def question_label(plan: dict, qid: str, width: int = 70) -> str:
+    """Human-readable name for a question in HR-facing text (never a bare id like 'q3')."""
+    for i, q in enumerate(plan.get("questions", []), 1):
+        if q["id"] == qid:
+            ask = q["ask"] if len(q["ask"]) <= width else q["ask"][:width - 1].rstrip() + "…"
+            return f'Question {i} ("{ask}")'
+    return f"Question {qid}"
+
+
+# ---------------------------------------------------------------------------
+# Integrity warnings: the interviewer confronts the candidate, then ends the interview
+# ---------------------------------------------------------------------------
+VIOLATION_WHAT = {
+    "tab_hidden": "left the interview screen",
+    "window_blur": "switched to another window",
+    "multi_monitor": "connected a second screen",
+    "fullscreen_exit": "left full screen",
+}
+
+
+def integrity_message(plan: dict, kind: str, n: int, max_warnings: int) -> tuple[str, bool]:
+    """n = this violation's number (1-based). Returns (words to speak, terminate)."""
+    name = _first_name(plan)
+    what = VIOLATION_WHAT.get(kind, "broke the interview rules")
+    if n > max_warnings:
+        after = " after your final warning" if max_warnings else ""
+        return (f"{name}, you {what}{after}. I'm sorry, but I have to stop the interview here. "
+                f"The hiring team will be informed, and {END_PHRASE}."), True
+    if n == max_warnings:
+        lead = f"{name}, you {what}." if n == 1 else f"{name}, you {what}. That's the second time."
+        return (f"{lead} This is your final warning. If it happens once more, "
+                "I'll have to end the interview. Please stay on this screen. Let's continue."), False
+    return (f"{name}, I noticed you {what} just now. Please stay on this interview screen until we finish. "
+            "This has been noted for the hiring team. Let's continue."), False
 
 
 def _snap(st: dict) -> dict:
@@ -175,13 +216,15 @@ def start_session(rec: dict) -> str:
         q = plan["questions"][st["q_idx"]]
         first = (f"Welcome back {_first_name(plan)}. It looks like we got disconnected. "
                  f"Let's continue from where we stopped. {q['ask']}")
+        st["display"] = _display(q)
         action = "resume"
     else:
         tokens = (st or {}).get("tokens", [])
         st = {"session": (st or {}).get("session", 0) + 1, "reconnects": 0, "q_idx": 0, "fu_used": 0,
               "stall": 0, "covered": {}, "notes": {}, "skipped": [], "judge_failures": 0,
               "ended": False, "active_before": 0.0, "last_active": 0.0, "q_started_active": 0.0,
-              "session_started": now, "log": [], "tokens": tokens, "seq": 0}
+              "session_started": now, "log": [], "tokens": tokens, "seq": 0,
+              "display": _display(plan["questions"][0])}
         first = opening_message(plan)
         action = "open"
     st["token"] = secrets.token_urlsafe(16)
@@ -390,9 +433,13 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
         say = _clean(d.get("followup"))
         st["fu_used"] += 1
         st["stall"] = 0
+        st["display"] = _display(q, say, "follow_up")
     elif action == "clarify_repeat":
         say = _clean(d.get("rephrase")) or ("Sure. " + q["ask"])
         st["stall"] += 1
+        if (st.get("display") or {}).get("kind") != "follow_up":
+            st["display"] = _display(q, re.sub(r"^(sure|okay|of course|no problem)[.,!]?\s+", "", say, flags=re.I),
+                                     "rephrase")
     elif action in ("answer_candidate_question", "redirect"):
         say = _clean(d.get("reply")) or ("Let's stay with the interview. " + q["ask"])
         st["stall"] += 1
@@ -404,9 +451,11 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
         st["fu_used"] = 0
         st["stall"] = 0
         st["q_started_active"] = active
+        st["display"] = _display(nq)
     else:  # end
         say = f"{ack} {CLOSING}"
         st["ended"] = True
+        st["display"] = {"q_id": q["id"], "main": "", "text": "", "kind": "closing"}
 
     cov = set(st["covered"].get(q["id"], []))
     for i in d.get("covered") or []:
@@ -551,7 +600,7 @@ async def score_interview(rec: dict) -> dict:
             rep["questions"].append({"q_id": q["id"], "score": None, "evidence": [], "covered_points": [],
                                      "missed_points": [], "rationale": "Not returned by the scoring model."})
             if q["scored"]:
-                review.append(f"{q['id']}: scoring model returned no score")
+                review.append(f"{question_label(plan, q['id'])}: scoring model returned no score")
     order = {q["id"]: i for i, q in enumerate(plan["questions"])}
     rep["questions"].sort(key=lambda qr: order[qr["q_id"]])
 
@@ -566,7 +615,7 @@ async def score_interview(rec: dict) -> dict:
             vals = by_q.get(qr["q_id"], [])
             if len(vals) > 1:
                 if max(vals) - min(vals) > 1:
-                    review.append(f"{qr['q_id']}: scoring unstable across passes ({vals})")
+                    review.append(f"{question_label(plan, qr['q_id'])}: scoring unstable across passes ({vals})")
                 qr["score"] = round(sum(vals) / len(vals))
 
     # evidence verification: quotes must exist in what the candidate actually said
@@ -586,7 +635,7 @@ async def score_interview(rec: dict) -> dict:
                 n_ok += 1
                 ok_any = True
         if qr["score"] is not None and qr["score"] > 1 and not ok_any:
-            review.append(f"{qr['q_id']}: score {qr['score']} has no verifiable quote")
+            review.append(f"{question_label(plan, qr['q_id'])}: score {qr['score']} has no verifiable quote")
         qr["ask"] = q["ask"]
         qr["type"] = q["type"]
         qr["competency_id"] = q.get("competency_id")
@@ -618,10 +667,13 @@ async def score_interview(rec: dict) -> dict:
     skipped = [x for x in st.get("skipped", []) if x not in asked]
     missing = [q["id"] for q in plan["questions"] if q["id"] not in asked and q["id"] not in skipped]
     if skipped:
-        review.append(f"Skipped to save time: {', '.join(skipped)}")
+        review.append("Skipped to save time: " + "; ".join(question_label(plan, x) for x in skipped))
     if missing:
-        review.append(f"Questions not reached: {', '.join(missing)}")
-    if not st.get("ended"):
+        review.append("Questions not reached: " + "; ".join(question_label(plan, x) for x in missing))
+    dq = rec.get("disqualified")
+    if dq:
+        review.insert(0, f"DISQUALIFIED: {dq.get('reason', 'interview ended for integrity violations')}")
+    elif not st.get("ended"):
         review.append("Interview did not reach its normal end (dropped call or candidate left)")
     if st.get("judge_failures"):
         review.append(f"Live AI failed on {st['judge_failures']} turn(s); the interviewer used a safe fallback")
@@ -629,8 +681,9 @@ async def score_interview(rec: dict) -> dict:
         review.append(f"Call reconnected {st['reconnects']} time(s)")
 
     proctor = proctor_mod.summary(rec)
-    if proctor["reasons"]:
-        review.append(f"Integrity risk {proctor['risk'].upper()}: " + "; ".join(proctor["reasons"]))
+    other = [r for r in proctor["reasons"] if not r.startswith("Disqualified")]
+    if other:
+        review.append(f"Integrity risk {proctor['risk'].upper()}: " + "; ".join(other))
 
     rep["computed"] = {
         "overall": overall,

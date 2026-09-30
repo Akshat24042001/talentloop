@@ -1,0 +1,72 @@
+[
+ {
+  "id": "java-backend",
+  "role": "Java Backend Developer",
+  "company": "Demo Tech Pvt Ltd",
+  "candidate": "Rohan Mehta",
+  "duration": 15,
+  "jd": "sample_jd.txt",
+  "resume": "sample_resume.txt",
+  "questions": "sample_questions.txt"
+ },
+ {
+  "id": "frontend-react",
+  "role": "Frontend Developer (React)",
+  "company": "Pixelcraft Labs",
+  "candidate": "Priya Shah",
+  "duration": 15,
+  "jd": "frontend-react/jd.txt",
+  "resume": "frontend-react/resume.txt",
+  "questions": "frontend-react/questions.txt"
+ },
+ {
+  "id": "data-analyst",
+  "role": "Data Analyst",
+  "company": "Northwind Retail Analytics",
+  "candidate": "Arjun Nair",
+  "duration": 15,
+  "jd": "data-analyst/jd.txt",
+  "resume": "data-analyst/resume.txt",
+  "questions": "data-analyst/questions.txt"
+ },
+ {
+  "id": "sales-bde",
+  "role": "Business Development Executive (B2B SaaS)",
+  "company": "Flowbooks Software",
+  "candidate": "Neha Patel",
+  "duration": 15,
+  "jd": "sales-bde/jd.txt",
+  "resume": "sales-bde/resume.txt",
+  "questions": "sales-bde/questions.txt"
+ },
+ {
+  "id": "customer-support",
+  "role": "Customer Support Associate (Voice)",
+  "company": "QuickServe Telecom",
+  "candidate": "Imran Shaikh",
+  "duration": 15,
+  "jd": "customer-support/jd.txt",
+  "resume": "customer-support/resume.txt",
+  "questions": "customer-support/questions.txt"
+ },
+ {
+  "id": "hr-recruiter",
+  "role": "HR Recruiter (IT Hiring)",
+  "company": "TalentBridge Consulting",
+  "candidate": "Kavya Iyer",
+  "duration": 15,
+  "jd": "hr-recruiter/jd.txt",
+  "resume": "hr-recruiter/resume.txt",
+  "questions": "hr-recruiter/questions.txt"
+ },
+ {
+  "id": "devops",
+  "role": "DevOps Engineer",
+  "company": "CloudNimbus Technologies",
+  "candidate": "Siddharth Rao",
+  "duration": 15,
+  "jd": "devops/jd.txt",
+  "resume": "devops/resume.txt",
+  "questions": "devops/questions.txt"
+ }
+]

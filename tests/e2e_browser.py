@@ -50,11 +50,15 @@ export default class FakeVapi {
     setTimeout(() => this.run(asst), 20);
     return {id: 'call_fake_' + Date.now()};
   }
-  async say(msgs, text){ msgs.push({role: 'assistant', content: text}); this.emit('speech-start'); this.emit('message', {type:'transcript', role:'assistant', transcriptType:'final', transcript: text}); await sleep(150); this.emit('speech-end'); }
+  async speak(msgs, text){ msgs.push({role: 'assistant', content: text}); this.emit('speech-start'); this.emit('message', {type:'transcript', role:'assistant', transcriptType:'final', transcript: text}); await sleep(150); this.emit('speech-end'); }
+  // Real SDK signature: say(message, endCallAfterSpoken, interruptionsEnabled, interruptAssistantEnabled)
+  say(text, endAfter){ (window.__said ||= []).push({text, endAfter}); this.msgs && this.msgs.push({role: 'assistant', content: text});
+    this.emit('message', {type:'transcript', role:'assistant', transcriptType:'final', transcript: text});
+    if (endAfter){ this.stopped = true; setTimeout(() => { this.cleanup(); this.emit('call-end'); }, 800); } }
   async run(asst){
     this.emit('call-start');
-    const msgs = [{role:'system', content:'x'}];
-    await this.say(msgs, asst.firstMessage);
+    const msgs = this.msgs = [{role:'system', content:'x'}];
+    await this.speak(msgs, asst.firstMessage);
     let n = 0;
     for (const a of (window.__ANSWERS || [])){
       await sleep(window.__TURN_MS || 1200);
@@ -66,7 +70,7 @@ export default class FakeVapi {
       if (!r.ok){ window.__llmError = r.status; this.cleanup(); this.emit('call-end'); return; }
       const text = (await r.text()).split('\n').filter(l => l.startsWith('data: ') && !l.includes('[DONE]'))
         .map(l => JSON.parse(l.slice(6)).choices[0].delta.content || '').join('');
-      await this.say(msgs, text);
+      await this.speak(msgs, text);
       if (/concludes our interview/i.test(text)){ await sleep(1500); this.cleanup(); this.emit('call-end'); return; }
     }
   }
@@ -143,6 +147,15 @@ def wait(fn, timeout=60, every=0.5, what="condition"):
     raise AssertionError(f"timed out waiting for {what}")
 
 
+def wait_question(pg):
+    """The call is live once the current question is on screen."""
+    pg.wait_for_function("(t => t.length > 5 && !t.startsWith('Connecting'))(document.getElementById('qText').textContent)", timeout=20000)
+
+
+def tracks_stopped(pg) -> bool:
+    return pg.evaluate("!document.getElementById('screenVid').srcObject && !document.getElementById('self').srcObject")
+
+
 def main():
     data = tempfile.mkdtemp()
     env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test",
@@ -168,7 +181,9 @@ def main():
                 pg.on("pageerror", lambda e: errs.append(str(e)))
                 pg.route("**/vendor/vapi-web.mjs", lambda r: r.fulfill(status=200, content_type="text/javascript", body=FAKE_VAPI))
                 pg.route("**/vendor/mediapipe/vision_bundle.mjs", lambda r: r.fulfill(status=200, content_type="text/javascript", body=FAKE_VISION))
-                init = f"window.__ANSWERS = {json.dumps(answers)}; window.__TURN_MS = {flags.get('turn_ms', 1200)}; window.__DROP_AFTER = {flags.get('drop_after', 0)}; window.__FACES = 1;"
+                # screen.isExtended (second monitor) is controlled by window.__EXT, like a real display change.
+                init = (f"window.__ANSWERS = {json.dumps(answers)}; window.__TURN_MS = {flags.get('turn_ms', 1200)}; window.__DROP_AFTER = {flags.get('drop_after', 0)}; window.__FACES = 1;"
+                        "Object.defineProperty(Screen.prototype, 'isExtended', {get: () => !!window.__EXT, configurable: true});")
                 pg.add_init_script(init)
                 pg.goto(f"{BASE}/interview.html?id={iid}")
                 return pg, errs
@@ -191,7 +206,12 @@ def main():
             pass_checks(pg, share=True)
             pg.click("#startBtn")
             pg.wait_for_selector("#s3:not(.hidden)")
-            pg.wait_for_function("document.getElementById('progText').textContent.includes('Question')", timeout=20000)
+            wait_question(pg)
+            # the shared screen is shown live, and the candidate is never told counts or time
+            assert pg.evaluate("document.getElementById('screenVid').srcObject?.active === true"), "screen share not shown"
+            assert pg.is_visible("#screenTile")
+            body = pg.inner_text("body").lower()
+            assert "minutes" not in body and " of 5" not in body and "question 1 of" not in body, "counts or time shown to the candidate"
             time.sleep(4)
             # integrity signals during the call
             pg.evaluate("document.dispatchEvent(new ClipboardEvent('paste', {clipboardData: new DataTransfer()}))")
@@ -213,6 +233,7 @@ def main():
             pg.wait_for_selector("#s4:not(.hidden)", timeout=180000)
             pg.wait_for_function("document.getElementById('uploadMsg').textContent.includes('saved') || document.getElementById('uploadMsg').textContent === ''", timeout=60000)
             pg.wait_for_selector("#fbBox:not(.hidden)", timeout=30000)
+            assert tracks_stopped(pg), "camera or screen sharing still running after the interview"
             pg.click("#stars button:nth-child(5)")
             pg.click("#fbSend")
             pg.wait_for_function("document.getElementById('fbDone').textContent.includes('Thank')")
@@ -243,6 +264,7 @@ def main():
                 assert cnt.get(k), f"missing proctoring event {k}: {cnt}"
             assert rec["proctoring"]["risk"] in ("medium", "high")
             assert any(i["reason"] == "reference" for i in rec["images"]), rec["images"]
+            assert any(i["reason"] == "reference" and i.get("source") == "screen" for i in rec["images"]), "no screen snapshot"
             assert any(i["reason"] in ("multiple_faces", "no_face") for i in rec["images"])
             assert rec["consent"] and rec["feedback"]["rating"] == 5 and rec["device"].get("screen")
             assert rec["settings"]["candidate_email"] == "rohan@example.com"
@@ -264,7 +286,9 @@ def main():
             cur = hr.evaluate("document.querySelector('video[data-file]').currentTime")
             print("jump-to-moment currentTime:", cur)
             assert cur > 1, cur
-            assert hr.locator("text=Integrity and proctoring").count() and hr.locator(".snaps img").count() >= 2
+            assert hr.locator("text=Integrity and proctoring").count() and hr.locator(".snaps img, .moment img").count() >= 3
+            assert hr.locator(".hbar").count() >= 3, "report charts missing"
+            assert not hr.locator("td.qref:text-matches('^q[0-9]+$')").count(), "bare question ids shown to HR"
             with hr.expect_download() as d:
                 hr.click("text=Download PDF report")
             pdf = Path(d.value.path()).read_bytes()
@@ -278,7 +302,7 @@ def main():
             assert any("/snapshots/" in n for n in names)
             if hr_errs:
                 failures.append(f"report page JS errors: {hr_errs}")
-            hr.goto(f"{BASE}/hr.html")
+            hr.goto(f"{BASE}/dashboard.html")
             hr.wait_for_selector("text=Rohan Mehta", timeout=15000)
             hr.fill("#q", "nobody-matches")
             assert hr.locator("text=No interviews match").count()
@@ -327,13 +351,56 @@ def main():
             pg4, _ = page_for(iid4, ANSWERS, turn_ms=1500)
             pass_checks(pg4)
             pg4.click("#startBtn")
-            pg4.wait_for_function("document.getElementById('progText').textContent.includes('Question')", timeout=20000)
+            wait_question(pg4)
             time.sleep(4)
-            pg4.once("dialog", lambda dlg: dlg.accept())
             pg4.click("#endBtn")
+            pg4.wait_for_selector("#endModal:not(.hidden)")
+            pg4.click("#endConfirm")
             pg4.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview ended'", timeout=30000)
             assert httpx.post(f"{BASE}/api/interviews/{iid4}/assistant").status_code == 409
+            assert tracks_stopped(pg4)
             print("deliberate end: closed, no rejoin")
+
+            # ---------------------------------------------------------- 5. second screen + leaving the window -> warned, then stopped
+            iid5 = create(c, require_screen_share=True, max_warnings=1, candidate_email="multi@example.com")
+            pg5, errs5 = page_for(iid5, ANSWERS, turn_ms=2500)
+            pg5.evaluate("window.__EXT = true")
+            pg5.check("#consent"); pg5.click("#toCheck")
+            pg5.wait_for_selector("#ckScreen.bad", timeout=15000)
+            pg5.click("#shareBtn"); pg5.wait_for_selector("#ckShare.ok", timeout=15000)
+            pg5.wait_for_selector("#ckMic.ok", timeout=20000); time.sleep(1)
+            assert pg5.is_enabled("#startBtn") is False, "a second screen must block the start"
+            pg5.evaluate("window.__EXT = false")
+            pg5.wait_for_selector("#ckScreen.ok", timeout=10000)
+            pg5.wait_for_function("!document.getElementById('startBtn').disabled", timeout=15000)
+            pg5.click("#startBtn")
+            wait_question(pg5)
+            time.sleep(2)
+            pg5.evaluate("window.__EXT = true")                       # monitor plugged in mid-interview
+            pg5.wait_for_selector("#monOverlay:not(.hidden)", timeout=10000)
+            pg5.wait_for_selector("#warnBar:not(.hidden)", timeout=10000)
+            assert "Final warning" in pg5.inner_text("#warnTitle"), pg5.inner_text("#warnTitle")
+            pg5.evaluate("window.__EXT = false")
+            pg5.wait_for_selector("#monOverlay.hidden", state="attached", timeout=10000)
+            time.sleep(4.5)                                          # past the server's one-episode debounce
+            pg5.evaluate("window.dispatchEvent(new Event('blur'))")  # switched to another window
+            pg5.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview stopped'", timeout=30000)
+            said = pg5.evaluate("window.__said")
+            print("interviewer said:", [s["text"][:60] for s in said])
+            assert len(said) == 2 and said[0]["endAfter"] is False and said[1]["endAfter"] is True, said
+            assert "second screen" in said[0]["text"] and "stop the interview" in said[1]["text"]
+            assert tracks_stopped(pg5), "screen sharing kept running after the interview was stopped"
+            r5 = wait(lambda: (lambda r: r if r.get("report") else None)(c.get(f"/api/interviews/{iid5}").json()), 60, what="disqualified interview scored")
+            assert r5["disqualified"] and len(r5["warnings"]) == 2 and r5["report"]["human_review_reasons"][0].startswith("DISQUALIFIED")
+            shots = [(i["reason"], i.get("source")) for i in r5["images"]]
+            assert ("window_blur", "screen") in shots and ("multi_monitor", "screen") in shots, shots
+            assert httpx.post(f"{BASE}/api/interviews/{iid5}/assistant").status_code == 409, "a disqualified candidate rejoined"
+            if errs5:
+                failures.append(f"disqualification page JS errors: {errs5}")
+            hr.goto(f"{BASE}/report.html?id={iid5}")
+            hr.wait_for_selector(".dq", timeout=15000)
+            assert hr.locator(".moment").count() >= 2
+            print("second screen + window switch: warned, then stopped; screen captured:", shots)
             browser.close()
     finally:
         srv.terminate()

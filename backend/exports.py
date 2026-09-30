@@ -66,15 +66,35 @@ def transcript_text(rec: dict) -> str:
              f"Interview ID: {rec['id']}   Created: {_when(rec.get('created_at'))}   Status: {rec.get('status')}",
              "Times are minutes:seconds of active interview time.", ""]
     last_q = None
-    for e in (rec.get("state") or {}).get("log", []):
+    order = {q["id"]: i for i, q in enumerate(p["questions"], 1)}
+    for e in merged_log(rec):
         if e["role"] == "ai" and e.get("q_id") != last_q and e.get("action") in ("open", "resume", "next_question"):
             q = qs.get(e["q_id"], {})
-            lines += ["", f"=== {e['q_id']} ({q.get('type', '')}) {q.get('ask', '')}"]
+            lines += ["", f"=== Question {order.get(e['q_id'], '?')} ({q.get('type', '')}): {q.get('ask', '')}"]
             last_q = e["q_id"]
         who = "INTERVIEWER" if e["role"] == "ai" else "CANDIDATE"
         tag = f"  [{e['action']}]" if e.get("action") and e["role"] == "ai" and e["action"] not in ("open", "next_question") else ""
         lines.append(f"[{_mmss(e.get('t'))}] {who}: {e['text']}{tag}")
     return "\n".join(lines).strip() + "\n"
+
+
+def merged_log(rec: dict) -> list[dict]:
+    """The conversation log plus the interviewer's integrity warnings (spoken outside the turn flow),
+    in time order. Warnings borrow the active-time stamp of the turn before them."""
+    log = list((rec.get("state") or {}).get("log", []))
+    for w in rec.get("warnings") or []:
+        prev = [e for e in log if (e.get("ts") or 0) <= w["at"]]
+        log.append({"role": "ai", "text": w["say"], "q_id": w.get("q_id"), "ts": w["at"],
+                    "t": prev[-1].get("t") if prev else 0,
+                    "action": "integrity_termination" if w.get("action") == "terminate" else "integrity_warning"})
+    return sorted(log, key=lambda e: e.get("ts") or 0)
+
+
+def q_short(rec: dict, qid) -> str:
+    for i, q in enumerate(rec["plan"]["questions"], 1):
+        if q["id"] == qid:
+            return f"Q{i}: {q['ask'][:48]}{'…' if len(q['ask']) > 48 else ''}"
+    return "-"
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +277,11 @@ def report_pdf(rec: dict) -> bytes:
     # --- integrity
     if pr:
         story.append(P("Integrity and proctoring", h2))
+        dq = rec.get("disqualified")
+        if dq:
+            story.append(P(f"<font color='#c62828'><b>DISQUALIFIED.</b> {_t(dq.get('reason'))}</font>"))
+        for w in rec.get("warnings") or []:
+            story.append(P(f"- Interviewer warning {w['n']} ({_t(w['type'])}): &ldquo;{_t(w['say'])}&rdquo;", small))
         story.append(P(f"Risk <b>{_t(pr['risk'].upper())}</b> ({pr['risk_points']} points). Signals are evidence for review, "
                        "not proof. Check the video before concluding anything."))
         for r in pr["reasons"]:
@@ -277,11 +302,11 @@ def report_pdf(rec: dict) -> bytes:
         if tl:
             story.append(P("Timeline of flagged events", h3))
             rows = [["When", "Question", "Event", "Detail"]] + [
-                [_mmss(x["t"]) if x["t"] is not None else "-", x.get("q_id") or "-",
+                [_mmss(x["t"]) if x["t"] is not None else "-", P(_t(q_short(rec, x.get("q_id"))), small),
                  P(("<font color='#c62828'>" if x["severity"] == "high" else "") + _t(x["label"]) +
                    ("</font>" if x["severity"] == "high" else "") + (f" ({x['duration']}s)" if x.get("duration") else "")),
                  P(_t(x.get("detail", ""))[:120], small)] for x in tl]
-            story.append(table(rows, [16 * mm, 18 * mm, 80 * mm, 60 * mm]))
+            story.append(table(rows, [16 * mm, 50 * mm, 58 * mm, 50 * mm]))
         # snapshots: reference photo first, then flagged ones
         snaps = rec.get("images") or []
         pick = [s for s in snaps if s.get("reason") == "reference"][:1] + [s for s in snaps if s.get("reason") not in ("reference", "periodic")][:5]
@@ -291,12 +316,13 @@ def report_pdf(rec: dict) -> bytes:
             path = store.media_path(rec["id"], s["file"])
             if path:
                 try:
-                    cells.append([Image(str(path), width=40 * mm, height=22.5 * mm),
-                                  P(f"{_t(s.get('reason'))} {_mmss(s['at'] - (proctor.interview_start(rec) or s['at']))}", small)])
+                    src = "screen " if s.get("source") == "screen" else ""
+                    cells.append([Image(str(path), width=40 * mm, height=25 * mm, kind="proportional"),
+                                  P(f"{src}{_t(s.get('reason'))} {_mmss(s['at'] - (proctor.interview_start(rec) or s['at']))}", small)])
                 except Exception:
                     pass
         if cells:
-            story.append(P("Camera snapshots", h3))
+            story.append(P("Camera and screen snapshots", h3))
             rows = []
             for i in range(0, len(cells), 4):
                 grp = cells[i:i + 4] + [["", ""]] * (4 - len(cells[i:i + 4]))

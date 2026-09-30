@@ -38,6 +38,7 @@ RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "30"))
 RECONNECT_GRACE_SEC = 2          # network latency allowance on top of the window
 RETENTION_DAYS = float(os.getenv("RETENTION_DAYS", "0") or 0)   # 0 = keep forever
 SWEEP_EVERY_SEC = float(os.getenv("SWEEP_EVERY_SEC", "30"))
+FINISH_DELAY_SEC = float(os.getenv("FINISH_DELAY_SEC", "25"))   # after a disqualification
 CLOSED = ("completed", "incomplete", "scored")
 
 if WEAK_ADMIN:
@@ -46,6 +47,7 @@ if WEAK_ADMIN:
 app = FastAPI(title="TalentLoop AI Interview")
 _presence: dict[str, float] = {}     # interview id -> last heartbeat from a live call (memory only)
 _sweeping: set[str] = set()
+_tasks: set[asyncio.Task] = set()
 
 
 @app.on_event("startup")
@@ -108,7 +110,7 @@ def reconnect_window(rec: dict) -> int:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return RedirectResponse("/hr.html")
+    return RedirectResponse("/dashboard.html")
 
 
 @app.get("/api/health")
@@ -168,6 +170,13 @@ async def make_plan(req: Request):
             "ms": int((time.time() - t0) * 1000)}
 
 
+def _intish(v, default: int) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _settings(body: dict) -> dict:
     s = body.get("settings") or {}
     out = {"candidate_email": str(s.get("candidate_email") or "")[:200],
@@ -175,6 +184,9 @@ def _settings(body: dict) -> dict:
            "reconnect_window_sec": max(10, min(900, int(s.get("reconnect_window_sec") or RECONNECT_WINDOW_SEC))),
            "face_detection": s.get("face_detection", True) is not False,
            "snapshots": s.get("snapshots", True) is not False,
+           "enforce_focus": s.get("enforce_focus", True) is not False,
+           "block_multi_monitor": s.get("block_multi_monitor", True) is not False,
+           "max_warnings": max(0, min(5, _intish(s.get("max_warnings"), 2))),
            "hr_note": str(s.get("hr_note") or "")[:500]}
     af = s.get("available_from")
     out["available_from"] = float(af) if isinstance(af, (int, float)) and af > 0 else None
@@ -205,7 +217,30 @@ async def create_interview(req: Request):
            "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
            "scoring": None, "settings": settings}
     store.save(rec)
-    return {"id": iid, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/report.html?id={iid}"}
+    return {"id": iid, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/report.html?id={iid}",
+            "warnings": _history_warnings(settings["candidate_email"], iid)}
+
+
+def _history_warnings(email: str, skip: str = "") -> list[str]:
+    email = (email or "").strip().lower()
+    if not email:
+        return []
+    out = []
+    for r in store.list_all():
+        if r["id"] == skip or (r.get("settings") or {}).get("candidate_email", "").strip().lower() != email:
+            continue
+        dq = r.get("disqualified")
+        if dq:
+            out.append(f"This email was disqualified in an earlier interview ({r['plan'].get('role', '')}, "
+                       f"{time.strftime('%d %b %Y', time.localtime(dq.get('at', 0)))}): {dq.get('reason', '')}")
+    return out
+
+
+@app.get("/api/candidates/history")
+def candidate_history(req: Request, email: str = ""):
+    """Lets the HR form warn before a link is sent to a previously disqualified candidate."""
+    require_admin(req)
+    return {"warnings": _history_warnings(email)}
 
 
 def _row(r: dict) -> dict:
@@ -216,7 +251,9 @@ def _row(r: dict) -> dict:
             "email": (r.get("settings") or {}).get("candidate_email", ""),
             "recommendation": rep.get("recommendation"), "overall": (rep.get("computed") or {}).get("overall"),
             "risk": pr.get("risk"), "decision": (r.get("hr") or {}).get("decision"),
-            "ended_early": bool(r.get("ended_early")), "expires_at": r.get("expires_at")}
+            "ended_early": bool(r.get("ended_early")), "expires_at": r.get("expires_at"),
+            "disqualified": bool(r.get("disqualified")), "warnings": len(r.get("warnings") or []),
+            "company": r["plan"].get("company"), "started_at": proctor.interview_start(r) if r.get("state") else None}
 
 
 @app.get("/api/interviews")
@@ -387,6 +424,9 @@ async def get_media(iid: str, fname: str, req: Request):
 # Candidate side
 # ---------------------------------------------------------------------------
 def _check_open(rec: dict):
+    if rec.get("disqualified"):
+        raise HTTPException(409, "This interview was ended because the interview rules were broken after "
+                                 "warnings. Please contact HR.")
     if rec["status"] == "incomplete":
         raise HTTPException(409, "This interview was closed because the connection was not restored in time. "
                                  "Please contact HR.")
@@ -406,8 +446,11 @@ def public_info(iid: str):
     s = rec["settings"]
     resuming = rec["status"] == "in_progress" and _spoke(rec)
     deadline = last_activity(rec) + reconnect_window(rec) if resuming else None
+    # Deliberately no question count and no duration: the candidate is not told either.
     return {"candidate_name": p.get("candidate_name"), "role": p.get("role"), "company": p.get("company"),
-            "duration_min": p["duration_min"], "status": rec["status"], "questions": len(p["questions"]),
+            "status": rec["status"], "disqualified": bool(rec.get("disqualified")),
+            "enforce_focus": s.get("enforce_focus", True), "block_multi_monitor": s.get("block_multi_monitor", True),
+            "max_warnings": s.get("max_warnings", 2),
             "expired": time.time() > rec.get("expires_at", 1e18),
             "available_from": s.get("available_from"), "not_open_yet": bool(s.get("available_from") and time.time() < s["available_from"]),
             "require_screen_share": bool(s.get("require_screen_share")),
@@ -433,8 +476,8 @@ async def consent(iid: str, req: Request):
 @app.post("/api/interviews/{iid}/device")
 async def device_info(iid: str, req: Request):
     body = await req.json()
-    allowed = ("platform", "screen", "window", "extended_display", "timezone", "language", "cores", "memory_gb",
-               "touch", "browser", "camera", "microphone", "connection")
+    allowed = ("platform", "screen", "window", "extended_display", "screens", "timezone", "language", "cores",
+               "memory_gb", "touch", "browser", "camera", "microphone", "connection")
     async with store.lock(iid):
         rec = get_rec(iid)
         rec["device"] = {k: str(body.get(k))[:200] for k in allowed if k in body}
@@ -518,16 +561,75 @@ async def heartbeat(iid: str):
 
 @app.get("/api/interviews/{iid}/progress")
 def progress(iid: str):
+    """What the candidate's screen shows: the question being asked now. No counts, no timer."""
     rec = get_rec(iid)
     st = rec.get("state") or {}
-    p = rec["plan"]
-    out = {"status": rec["status"], "q_total": len(p["questions"]), "q_num": None, "remaining_sec": None,
-           "ended": bool(st.get("ended"))}
-    if st:
-        out["q_num"] = st["q_idx"] + 1
-        active = st.get("active_before", 0) + (time.time() - st.get("session_started", time.time()))
-        out["remaining_sec"] = max(0, int(p["duration_min"] * 60 - active))
-    return out
+    return {"status": rec["status"], "ended": bool(st.get("ended")), "disqualified": bool(rec.get("disqualified")),
+            "question": st.get("display"), "warnings": len(rec.get("warnings") or []),
+            "max_warnings": rec["settings"].get("max_warnings", 2)}
+
+
+VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor")
+VIOLATION_DEBOUNCE_SEC = 4
+
+
+@app.post("/api/interviews/{iid}/violation")
+async def violation(iid: str, req: Request):
+    """The candidate left the interview (tab/window switch) or connected a second screen during a live call.
+    The count lives on the server, so closing or reloading the page does not reset it. The page speaks the
+    returned words through the interviewer's voice; on the last one the call ends and the interview is
+    closed as disqualified. The custom-LLM endpoint also refuses to continue a disqualified interview,
+    so a tampered page cannot carry on."""
+    body = await req.json()
+    kind = str(body.get("type") or "")
+    if kind not in VIOLATION_KINDS:
+        raise HTTPException(400, "unknown violation type")
+    detail = str(body.get("detail") or "")[:200]
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        s = rec["settings"]
+        st = rec.get("state") or {}
+        enforced = s.get("block_multi_monitor", True) if kind == "multi_monitor" else s.get("enforce_focus", True)
+        if rec.get("disqualified"):
+            return {"action": "terminate", "say": "", "warning": len(rec.get("warnings") or []), "already": True}
+        if rec["status"] != "in_progress" or not st or st.get("ended") or not enforced:
+            return {"action": "ignored", "say": "", "warning": len(rec.get("warnings") or [])}
+        warns = rec.setdefault("warnings", [])
+        now = time.time()
+        if warns and now - warns[-1]["at"] < VIOLATION_DEBOUNCE_SEC:
+            return {"action": "ignored", "say": "", "warning": len(warns), "debounced": True}
+        max_w = int(s.get("max_warnings", 2))
+        n = len(warns) + 1
+        say, terminate = brain.integrity_message(rec["plan"], kind, n, max_w)
+        q_id = (st.get("display") or {}).get("q_id")
+        warns.append({"n": n, "type": kind, "at": now, "say": say, "q_id": q_id, "detail": detail,
+                      "action": "terminate" if terminate else "warn"})
+        server_event(rec, "integrity_warning", f"warning {n} of {max_w}: {kind} {detail}".strip())
+        if terminate:
+            what = brain.VIOLATION_WHAT.get(kind, kind)
+            during = f", during {brain.question_label(rec['plan'], q_id)}" if q_id else ""
+            after = f"after {max_w} warning{'' if max_w == 1 else 's'}" if max_w else "with no warnings allowed"
+            rec["disqualified"] = {"at": now, "type": kind, "violations": n,
+                                   "reason": f"{what[0].upper() + what[1:]} {after}{during}"}
+            rec["status"] = "incomplete"
+            rec["ended_early"] = True
+            server_event(rec, "disqualified", f"after {n} violation(s)")
+        rec["last_seen"] = now
+        store.save(rec)
+    log.info("[%s] integrity %s #%d (%s)", iid, "TERMINATE" if terminate else "warning", n, kind)
+    if terminate:
+        # Detached, not a request background task: the request finishes now and a shutdown isn't held up.
+        # If the server restarts first, the sweeper scores the interview instead.
+        t = asyncio.create_task(_finish_up_later(iid))
+        _tasks.add(t)
+        t.add_done_callback(_tasks.discard)
+    return {"action": "terminate" if terminate else "warn", "say": say, "warning": n, "max_warnings": max_w}
+
+
+async def _finish_up_later(iid: str):
+    """Give the page time to finish speaking and upload the last recording pieces."""
+    await asyncio.sleep(FINISH_DELAY_SEC)
+    await _finish_up(iid)
 
 
 @app.post("/api/interviews/{iid}/events")
@@ -555,10 +657,14 @@ async def add_events(iid: str, req: Request):
 
 
 @app.post("/api/interviews/{iid}/snapshot")
-async def snapshot(iid: str, req: Request, reason: str = "periodic"):
+async def snapshot(iid: str, req: Request, reason: str = "periodic", source: str = "camera"):
+    """source=camera: the candidate's webcam. source=screen: a frame of the shared screen, taken e.g. the
+    moment the candidate switches away, so HR sees what was on the screen."""
     data = await req.body()
-    if not data.startswith(b"\xff\xd8") or len(data) > 400 * 1024:
-        raise HTTPException(400, "JPEG under 400 KB expected")
+    source = "screen" if source == "screen" else "camera"
+    cap = 700 * 1024 if source == "screen" else 400 * 1024
+    if not data.startswith(b"\xff\xd8") or len(data) > cap:
+        raise HTTPException(400, f"JPEG under {cap // 1024} KB expected")
     reason = "".join(c for c in reason if c.isalnum() or c == "_")[:30] or "periodic"
     async with store.lock(iid):
         rec = get_rec(iid)
@@ -566,11 +672,11 @@ async def snapshot(iid: str, req: Request, reason: str = "periodic"):
             raise HTTPException(409, "Interview closed")
         if len(rec["images"]) >= MAX_IMAGES:
             return {"ok": False, "reason": "limit"}
-        fname = f"snap_{len(rec['images']) + 1:03d}_{reason}.jpg"
+        fname = f"snap_{len(rec['images']) + 1:03d}_{'screen_' if source == 'screen' else ''}{reason}.jpg"
         d = store.MEDIA_DIR / iid
         d.mkdir(parents=True, exist_ok=True)
         (d / fname).write_bytes(data)
-        rec["images"].append({"file": fname, "at": time.time(), "reason": reason, "bytes": len(data)})
+        rec["images"].append({"file": fname, "at": time.time(), "reason": reason, "bytes": len(data), "source": source})
         store.save(rec)
     if store.S3_ENABLED:
         asyncio.get_running_loop().run_in_executor(None, _quiet_upload, iid, fname)
@@ -833,7 +939,10 @@ async def custom_llm(iid: str, token: str, req: Request):
         if not _token_ok(rec, token, current_only=True):
             log.warning("[%s] rejected LLM request with stale or wrong token", iid)
             raise HTTPException(403, "This call session is no longer active")
-        prep = brain.prepare_turn(rec, messages)
+        if rec.get("disqualified"):
+            prep = {"reply": f"The interview has been stopped, and {brain.END_PHRASE}."}
+        else:
+            prep = brain.prepare_turn(rec, messages)
         rec["last_seen"] = time.time()
         store.save(rec)
         plan = rec["plan"]

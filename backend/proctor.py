@@ -25,8 +25,10 @@ LABELS = {
     "ip_changed": "Rejoined from a different network (IP)", "reconnect_denied": "Tried to rejoin after the allowed window",
     "camera_off": "Camera stopped", "mic_off": "Microphone stopped", "devtools_suspected": "Browser developer tools may be open",
     "speaker_voice_while_muted": "Voice detected while muted",
+    "integrity_warning": "Interviewer warned the candidate", "disqualified": "Interview stopped: rules broken after warnings",
+    "multi_monitor_removed": "Second screen disconnected", "screen_changed": "Screen setup changed",
 }
-HIGH = {"multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",
+HIGH = {"integrity_warning", "disqualified", "multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",
         "screen_share_not_monitor", "camera_off", "devtools_suspected", "speaker_voice_while_muted"}
 MEDIUM = {"tab_hidden", "window_blur", "fullscreen_exit", "copy", "cut", "shortcut", "multi_monitor", "print_screen",
           "face_missing_start", "ip_changed", "call_dropped", "reconnect_denied", "mute_on", "window_small",
@@ -110,6 +112,13 @@ def summary(rec: dict) -> dict:
         score += points
         reasons.append(why)
 
+    dq = rec.get("disqualified")
+    warns = rec.get("warnings") or []
+    if dq:
+        add(10, f"Disqualified: {dq.get('reason', 'rules broken after warnings')}")
+    elif warns:
+        add(3 * len(warns), f"Warned by the interviewer {_x(len(warns))} for leaving the interview or a second screen")
+
     away = durations["tab_hidden"]
     if counts.get("tab_hidden", 0) >= 3 or away > 30:
         add(4 if away > 120 else 2, f"Left the interview tab {_x(counts.get('tab_hidden', 0))} ({int(away)}s away)")
@@ -150,11 +159,13 @@ def summary(rec: dict) -> dict:
         add(3, "Camera stopped during the interview")
     risk = "high" if score >= 7 else "medium" if score >= 3 else "low"
     return {"risk": risk, "risk_points": score, "reasons": reasons, "counts": counts,
+            "warnings": warns, "disqualified": dq,
             "durations": {k: int(v) for k, v in durations.items()},
             "hidden_seconds": int(away), "per_question": per_q,
             "timeline": [x for x in timeline if x["severity"] != "info" or x["type"] in
                          ("call_start", "call_end", "call_dropped", "session_start", "screen_share_started",
-                          "face_missing_end", "tab_visible", "window_focus", "mute_off", "network_online")],
+                          "face_missing_end", "tab_visible", "window_focus", "mute_off", "network_online",
+                          "multi_monitor_removed")],
             # kept for the old report field name
             "flags": reasons}
 

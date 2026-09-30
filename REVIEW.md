@@ -55,13 +55,29 @@ Verified end-to-end in real Chromium (`tests/e2e_browser.py`): full interview wi
 
 Still unverifiable from here: a live Vapi call. Do the checklist below on your first real call.
 
+## Round 4: candidate experience and stricter integrity
+
+| # | Area | Problem | Change |
+|---|---|---|---|
+| 29 | Candidate UI | The call screen was a plain card; the shared screen was never shown, and the controls were text buttons. | Video-call layout: AI interviewer tile, camera tile, live shared-screen tile, icon control bar (mic, camera locked on, screen share, captions, hang up), responsive down to 360 px phones. |
+| 30 | Candidate UI | The question was only heard, not shown. | The current question (and the question a follow-up belongs to) is on screen, from the server's state (`/progress` returns `question`). |
+| 31 | Candidate UI | The consent page, the opening line and the progress bar told the candidate the length and question count. | Removed everywhere; `/public` and `/progress` no longer return counts or time. |
+| 32 | Integrity | Tab and window switches were only logged. | Server-counted violations (`POST /violation`): the interviewer speaks a warning (`vapi.say`), then ends the call at the HR-set limit and marks the interview disqualified. The custom-LLM endpoint refuses to continue a disqualified interview and rejoin is refused, so a tampered page can't carry on. A new link for the same email warns HR. |
+| 33 | Integrity | A second monitor only produced a log line. | Blocks the start; mid-interview it shows a blocking overlay and counts as a violation. |
+| 34 | Integrity | Snapshots were camera-only. | A frame of the shared screen is captured the moment the candidate switches away (`ImageCapture`, works in a background tab), paired with a camera photo on the report. |
+| 35 | Privacy | Screen sharing kept running after the interview ended. | Screen sharing stops as soon as the call ends; camera and mic stop once no rejoin is possible. |
+| 36 | Report | Questions were shown as "q3"/"Q3"; no charts. | Questions named by their text in the report, review reasons, PDF and transcript; charts for scores (AI vs HR), competencies, time per question and an integrity timeline. |
+| 37 | HR | One long HR page, one sample. | Separate Interviews dashboard and New interview page; 7 sample roles. |
+
+Limits to know: `screen.isExtended` exists in Chrome and Edge only (other browsers show "not checkable"), and "Duplicate" display mode passes. A focus change shorter than 1 s (tab) or 2 s (window) is logged but not warned, so OS notifications don't cause warnings. `vapi.say` is used as the Vapi SDK defines it, but like the rest of the Vapi integration it has not yet run on a live call: check the first warning on your first real call.
+
 ## Still open (not fixed, your call)
 
 1. **The whole Vapi assistant config passes through the candidate's browser.** That includes the LLM URL and the session token. A technical candidate can open devtools, copy the token and send made-up turns to your server. The token stops stale calls and outsiders, but it doesn't stop the candidate. The real fix: create the assistant server-side with the Vapi **private** key (`POST /assistant`), store the custom-LLM credential and the `server.secret` in Vapi, and give the browser only the `assistantId`. I didn't build this because I can't test it against Vapi from here.
 2. **Latency.** Nothing is spoken until the full JSON decision comes back, so each turn waits for the silence window plus about 1 to 2 s. Measure it on a real call (the report shows the average). If it's too slow, stream the ack first ("Okay.") while the decision finishes, or use a faster model.
 3. **Unfinished interviews stay open forever.** A dropped call that never reconnects stays `in_progress`. HR has to press "Score now". Add a sweeper job that auto-scores after the link expires.
 4. **The camera is required.** Without a working camera the candidate can't start. Decide whether audio-only is allowed.
-5. **The `no_face` proctoring flag is dead code.** Nothing in the browser sends that event.
+5. **The violation endpoint trusts the candidate link.** Anyone holding the link could post violations during a live interview. It's the same trust model as every other candidate endpoint, which is fine while links stay private.
 6. **Storage is JSON files with in-process locks.** It works with one uvicorn worker only. More workers would corrupt state. Fine for the pilot. Move to Postgres before production.
 7. **Compliance.** The consent screen is a start, but India's DPDP Act needs more: the company named as data fiduciary, a stated retention period, a grievance contact, and a working deletion process. Vapi, Deepgram, Azure and the LLM provider keep their own copies, which the delete button doesn't touch.
 8. **The admin key goes in the query string for media URLs,** so it ends up in server and proxy logs. Acceptable for a pilot only.
@@ -75,6 +91,7 @@ Still unverifiable from here: a live Vapi call. Do the checklist below on your f
 - [ ] The server log never shows `could not match Vapi history to a snapshot`. If it does, Vapi stores assistant text differently than expected, so send me an example request body.
 - [ ] Interrupt the AI mid-question, then keep talking after a pause. The transcript should show no skipped questions.
 - [ ] Stay silent for 30 s. You should hear "Take your time...", not a hang-up.
+- [ ] Switch to another window for 3 s. The interviewer should say the warning out loud, and the report should show a screenshot of that window. Go past the limit: the interviewer says goodbye and the call ends.
 - [ ] Close the tab mid-interview, reopen the link within 30 s: it should say "Welcome back". Try again after 30 s: it must refuse.
 - [ ] Close the tab right after the goodbye. The report should still appear (webhook-triggered scoring) with most of the video.
 - [ ] Check the `recordingUrl` host in the saved `end_report`. If it isn't `*.vapi.ai`, add it to `RECORDING_HOSTS`.

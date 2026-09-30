@@ -1,0 +1,21 @@
+Frontend Developer (React) (2-5 years) - Pune (Hybrid)
+
+About the role
+We build a B2B procurement dashboard used daily by 1,200 purchase managers. You will own features end to end in our React + TypeScript web app, from design hand-off to production monitoring.
+
+Must have
+- 2+ years of production React with hooks and TypeScript
+- State management (Redux Toolkit, Zustand or React Query) and REST API integration
+- Strong CSS: flexbox/grid, responsive layouts, a design system or component library
+- Web performance basics: bundle size, lazy loading, Core Web Vitals
+- Testing with Jest and React Testing Library; Git and code reviews
+
+Good to have
+- Next.js or server-side rendering
+- Accessibility (WCAG 2.1 AA), Storybook
+- Charts and data grids (Recharts, AG Grid)
+
+Details
+- 3 days a week in office at Baner, Pune
+- Squad of 6: 3 frontend, 2 backend, 1 designer; reports to the Frontend Lead
+- Interview process: AI first round, take-home task, technical round, culture round

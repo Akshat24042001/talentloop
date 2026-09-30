@@ -1,144 +1,353 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
 <title>Interview</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  .stage{display:grid;grid-template-columns:1fr 300px;gap:16px}
-  @media (max-width:760px){.stage{grid-template-columns:1fr}}
-  video{width:100%;border-radius:10px;background:#000}
-  video.mirror{transform:scaleX(-1)}
-  .status{font-size:20px;font-weight:700;margin:6px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .caption{font-size:19px;line-height:1.5;min-height:96px;padding:16px;border-radius:10px;background:var(--chip);user-select:none;-webkit-user-select:none}
-  .you{font-size:15px;color:var(--muted);min-height:24px;margin-top:8px;user-select:none;-webkit-user-select:none}
-  .meter{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:6px}
-  .meter>div{height:100%;width:0;background:var(--ok);transition:width .08s}
-  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--muted)}
-  .dot.speaking{background:var(--brand);animation:pulse 1s infinite} .dot.listening{background:var(--ok)}
-  @keyframes pulse{50%{opacity:.35}}
-  ul.tips{padding-left:18px;margin:8px 0} ul.tips li{margin:4px 0}
-  .checks{list-style:none;padding:0;margin:10px 0} .checks li{margin:6px 0}
-  .checks li::before{content:"\25CB  ";color:var(--muted)} .checks li.ok::before{content:"\2714  ";color:var(--ok)}
-  .checks li.bad::before{content:"\2716  ";color:var(--bad)}
-  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
-  .pill{padding:4px 10px;border-radius:99px;background:var(--chip);font-size:13px;font-weight:600}
-  .pill.bad{background:#fdecea;color:#8a1c1c} .pill.ok{color:var(--ok)}
-  .progress{height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0}
-  .progress>div{height:100%;width:0;background:var(--brand);transition:width .4s}
-  .overlay{position:fixed;inset:0;background:rgba(10,12,16,.82);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
-  .overlay .card{max-width:460px}
-  button.muted{background:#fdecea;border-color:#f5c2c0;color:#8a1c1c}
-  .stars button{font-size:22px;padding:6px 10px}
-  .stars button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
-  .banner{background:#fff7e6;color:#7a4b00;padding:10px 12px;border-radius:8px;margin:8px 0;font-size:14px}
-  @media (prefers-color-scheme: dark){.banner{background:#3a2c10;color:#ffd58a}.pill.bad{background:#3a1616;color:#ffb4b4}}
+  /* ---------- pre-call (consent, system check, done) ---------- */
+  .pre-head{max-width:920px;margin:0 auto;padding:18px 16px 0;display:flex;align-items:center;justify-content:space-between}
+  .pre-main{max-width:920px;margin:0 auto;padding:18px 16px 64px}
+  .eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--brand);background:var(--brand-soft);padding:4px 10px;border-radius:99px;margin-bottom:10px}
+  .intro{margin:6px 0 18px} .intro h1{font-size:28px} .intro p{margin:4px 0 0;color:var(--muted)}
+  .rules{list-style:none;padding:0;margin:4px 0 16px;display:grid;gap:10px}
+  .rules li{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+  .rules .ri{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--brand-soft);color:var(--brand)}
+  .rules .ri svg{width:18px;height:18px}
+  .rules li.strict .ri{background:var(--bad-soft);color:var(--bad)}
+  .rules b{font-weight:650}
+  .consent{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:6px 0 0;padding:12px 14px;border-radius:12px;background:var(--brand-soft)}
+  .consent input{width:18px;height:18px;margin-top:2px;flex:none;accent-color:var(--brand)}
+  .check-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
+  @media (max-width:760px){.check-grid{grid-template-columns:1fr}}
+  .pv{position:relative;border-radius:16px;overflow:hidden;background:#0b0d12;aspect-ratio:4/3}
+  .pv video{width:100%;height:100%;object-fit:cover;display:block}
+  .pv .tag{position:absolute;left:10px;bottom:10px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:600;padding:4px 9px;border-radius:8px}
+  .mirror{transform:scaleX(-1)}
+  .meter{height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:10px}
+  .meter>div{height:100%;width:0;background:linear-gradient(90deg,var(--ok),#6ad3a6);transition:width .08s}
+  .checks{list-style:none;padding:0;margin:0 0 12px;display:grid;gap:8px}
+  .checks li{display:flex;gap:10px;align-items:center;font-size:14px;padding:9px 12px;border:1px solid var(--line);border-radius:10px}
+  .checks .ci{flex:none;width:22px;height:22px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--brand);animation:spin 1s linear infinite;display:grid;place-items:center;font-size:13px;font-weight:800;color:#fff}
+  .checks li.ok .ci{animation:none;border:0;background:var(--ok)} .checks li.ok .ci::after{content:"\2713"}
+  .checks li.bad{border-color:color-mix(in srgb,var(--bad) 40%,var(--line));background:var(--bad-soft)}
+  .checks li.bad .ci{animation:none;border:0;background:var(--bad)} .checks li.bad .ci::after{content:"!"}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .share-pv{margin-top:10px;border-radius:12px;overflow:hidden;background:#0b0d12;aspect-ratio:16/10;position:relative}
+  .share-pv video{width:100%;height:100%;object-fit:contain;display:block}
+  .done{text-align:center;padding:36px 20px}
+  .done .big-ic{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;margin:0 auto 14px;background:var(--ok-soft);color:var(--ok)}
+  .done .big-ic svg{width:32px;height:32px}
+  .done.bad .big-ic{background:var(--bad-soft);color:var(--bad)}
+  .stars{display:flex;gap:6px;justify-content:center;margin-top:10px}
+  .stars button{width:44px;height:44px;padding:0;font-size:22px;border-radius:12px;color:#c2c8d4}
+  .stars button.on{color:#f5a623;border-color:#f5a623;background:#fff7e6}
+
+  /* ---------- the call ---------- */
+  body.in-call{background:#0b0d12;overflow:hidden}
+  .call{position:fixed;inset:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100vh;height:100dvh;background:#0b0d12;color:#e9ecf2;
+        padding-top:env(safe-area-inset-top);user-select:none;-webkit-user-select:none}
+  .call-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px}
+  .ct-left{display:flex;align-items:center;gap:12px;min-width:0}
+  .ct-title{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ct-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .rec{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;letter-spacing:.06em;color:#ff8080;background:rgba(255,80,80,.12);padding:4px 10px;border-radius:99px}
+  .rec i{width:8px;height:8px;border-radius:50%;background:#ff4d4d;animation:blink 1.4s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;background:#1a1f2a;color:#c7cdd9;font-size:12.5px;font-weight:600;white-space:nowrap}
+  .pill svg{width:14px;height:14px}
+  .pill.bad{background:rgba(255,77,77,.16);color:#ff9a9a} .pill.warn{background:rgba(245,166,35,.16);color:#ffc46b}
+  .call-body{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;padding:0 18px 8px;min-height:0}
+  .tiles{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-content:center;min-height:0}
+  .tile{position:relative;border-radius:18px;overflow:hidden;background:#161a23;aspect-ratio:4/3;min-height:0;
+        box-shadow:0 0 0 2px transparent;transition:box-shadow .2s}
+  .tile video{width:100%;height:100%;object-fit:cover;display:block;background:#161a23}
+  .tile.screen video{object-fit:contain;background:#000}
+  .tile-label{position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:6px;background:rgba(10,12,18,.6);backdrop-filter:blur(6px);
+              padding:5px 10px;border-radius:9px;font-size:13px;font-weight:600;color:#fff}
+  .tile-label svg{width:15px;height:15px}
+  .mic-ind{display:none;color:#ff6b6b} .mic-ind.on{display:inline-flex}
+  .tile.talking{box-shadow:0 0 0 3px #4f7bff}
+  .tile.ai{background:radial-gradient(120% 90% at 50% 30%,#1c2340 0%,#141925 60%,#11151e 100%);display:grid;place-items:center}
+  .tile.ai.speaking{box-shadow:0 0 0 3px #4f7bff}
+  .ai-center{display:flex;flex-direction:column;align-items:center;gap:14px}
+  .ai-avatar{--v:0;position:relative;width:132px;height:132px;display:grid;place-items:center}
+  .ai-avatar .ring{position:absolute;inset:0;border-radius:50%;background:rgba(79,123,255,.18);transform:scale(calc(1 + var(--v) * .55));transition:transform .09s linear}
+  .ai-avatar .ring.r2{background:rgba(124,92,255,.14);transform:scale(calc(1 + var(--v) * .95));transition:transform .14s linear}
+  .tile.ai.speaking.novol .ring{animation:breathe 1.2s ease-in-out infinite}
+  .tile.ai.speaking.novol .ring.r2{animation-delay:.2s}
+  @keyframes breathe{50%{transform:scale(1.35)}}
+  .orb{position:relative;width:100px;height:100px;border-radius:50%;display:grid;place-items:center;
+       background:conic-gradient(from 210deg,#4f7bff,#7c5cff,#27c2ff,#4f7bff);box-shadow:0 10px 40px rgba(79,123,255,.35)}
+  .orb::after{content:"";position:absolute;inset:4px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#2a3560,#161c33 70%)}
+  .orb svg{position:relative;z-index:1;width:44px;height:44px;color:#dfe6ff}
+  .ai-state{display:flex;align-items:center;gap:8px;font-size:14px;color:#b8c0d0;font-weight:600;min-height:22px}
+  .bars{display:none;gap:3px;align-items:flex-end;height:14px}
+  .bars i{width:3px;background:#7fa0ff;border-radius:2px;animation:bar 0.9s ease-in-out infinite}
+  .bars i:nth-child(2){animation-delay:.15s}.bars i:nth-child(3){animation-delay:.3s}.bars i:nth-child(4){animation-delay:.45s}
+  @keyframes bar{0%,100%{height:4px}50%{height:14px}}
+  .tile.ai.speaking .bars{display:flex}
+  .lvl{position:absolute;right:10px;bottom:12px;width:44px;height:5px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden}
+  .lvl i{display:block;height:100%;width:0;background:#4fd18b;transition:width .08s}
+  .tile.me .cam-off{position:absolute;inset:0;display:none;place-items:center;color:#8b93a5;font-size:14px}
+  @media (min-width:921px){
+    .tiles.three{grid-template-columns:1.65fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr);align-content:stretch;max-height:720px;align-self:center;height:100%}
+    .tiles.three .tile{aspect-ratio:auto}
+    .tiles.three .ai{grid-row:1/3;grid-column:1}
+  }
+  .side{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto;padding-bottom:4px}
+  .qcard{background:#141925;border:1px solid #242b3a;border-radius:18px;padding:18px 18px 16px}
+  .q-kicker{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+  .q-kind{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8fb0ff;background:rgba(79,123,255,.14);padding:4px 10px;border-radius:99px}
+  .q-kind.fu{color:#c3a6ff;background:rgba(124,92,255,.16)}
+  .q-main{font-size:13px;color:#8e97a9;margin-bottom:6px;line-height:1.45}
+  .q-main b{color:#aab3c5;font-weight:600}
+  .q-text{font-size:20px;line-height:1.45;font-weight:600;color:#f3f5fa;animation:qin .35s ease}
+  @keyframes qin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .q-hint{font-size:12.5px;color:#7f889b;margin-top:12px;display:flex;gap:6px;align-items:flex-start}
+  .q-hint svg{width:14px;height:14px;flex:none;margin-top:2px}
+  .captions{background:#11151e;border:1px solid #1f2533;border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.5;min-height:74px}
+  .captions .who{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6f7a90;margin-right:6px}
+  .captions #capYou{color:#9fa8ba;margin-top:6px}
+  .banner{background:rgba(245,166,35,.14);color:#ffcd7a;padding:10px 12px;border-radius:12px;font-size:14px;display:flex;gap:8px;align-items:flex-start}
+  .banner svg{width:18px;height:18px;flex:none;margin-top:1px}
+  #err3 .err{background:rgba(255,77,77,.14);color:#ffb0b0}
+  .controls{display:flex;justify-content:center;align-items:center;gap:14px;padding:12px 16px calc(14px + env(safe-area-inset-bottom))}
+  .cbtn{position:relative;width:54px;height:54px;padding:0;border-radius:50%;border:0;background:#262c3a;color:#eef1f7;display:grid;place-items:center;transition:background .15s,transform .05s}
+  .cbtn:hover{background:#323a4c;border:0}
+  .cbtn svg{width:22px;height:22px}
+  .cbtn .i-off{display:none} .cbtn.off .i-on{display:none} .cbtn.off .i-off{display:block}
+  .cbtn.off{background:#e8453c;color:#fff} .cbtn.off:hover{background:#f05a51}
+  .cbtn.on{background:#dce6ff;color:#1b3fbf} .cbtn.on:hover{background:#cbd9ff}
+  .cbtn.end{width:68px;border-radius:28px;background:#e8453c;color:#fff} .cbtn.end:hover{background:#f05a51}
+  .cbtn.end svg{width:26px;height:26px}
+  .cbtn .lock{position:absolute;right:-2px;bottom:-2px;width:20px;height:20px;border-radius:50%;background:#0b0d12;display:grid;place-items:center;color:#9aa3b5}
+  .cbtn .lock svg{width:11px;height:11px}
+  .cbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:64px;left:50%;transform:translateX(-50%);background:#1d2230;color:#fff;font-size:12px;font-weight:500;padding:5px 9px;border-radius:7px;white-space:nowrap;pointer-events:none}
+  @media (max-width:920px){
+    .call-top{padding:10px 12px}
+    .ct-title{font-size:14px}
+    .call-body{grid-template-columns:1fr;grid-template-rows:auto auto;align-content:start;overflow:auto;padding:0 12px 8px}
+    .tiles{grid-template-columns:1fr}
+    .tile.ai{aspect-ratio:16/11}
+    .tile.me{position:absolute;right:10px;top:10px;width:27%;max-width:150px;min-width:92px;aspect-ratio:3/4;z-index:3;border:2px solid rgba(255,255,255,.14)}
+    .tile.screen{position:absolute;left:10px;top:10px;width:30%;max-width:170px;aspect-ratio:16/10;z-index:3;border:2px solid rgba(255,255,255,.14)}
+    .tile.me .tile-label,.tile.screen .tile-label{left:6px;bottom:6px;padding:3px 7px;font-size:11px}
+    .tile.me .lvl{display:none}
+    .ai-avatar{width:104px;height:104px} .orb{width:78px;height:78px} .orb svg{width:34px;height:34px}
+    .q-text{font-size:18px}
+    .side{overflow:visible}
+    .controls{gap:10px}
+    .cbtn{width:50px;height:50px} .cbtn.end{width:62px}
+    .ct-right .pill.focus{display:none}
+  }
+  @media (max-width:380px){.cbtn{width:46px;height:46px}.controls{gap:8px}}
+
+  /* ---------- overlays ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(6,8,12,.78);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px}
+  .overlay .card{max-width:460px;width:100%;color:var(--ink)}
+  .modal-ic{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;background:var(--bad-soft);color:var(--bad);margin-bottom:12px}
+  .modal-ic svg{width:24px;height:24px}
+  .warnbar{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);z-index:70;width:min(560px,calc(100vw - 24px));
+           background:#2a1414;border:1px solid #6b2626;color:#ffe1e1;border-radius:16px;padding:14px 16px;display:flex;gap:12px;box-shadow:0 18px 50px rgba(0,0,0,.5);animation:drop .3s ease}
+  .warnbar.final{background:#3a1010;border-color:#a33}
+  .warnbar svg{width:24px;height:24px;flex:none;color:#ff7b7b}
+  .warnbar b{display:block;font-size:15px;margin-bottom:2px;color:#fff}
+  .warnbar span{font-size:13.5px;color:#f3caca}
+  @keyframes drop{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+  .toast{bottom:100px}
 </style>
 </head>
 <body>
-<div class="wrap" style="max-width:960px">
-  <h1 id="title">Interview</h1>
-  <p class="sub" id="subtitle"></p>
-  <div id="blocker" class="err hidden"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.22 3.48a.5.5 0 0 0 .78-.42V7.87a.5.5 0 0 0-.75-.43L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m9 10 3-3 3 3M12 7v6"/></symbol>
+    <symbol id="i-share-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 17H4a2 2 0 0 1-2-2V5c0-1.5 1-2 1-2"/><path d="M22 15V5a2 2 0 0 0-2-2H9"/><path d="M8 21h8M12 17v4"/><path d="m2 2 20 20"/></symbol>
+    <symbol id="i-cc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></symbol>
+    <symbol id="i-end" viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.96.96 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.27 11.27 0 0 0-2.67-1.85 1 1 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M2 14h2M20 14h2M9 13v2M15 13v2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-wifi-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20M8.5 16.5a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M12 20h.01"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a4 4 0 0 1 0 8H7a4 4 0 0 0 0 8h10"/><path d="m14 16 3 3-3 3"/></symbol>
+  </defs>
+</svg>
 
-  <!-- Step 1: consent -->
-  <div class="card" id="s1">
-    <h2>Before you start</h2>
-    <ul class="tips">
-      <li>This is a first-round interview conducted by an <b>AI interviewer</b>. It takes about <b id="mins"></b> minutes and has <b id="qcount"></b> questions.</li>
-      <li>Use a laptop or desktop with <b>Chrome or Edge</b>, a working camera and microphone, in a quiet place. Headphones help.</li>
-      <li>Speak naturally and take your time. You can ask the interviewer to repeat a question.</li>
-      <li id="shareTip" class="hidden"><b>You will be asked to share your entire screen</b> for the whole interview.</li>
-      <li>Stay on this page in full screen. Leaving the page, switching windows, pasting text, other people on camera and similar events are recorded and reviewed by HR.</li>
-      <li>If your connection drops, rejoin <b>within <span id="rw"></span> seconds</b> using the Rejoin button. After that the interview closes.</li>
-    </ul>
-    <label style="font-weight:400;display:flex;gap:10px;align-items:flex-start">
-      <input type="checkbox" id="consent" style="width:auto;margin-top:4px">
-      <span class="small">I agree that this interview (my camera video, audio, screen if shared, snapshots, transcript and the events above) will be recorded and processed by AI services, including cloud providers that may be outside India, only to evaluate my application. A person at the company reviews the result and makes the decision. I can ask HR for a human interview instead, and ask for my data to be deleted.</span>
-    </label>
-    <div class="actions"><button class="primary" id="toCheck" disabled>Continue</button></div>
-  </div>
+<!-- ======================= before / after the call ======================= -->
+<div id="pre">
+  <header class="pre-head">
+    <span class="brand"><span class="logo"><svg><use href="#i-logo"/></svg></span><span>TalentLoop</span></span>
+  </header>
+  <main class="pre-main">
+    <div class="intro">
+      <span class="eyebrow"><svg width="14" height="14"><use href="#i-bot"/></svg>AI interview</span>
+      <h1 id="title">Interview</h1>
+      <p id="subtitle"></p>
+    </div>
+    <div id="blocker" class="err hidden"></div>
 
-  <!-- Step 2: device check -->
-  <div class="card hidden" id="s2">
-    <h2>System check</h2>
-    <div class="row">
-      <div><video id="preview" class="mirror" autoplay muted playsinline></video></div>
-      <div>
-        <ul class="checks">
-          <li id="ckCam">Camera</li>
-          <li id="ckMic">Microphone: say "Hello, my name is ..."</li>
-          <li id="ckFace">Your face is clearly visible</li>
-          <li id="ckShare" class="hidden">Entire screen shared</li>
-        </ul>
-        <div class="meter"><div id="meter"></div></div>
-        <div class="actions">
-          <button id="speakerBtn" type="button">Test speakers</button>
-          <button id="shareBtn" class="hidden" type="button">Share entire screen</button>
+    <!-- Step 1: how it works + consent -->
+    <div class="card" id="s1">
+      <h2>Before you start</h2>
+      <ul class="rules">
+        <li><span class="ri"><svg><use href="#i-chat"/></svg></span><div>An <b>AI interviewer</b> talks with you, one question at a time. The question is always shown on your screen, and you can say <b>"please repeat"</b> any time.</div></li>
+        <li><span class="ri"><svg><use href="#i-sun"/></svg></span><div id="deviceRule">Sit in a quiet, well-lit place. Use the latest <b>Chrome or Edge</b>. Headphones help.</div></li>
+        <li><span class="ri"><svg><use href="#i-user"/></svg></span><div>Keep your <b>camera on</b> and your face visible. Only you should be in view.</div></li>
+        <li class="strict" id="ruleFocus"><span class="ri"><svg><use href="#i-eye"/></svg></span><div id="ruleFocusText"></div></li>
+        <li class="strict hidden" id="ruleMon"><span class="ri"><svg><use href="#i-monitor"/></svg></span><div>Use <b>one screen only</b>. Disconnect any extra monitor before you start. A second screen is treated like leaving the interview.</div></li>
+        <li class="hidden" id="shareTip"><span class="ri"><svg><use href="#i-share"/></svg></span><div>You'll <b>share your entire screen</b> for the whole interview.</div></li>
+        <li><span class="ri"><svg><use href="#i-refresh"/></svg></span><div>If your connection drops, rejoin within <b><span id="rw"></span> seconds</b> using the Rejoin button.</div></li>
+      </ul>
+      <label class="consent">
+        <input type="checkbox" id="consent">
+        <span class="small">I agree that this interview (my camera video, audio, screen if shared, snapshots, transcript and the events above) will be recorded and processed by AI services, including cloud providers that may be outside India, only to evaluate my application. A person at the company reviews the result and makes the decision. I can ask HR for a human interview instead, and ask for my data to be deleted.</span>
+      </label>
+      <div class="actions"><button class="primary" id="toCheck" disabled>Continue</button></div>
+    </div>
+
+    <!-- Step 2: system check -->
+    <div class="card hidden" id="s2">
+      <h2>System check</h2>
+      <div class="check-grid">
+        <div>
+          <div class="pv"><video id="preview" class="mirror" autoplay muted playsinline></video><span class="tag">Camera preview</span></div>
+          <div class="meter"><div id="meter"></div></div>
+          <p class="small muted" style="margin:6px 0 0">Say "Hello, my name is ..." to test your microphone.</p>
         </div>
-        <p class="small muted" id="checkMsg"></p>
-        <div class="actions"><button class="primary" id="startBtn" disabled>Start interview</button></div>
+        <div>
+          <ul class="checks">
+            <li id="ckCam"><span class="ci"></span><span class="ct">Camera</span></li>
+            <li id="ckMic"><span class="ci"></span><span class="ct">Microphone</span></li>
+            <li id="ckFace"><span class="ci"></span><span class="ct">Your face is clearly visible</span></li>
+            <li id="ckScreen" class="hidden"><span class="ci"></span><span class="ct">Single screen</span></li>
+            <li id="ckShare" class="hidden"><span class="ci"></span><span class="ct">Entire screen shared</span></li>
+          </ul>
+          <div class="actions" style="margin-top:0">
+            <button id="speakerBtn" type="button">Test speakers</button>
+            <button id="shareBtn" class="hidden" type="button"><svg><use href="#i-share"/></svg>Share entire screen</button>
+          </div>
+          <div class="share-pv hidden" id="sharePv"><video id="sharePreview" autoplay muted playsinline></video></div>
+          <p class="small muted" id="checkMsg"></p>
+          <div class="actions"><button class="primary" id="startBtn" disabled>Join interview</button></div>
+        </div>
+      </div>
+      <div id="err2"></div>
+    </div>
+
+    <!-- Step 4: done / dropped / stopped -->
+    <div class="card hidden done" id="s4">
+      <div class="big-ic" id="doneIc"><svg><use href="#i-check"/></svg></div>
+      <h2 id="doneTitle" style="font-size:22px">Thank you</h2>
+      <p id="doneMsg" class="muted">Your interview is complete. The HR team will get back to you.</p>
+      <p class="small muted" id="uploadMsg"></p>
+      <div class="actions hidden" id="reconnectBox" style="justify-content:center"><button class="primary" id="reconnectBtn">Rejoin now</button><span class="small" id="rejoinLeft"></span></div>
+      <div id="fbBox" class="hidden" style="max-width:460px;margin:18px auto 0">
+        <h3>How was this interview experience?</h3>
+        <div class="stars" id="stars"></div>
+        <textarea id="fbText" style="min-height:64px;margin-top:12px" placeholder="Anything we should improve? (optional)"></textarea>
+        <div class="actions" style="justify-content:center"><button id="fbSend" disabled>Send feedback</button><span id="fbDone" class="small ok"></span></div>
       </div>
     </div>
-    <div id="err2"></div>
-  </div>
+  </main>
+</div>
 
-  <!-- Step 3: interview -->
-  <div class="card hidden" id="s3">
-    <div class="stage">
-      <div>
-        <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting...</span></div>
-        <div class="small muted" id="progText"></div>
-        <div class="progress"><div id="progBar"></div></div>
-        <div class="caption" id="caption">The interviewer will start speaking in a moment.</div>
-        <div class="you" id="youSaid"></div>
-        <div id="mutedBanner" class="banner hidden">You are muted. The interviewer cannot hear you. Click <b>Unmute</b> to answer.</div>
-        <p class="small muted">When you finish an answer, just stop talking. Say "can you repeat that" anytime.</p>
-        <div class="meter"><div id="meter2"></div></div>
+<!-- ======================= the call ======================= -->
+<div class="call hidden" id="s3">
+  <div class="call-top">
+    <div class="ct-left"><span class="rec"><i></i>REC</span><span class="ct-title" id="callTitle"></span></div>
+    <div class="ct-right">
+      <span class="pill hidden" id="netPill"></span>
+      <span class="pill warn hidden" id="warnPill"></span>
+      <span class="pill focus" id="focusPill"><svg><use href="#i-eye"/></svg>Stay on this screen</span>
+    </div>
+  </div>
+  <div class="call-body">
+    <div class="tiles" id="tiles">
+      <div class="tile ai novol" id="aiTile">
+        <div class="ai-center">
+          <div class="ai-avatar"><div class="ring r2"></div><div class="ring"></div><div class="orb"><svg><use href="#i-bot"/></svg></div></div>
+          <div class="ai-state"><span class="bars"><i></i><i></i><i></i><i></i></span><span id="statusText">Connecting...</span></div>
+        </div>
+        <div class="tile-label"><span>AI Interviewer</span></div>
       </div>
-      <div>
+      <div class="tile me" id="meTile">
         <video id="self" class="mirror" autoplay muted playsinline></video>
-        <div class="bar">
-          <span class="pill" id="recPill">&#9679; Recording</span>
-          <span class="pill hidden" id="sharePill">Screen shared</span>
-          <span class="pill hidden" id="netPill"></span>
-        </div>
-        <div class="actions">
-          <button id="muteBtn">Mute</button>
-          <button id="shareBtn2">Share screen</button>
-          <button id="endBtn">End interview</button>
-        </div>
+        <div class="tile-label"><span class="mic-ind" id="meMic"><svg><use href="#i-mic-off"/></svg></span><span>You</span></div>
+        <div class="lvl"><i id="meter2"></i></div>
+      </div>
+      <div class="tile screen hidden" id="screenTile">
+        <video id="screenVid" autoplay muted playsinline></video>
+        <div class="tile-label"><svg><use href="#i-share"/></svg><span>Your screen</span></div>
       </div>
     </div>
-    <div id="err3"></div>
+    <aside class="side">
+      <div class="qcard" id="qCard">
+        <div class="q-kicker"><span class="q-kind" id="qKind">Question</span></div>
+        <div class="q-main hidden" id="qMain"></div>
+        <div class="q-text" id="qText">Connecting you to your interviewer...</div>
+        <div class="q-hint"><svg><use href="#i-mic"/></svg><span>Answer out loud and take your time. When you finish, just pause. Say "please repeat" if you missed anything.</span></div>
+      </div>
+      <div class="captions" id="captions" aria-live="polite">
+        <div id="capAi"><span class="who">Interviewer</span><span id="capAiText" class="muted">...</span></div>
+        <div id="capYou"></div>
+      </div>
+      <div id="mutedBanner" class="banner hidden"><svg><use href="#i-mic-off"/></svg><span>You're muted, so the interviewer can't hear you. Tap the microphone to answer.</span></div>
+      <div id="err3"></div>
+    </aside>
   </div>
-
-  <!-- Step 4: done / dropped -->
-  <div class="card hidden" id="s4">
-    <h2 id="doneTitle">Thank you</h2>
-    <p id="doneMsg">Your interview is complete. The HR team will get back to you.</p>
-    <p class="small muted" id="uploadMsg"></p>
-    <div class="actions hidden" id="reconnectBox"><button class="primary" id="reconnectBtn">Rejoin now</button><span class="small" id="rejoinLeft" style="align-self:center"></span></div>
-    <div id="fbBox" class="hidden">
-      <h3 style="margin-top:14px">How was this interview experience?</h3>
-      <div class="stars actions" id="stars"></div>
-      <textarea id="fbText" style="min-height:60px" placeholder="Anything we should improve? (optional)"></textarea>
-      <div class="actions"><button id="fbSend" disabled>Send feedback</button><span id="fbDone" class="small ok"></span></div>
-    </div>
+  <div class="controls">
+    <button class="cbtn" id="muteBtn" aria-label="Mute microphone" data-tip="Mute"><svg class="i-on"><use href="#i-mic"/></svg><svg class="i-off"><use href="#i-mic-off"/></svg></button>
+    <button class="cbtn" id="camBtn" aria-label="Camera stays on" data-tip="Camera stays on during the interview"><svg><use href="#i-cam"/></svg><span class="lock"><svg><use href="#i-lock"/></svg></span></button>
+    <button class="cbtn" id="shareBtn2" aria-label="Share screen" data-tip="Share screen"><svg class="i-on"><use href="#i-share"/></svg><svg class="i-off"><use href="#i-share-off"/></svg></button>
+    <button class="cbtn on" id="ccBtn" aria-label="Captions" data-tip="Captions"><svg><use href="#i-cc"/></svg></button>
+    <button class="cbtn end" id="endBtn" aria-label="End interview" data-tip="End interview"><svg><use href="#i-end"/></svg></button>
   </div>
 </div>
 
+<!-- ======================= overlays ======================= -->
 <div class="overlay hidden" id="shareOverlay"><div class="card">
+  <div class="modal-ic"><svg><use href="#i-share-off"/></svg></div>
   <h2>Screen sharing stopped</h2>
-  <p>This interview requires your entire screen to be shared. Please share it again to continue. This has been recorded.</p>
-  <div class="actions"><button class="primary" id="reshareBtn">Share entire screen</button></div>
+  <p>This interview requires your entire screen to be shared. Share it again to continue. This has been recorded.</p>
+  <div class="actions"><button class="primary" id="reshareBtn"><svg><use href="#i-share"/></svg>Share entire screen</button></div>
   <div id="reshareErr" class="small bad"></div>
 </div></div>
 <div class="overlay hidden" id="fsOverlay"><div class="card">
+  <div class="modal-ic"><svg><use href="#i-monitor"/></svg></div>
   <h2>Please return to full screen</h2>
   <p>Leaving full screen during the interview is recorded.</p>
   <div class="actions"><button class="primary" id="fsBtn">Return to full screen</button></div>
 </div></div>
+<div class="overlay hidden" id="monOverlay"><div class="card">
+  <div class="modal-ic"><svg><use href="#i-monitor"/></svg></div>
+  <h2>Second screen detected</h2>
+  <p>This interview must be taken on one screen. Disconnect the extra monitor (or set your displays to "Duplicate") to continue. The interviewer has been notified.</p>
+  <p class="small muted">This message closes by itself once only one screen is connected.</p>
+</div></div>
+<div class="overlay hidden" id="endModal"><div class="card">
+  <div class="modal-ic"><svg><use href="#i-end"/></svg></div>
+  <h2>End the interview?</h2>
+  <p>If you leave now, you <b>won't be able to rejoin</b> or continue this interview.</p>
+  <div class="actions"><button id="endCancel">Stay in interview</button><button class="danger" id="endConfirm">End interview</button></div>
+</div></div>
+<div class="overlay hidden" id="dqOverlay"><div class="card">
+  <div class="modal-ic"><svg><use href="#i-alert"/></svg></div>
+  <h2>The interview has been stopped</h2>
+  <p>You left the interview after the final warning. The hiring team has been informed.</p>
+</div></div>
+<div class="warnbar hidden" id="warnBar"><svg><use href="#i-alert"/></svg><div><b id="warnTitle"></b><span id="warnText"></span></div></div>
 
 <script type="module">
 // Self-hosted SDKs (no third-party CDN at interview time).
@@ -147,13 +356,19 @@ const vapiReady = import('/vendor/vapi-web.mjs').then(m => { Vapi = m.default?.d
 const $ = id => document.getElementById(id);
 const iid = new URLSearchParams(location.search).get('id');
 const CHUNK_MS = 5000;
-let P = null, stream, screenStream, vapi, inCall = false, ended = false, starting = false, audioCtx, micAnalyser;
-let events = [], lastCaption = '', faceDet = null, faceOk = false, micOk = false, faceState = {missing: 0, missingOn: false, multi: 0, lastMulti: 0};
-let camRec = null, screenRec = null, mixDest = null, aiAttached = false, upQueue = [], upBusy = false, upFailed = false;
-let hbTimer = null, progTimer = null, snapTimer = null, rejoinTimer = null, remainingSec = null, qNum = null, qTotal = null;
+let P = null, stream = null, screenStream = null, vapi, inCall = false, ended = false, starting = false, audioCtx, micAnalyser;
+let events = [], faceDet = null, faceOk = false, micOk = false, faceState = {missing: 0, missingOn: false, multi: 0};
+let camRec = null, screenRec = null, mixDest = null, upQueue = [], upBusy = false, upFailed = false;
+let hbTimer = null, progTimer = null, snapTimer = null, rejoinTimer = null, monTimer = null;
+let terminated = false, pickerUntil = 0, away = null, monBlocked = false, lastQKey = '', gotVolume = false;
 const cooldown = {};
 
-function show(step){ ['s1','s2','s3','s4'].forEach(s => $(s).classList.toggle('hidden', s !== step)); }
+function show(step){
+  const call = step === 's3';
+  $('pre').classList.toggle('hidden', call); $('s3').classList.toggle('hidden', !call);
+  document.body.classList.toggle('in-call', call);
+  ['s1','s2','s4'].forEach(s => $(s).classList.toggle('hidden', s !== step));
+}
 function once(key, ms){ const n = Date.now(); if (cooldown[key] && n - cooldown[key] < ms) return false; cooldown[key] = n; return true; }
 function ev(type, detail=''){ events.push({type, ts: Date.now(), detail: String(detail).slice(0,200)}); }
 async function post(path, body){ const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body ?? {})}); if(!r.ok){ let d; try{d=(await r.json()).detail}catch{}; const e = new Error(d||r.statusText); e.status = r.status; throw e;} return r.json(); }
@@ -161,29 +376,45 @@ async function flushEvents(){ if(!events.length) return; const b = events.splice
 setInterval(flushEvents, 5000);
 function blocker(msg){ $('blocker').textContent = msg; $('blocker').classList.remove('hidden'); ['s1','s2'].forEach(s => $(s).classList.add('hidden')); }
 function errBox(id, msg){ const d = document.createElement('div'); d.className = 'err'; d.textContent = msg; $(id).replaceChildren(d); }
+function setCheck(id, state, text){ const li = $(id); li.classList.remove('ok','bad'); if (state) li.classList.add(state); if (text) li.querySelector('.ct').textContent = text; }
+let toastT = null;
+function toast(msg){ let t = document.querySelector('.toast'); if (!t){ t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 3500); }
 const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && !/Windows|Macintosh|Linux x86/.test(navigator.userAgent));
+const extendedDisplay = () => typeof screen.isExtended === 'boolean' ? screen.isExtended : null;
 
 // ---------------------------------------------------------------- load
+function closedScreen(title, msg, bad){ show('s4'); $('doneTitle').textContent = title; $('doneMsg').textContent = msg; $('s4').classList.toggle('bad', !!bad);
+  $('doneIc').innerHTML = `<svg><use href="#${bad ? 'i-alert' : 'i-check'}"/></svg>`; }
 async function load(){
   if(!iid){ blocker('Invalid interview link.'); return; }
   const r = await fetch(`/api/interviews/${iid}/public`);
   if(!r.ok){ blocker('This interview link is not valid.'); return; }
   P = await r.json();
-  $('title').textContent = `${P.role || 'Interview'}${P.company ? ' · ' + P.company : ''}`;
-  $('subtitle').textContent = P.candidate_name ? `For ${P.candidate_name}` : '';
-  $('mins').textContent = P.duration_min; $('qcount').textContent = P.questions; $('rw').textContent = P.reconnect_window_sec;
-  if (P.require_screen_share){ $('shareTip').classList.remove('hidden'); $('ckShare').classList.remove('hidden'); $('shareBtn').classList.remove('hidden'); }
-  if (P.status === 'completed' || P.status === 'scored'){ show('s4'); return; }
-  if (P.status === 'incomplete' || P.status === 'cancelled'){ show('s4'); $('doneTitle').textContent = 'Interview closed'; $('doneMsg').textContent = 'This interview is closed. Please contact HR if you think this is a mistake.'; return; }
-  if (P.expired){ show('s4'); $('doneTitle').textContent='Link expired'; $('doneMsg').textContent='Please contact HR for a new link.'; return; }
+  const title = `${P.role || 'Interview'}${P.company ? ' · ' + P.company : ''}`;
+  $('title').textContent = title; $('callTitle').textContent = title; document.title = `Interview · ${P.role || ''}`;
+  $('subtitle').textContent = P.candidate_name ? `Hi ${P.candidate_name.split(' ')[0]}, welcome. Here's how it works.` : "Here's how it works.";
+  $('rw').textContent = P.reconnect_window_sec;
+  const mw = P.max_warnings;
+  $('ruleFocusText').innerHTML = mw > 0
+    ? `<b>Stay on this screen.</b> If you switch tabs, windows or apps, the interviewer will warn you. After <b>${mw} warning${mw === 1 ? '' : 's'}</b>, the next time ends the interview.`
+    : `<b>Stay on this screen.</b> Switching tabs, windows or apps <b>ends the interview immediately</b>.`;
+  if (!P.enforce_focus){ $('ruleFocus').classList.remove('strict'); $('ruleFocusText').innerHTML = '<b>Stay on this screen.</b> Leaving the page, switching windows and similar events are recorded and reviewed by HR.'; }
+  if (P.block_multi_monitor){ $('ruleMon').classList.remove('hidden'); $('ckScreen').classList.remove('hidden'); }
+  if (P.require_screen_share){ $('shareTip').classList.remove('hidden'); $('ckShare').classList.remove('hidden'); $('shareBtn').classList.remove('hidden');
+    $('deviceRule').innerHTML = 'Sit in a quiet, well-lit place. Use a <b>laptop or desktop</b> with the latest <b>Chrome or Edge</b>. Headphones help.'; }
+  else { $('shareBtn2').classList.toggle('hidden', !navigator.mediaDevices?.getDisplayMedia || isMobile); }
+  if (P.disqualified){ closedScreen('Interview closed', 'This interview was stopped because the interview rules were broken after warnings. Please contact HR if you think this is a mistake.', true); return; }
+  if (P.status === 'completed' || P.status === 'scored'){ closedScreen('Thank you', 'Your interview is complete. The HR team will get back to you.'); return; }
+  if (P.status === 'incomplete' || P.status === 'cancelled'){ closedScreen('Interview closed', 'This interview is closed. Please contact HR if you think this is a mistake.', true); return; }
+  if (P.expired){ closedScreen('Link expired', 'Please contact HR for a new link.', true); return; }
   if (P.not_open_yet){ blocker(`This interview opens at ${new Date(P.available_from*1000).toLocaleString()}. Please come back then.`); return; }
-  // Browser capability checks
   const missing = [];
   if (!navigator.mediaDevices?.getUserMedia) missing.push('camera/microphone access');
   if (!window.MediaRecorder) missing.push('video recording');
   if (!window.AudioContext) missing.push('audio processing');
   if (P.require_screen_share && (!navigator.mediaDevices?.getDisplayMedia || isMobile)) missing.push('screen sharing (use a laptop or desktop)');
-  if (missing.length){ blocker(`This browser cannot run the interview (missing: ${missing.join(', ')}). Please open the link in the latest Chrome or Edge on a laptop or desktop.`); return; }
+  if (missing.length){ blocker(`This browser cannot run the interview (missing: ${missing.join(', ')}). Please open the link in the latest Chrome or Edge${P.require_screen_share ? ' on a laptop or desktop' : ''}.`); return; }
   if (P.resuming){
     $('toCheck').textContent = 'Rejoin your interview';
     $('consent').checked = true; $('toCheck').disabled = false;
@@ -194,43 +425,71 @@ $('consent').onchange = e => $('toCheck').disabled = !e.target.checked;
 
 // ---------------------------------------------------------------- step 2: checks
 $('toCheck').onclick = async () => {
-  post(`/api/interviews/${iid}/consent`, {version: 'v3'}).catch(()=>{});
+  post(`/api/interviews/${iid}/consent`, {version: 'v4'}).catch(()=>{});
   show('s2');
   try{
-    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}, video:{width:{ideal:640},height:{ideal:360},frameRate:{ideal:15}}});
-  }catch(e){ errBox('err2', `Camera/microphone blocked: ${e.message}. Allow access in the browser address bar and reload the page.`); $('ckCam').className='bad'; return; }
-  $('ckCam').className = 'ok';
+    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}, video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:15}}});
+  }catch(e){ errBox('err2', `Camera/microphone blocked: ${e.message}. Allow access in the browser address bar and reload the page.`); setCheck('ckCam', 'bad'); return; }
+  setCheck('ckCam', 'ok');
   $('preview').srcObject = stream; $('self').srcObject = stream;
   stream.getVideoTracks()[0].onended = () => { if (inCall) ev('camera_off'); };
   stream.getAudioTracks()[0].onended = () => { if (inCall) ev('mic_off'); };
   audioCtx = new AudioContext();
   micAnalyser = audioCtx.createAnalyser(); micAnalyser.fftSize = 512;
   audioCtx.createMediaStreamSource(stream).connect(micAnalyser);
-  const buf = new Uint8Array(micAnalyser.fftSize); let heard = 0, loudMuted = 0;
+  const buf = new Uint8Array(micAnalyser.fftSize); let heard = 0, loudMuted = 0, talk = 0;
   (function tick(){
+    if (!stream) return;
     micAnalyser.getByteTimeDomainData(buf); let peak = 0;
     for(const v of buf) peak = Math.max(peak, Math.abs(v-128));
     const pct = Math.min(100, peak*1.6);
-    $('meter').style.width = pct+'%'; $('meter2').style.width = pct+'%';
-    if (!micOk && pct > 25 && ++heard > 8){ micOk = true; $('ckMic').className = 'ok'; updateStart(); }
+    const muted = !!(vapi && vapi.isMuted && vapi.isMuted());
+    $('meter').style.width = pct+'%'; $('meter2').style.width = (muted ? 0 : pct)+'%';
+    if (!micOk && pct > 25 && ++heard > 8){ micOk = true; setCheck('ckMic', 'ok', 'Microphone works'); updateStart(); }
+    talk = (pct > 22 && !muted) ? 12 : Math.max(0, talk - 1);
+    $('meTile').classList.toggle('talking', inCall && talk > 0);
     // Talking while muted (e.g. someone being consulted): the camera recording still captures the room.
-    if (inCall && vapi && vapi.isMuted && vapi.isMuted()){ loudMuted = pct > 30 ? loudMuted + 1 : Math.max(0, loudMuted - 1);
+    if (inCall && muted){ loudMuted = pct > 30 ? loudMuted + 1 : Math.max(0, loudMuted - 1);
       if (loudMuted > 90 && once('vwm', 20000)){ ev('speaker_voice_while_muted'); snap('voice_while_muted'); loudMuted = 0; } }
     requestAnimationFrame(tick);
   })();
   sendDevice();
   initFace();
-  if (P.resuming){ micOk = true; $('ckMic').className = 'ok'; }  // no time to waste when rejoining
+  checkMonitors();
+  monTimer = setInterval(monTick, 2000);
+  if (window.screen && 'onchange' in screen) screen.addEventListener('change', monTick);
+  if (P.resuming){ micOk = true; setCheck('ckMic', 'ok', 'Microphone works'); }
   updateStart();
 };
 
+function checkMonitors(){
+  if (!P.block_multi_monitor) return true;
+  const ext = extendedDisplay();
+  if (ext === null){ setCheck('ckScreen', 'ok', 'Single screen (not checkable in this browser)'); return true; }
+  setCheck('ckScreen', ext ? 'bad' : 'ok', ext ? 'Second screen connected: disconnect it, or set displays to "Duplicate"' : 'Single screen');
+  return !ext;
+}
+function monTick(){
+  const ext = extendedDisplay();
+  if (!inCall){ if (!ended) { checkMonitors(); updateStart(); } return; }
+  if (!P.block_multi_monitor){ if (ext && once('mm', 60000)) ev('multi_monitor', 'screen changed'); return; }
+  if (ext && !monBlocked){
+    monBlocked = true; ev('multi_monitor', 'second screen connected during the call');
+    $('monOverlay').classList.remove('hidden'); snap('multi_monitor');
+    within(snapScreen('multi_monitor'), 1500).then(() => violation('multi_monitor', 'screen.isExtended'));
+  } else if (!ext && monBlocked){ monBlocked = false; ev('multi_monitor_removed'); $('monOverlay').classList.add('hidden'); }
+}
+
 function updateStart(){
+  if (!P || ended) return;
   const faceNeeded = P.face_detection && faceDet;
   const shareNeeded = P.require_screen_share;
-  const ready = stream && micOk && (!faceNeeded || faceOk) && (!shareNeeded || (screenStream && screenStream.active));
+  const monOk = !P.block_multi_monitor || extendedDisplay() !== true;
+  const ready = stream && micOk && (!faceNeeded || faceOk) && monOk && (!shareNeeded || (screenStream && screenStream.active));
   $('startBtn').disabled = !ready;
-  $('checkMsg').textContent = ready ? 'All set. Start when you are ready.' :
+  $('checkMsg').textContent = ready ? 'All set. Join when you are ready.' :
     !micOk ? 'Speak so we can check your microphone.' : (faceNeeded && !faceOk) ? 'Position your face in the camera, in good light.' :
+    !monOk ? 'Disconnect the second screen to continue.' :
     (shareNeeded && !screenStream) ? 'Share your entire screen to continue.' : '';
 }
 
@@ -244,13 +503,13 @@ async function sendDevice(){
   const cam = stream.getVideoTracks()[0], mic = stream.getAudioTracks()[0];
   post(`/api/interviews/${iid}/device`, {
     platform: navigator.userAgentData?.platform || navigator.platform, screen: `${screen.width}x${screen.height}`,
-    window: `${innerWidth}x${innerHeight}`, extended_display: String(screen.isExtended ?? 'unknown'),
+    window: `${innerWidth}x${innerHeight}`, extended_display: String(extendedDisplay() ?? 'unknown'),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: navigator.language,
     cores: navigator.hardwareConcurrency, memory_gb: navigator.deviceMemory ?? '', touch: navigator.maxTouchPoints,
     browser: (navigator.userAgentData?.brands || []).map(b => b.brand + ' ' + b.version).join(', ') || navigator.userAgent.slice(0, 120),
     camera: cam?.label || '', microphone: mic?.label || '', connection: navigator.connection?.effectiveType || ''
   }).catch(()=>{});
-  if (screen.isExtended === true) ev('multi_monitor', 'screen.isExtended');
+  if (extendedDisplay() === true) ev('multi_monitor', 'at system check');
 }
 
 // ---------------------------------------------------------------- face detection (runs in the browser, nothing is uploaded)
@@ -262,51 +521,97 @@ async function initFace(){
     faceDet = await vision.FaceDetector.createFromOptions(fileset, {
       baseOptions: {modelAssetPath: '/vendor/models/blaze_face_short_range.tflite', delegate: 'CPU'},
       runningMode: 'VIDEO', minDetectionConfidence: 0.5});
-  }catch(e){ console.warn('face detection unavailable', e); ev('face_check_unavailable', e.message); $('ckFace').textContent = 'Face check unavailable on this browser (skipped)'; faceDet = null; updateStart(); return; }
+  }catch(e){ console.warn('face detection unavailable', e); ev('face_check_unavailable', e.message); setCheck('ckFace', 'ok', 'Face check unavailable on this browser (skipped)'); faceDet = null; updateStart(); return; }
   setInterval(faceTick, 1000);
 }
 function faceTick(){
   const v = inCall ? $('self') : $('preview');
-  if (!faceDet || !v.videoWidth || document.hidden) return;
+  if (!faceDet || !stream || !v.videoWidth || document.hidden) return;
   // Real faces score ~0.85+. Present: >= 0.6. A second person must be clear (>= 0.75) to avoid shadows/posters.
   let n = 0, strong = 0;
   try{ const sc = faceDet.detectForVideo(v, performance.now()).detections.map(d => d.categories?.[0]?.score ?? 1);
        n = sc.filter(x => x >= 0.6).length; strong = sc.filter(x => x >= 0.75).length; }catch{ return; }
-  if (!inCall){ const ok = n === 1; if (ok !== faceOk){ faceOk = ok; $('ckFace').className = ok ? 'ok' : ''; $('ckFace').textContent = n > 1 ? 'Only you should be visible on camera' : 'Your face is clearly visible'; updateStart(); } return; }
+  if (!inCall){ const ok = n === 1; if (ok !== faceOk){ faceOk = ok; setCheck('ckFace', ok ? 'ok' : '', n > 1 ? 'Only you should be visible on camera' : 'Your face is clearly visible'); updateStart(); } return; }
   if (n === 0){ faceState.missing++; if (faceState.missing === 3 && !faceState.missingOn){ faceState.missingOn = true; ev('face_missing_start'); snap('no_face'); } }
   else { if (faceState.missingOn){ faceState.missingOn = false; ev('face_missing_end'); } faceState.missing = 0; }
   if (strong >= 2){ if (++faceState.multi >= 2 && once('multi', 30000)){ ev('multiple_faces', `${n} faces`); snap('multiple_faces'); } } else faceState.multi = 0;
 }
 
-// ---------------------------------------------------------------- snapshots
+// ---------------------------------------------------------------- snapshots (camera, and a frame of the shared screen)
+function upload(blob, reason, source){ if (blob) fetch(`/api/interviews/${iid}/snapshot?reason=${reason}&source=${source}`, {method:'POST', headers:{'Content-Type':'image/jpeg'}, body: blob}).catch(()=>{}); }
 function snap(reason){
   if (!P.snapshots || !stream) return;
   const v = $('self').videoWidth ? $('self') : $('preview'); if (!v.videoWidth) return;
   const c = document.createElement('canvas'); c.width = 320; c.height = Math.round(320 * v.videoHeight / v.videoWidth);
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-  c.toBlob(b => { if (b) fetch(`/api/interviews/${iid}/snapshot?reason=${reason}`, {method:'POST', headers:{'Content-Type':'image/jpeg'}, body: b}).catch(()=>{}); }, 'image/jpeg', 0.72);
+  c.toBlob(b => upload(b, reason, 'camera'), 'image/jpeg', 0.72);
+}
+async function snapScreen(reason){
+  const t = screenStream?.getVideoTracks()[0];
+  if (!P.snapshots || !t || t.readyState !== 'live') return;
+  // ImageCapture reads the track directly, so it works while this tab is in the background.
+  let src = null, w = 0, h = 0;
+  if (window.ImageCapture){ try{ src = await new ImageCapture(t).grabFrame(); w = src.width; h = src.height; }catch{} }
+  if (!src && $('screenVid').videoWidth){ src = $('screenVid'); w = src.videoWidth; h = src.videoHeight; }
+  if (!src || !w) return;
+  for (const [W, q] of [[1280, 0.62], [960, 0.5], [720, 0.42]]){
+    const c = document.createElement('canvas'); c.width = Math.min(W, w); c.height = Math.round(c.width * h / w);
+    c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    const b = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
+    if (b && b.size < 680 * 1024){ upload(b, reason, 'screen'); return; }
+  }
 }
 
 // ---------------------------------------------------------------- screen sharing
+function layoutTiles(){ const on = !!(screenStream && screenStream.active);
+  $('screenTile').classList.toggle('hidden', !on); $('tiles').classList.toggle('three', on);
+  $('sharePv').classList.toggle('hidden', !on);
+  $('shareBtn').innerHTML = `<svg><use href="#i-share"/></svg>${on ? 'Share a different screen' : 'Share entire screen'}`;
+  $('shareBtn2').classList.toggle('on', on); $('shareBtn2').dataset.tip = on ? (P?.require_screen_share ? 'Screen sharing is on (required)' : 'Stop sharing') : 'Share screen'; }
 async function startShare(required){
-  const s = await navigator.mediaDevices.getDisplayMedia({video: {displaySurface: 'monitor', frameRate: {ideal: 5, max: 10}}, audio: false,
-    monitorTypeSurfaces: 'include', selfBrowserSurface: 'exclude', surfaceSwitching: 'exclude'});
+  pickerUntil = Infinity;   // the browser's picker takes focus: not "leaving the interview"
+  let s;
+  try{
+    s = await navigator.mediaDevices.getDisplayMedia({video: {displaySurface: 'monitor', frameRate: {ideal: 5, max: 10}}, audio: false,
+      monitorTypeSurfaces: 'include', selfBrowserSurface: 'exclude', surfaceSwitching: 'exclude'});
+  } finally { pickerUntil = Date.now() + 3000; }
   const t = s.getVideoTracks()[0]; const surf = t.getSettings().displaySurface;
   if (required && surf && surf !== 'monitor'){ ev('screen_share_not_monitor', surf); s.getTracks().forEach(x => x.stop()); throw new Error('Please choose "Entire screen", not a window or a tab.'); }
   if (screenStream) screenStream.getTracks().forEach(x => x.stop());
   screenStream = s;
-  t.onended = () => { if (screenRec) stopRec(screenRec); screenRec = null; $('sharePill').classList.add('hidden'); $('shareBtn2').classList.remove('hidden');
+  $('screenVid').srcObject = s; $('sharePreview').srcObject = s;
+  t.onended = () => {
+    if (screenRec){ stopRec(screenRec); screenRec = null; }
+    screenStream = null; layoutTiles();
+    if (ended || terminated) return;
     if (inCall){ ev('screen_share_stopped'); snap('share_stopped'); if (P.require_screen_share) $('shareOverlay').classList.remove('hidden'); }
-    if (!inCall){ $('ckShare').className = ''; updateStart(); } };
+    else { setCheck('ckShare', ''); updateStart(); }
+  };
   ev('screen_share_started', surf || '');
-  $('ckShare').className = 'ok'; $('sharePill').classList.remove('hidden'); $('shareBtn2').classList.add('hidden');
+  setCheck('ckShare', 'ok'); layoutTiles();
   if (inCall) screenRec = startRec(new MediaStream([t]), 'screen', 700000);
   updateStart();
 }
-async function shareClick(required, errEl){ try{ await startShare(required); errEl && (errEl.textContent=''); return true; }catch(e){ if (e.name === 'NotAllowedError') ev('screen_share_denied'); errEl && (errEl.textContent = e.message); return false; } }
+async function shareClick(required, errEl){ errEl && (errEl.textContent=''); try{ await startShare(required); updateStart(); return true; }catch(e){ if (e.name === 'NotAllowedError') ev('screen_share_denied'); errEl && (errEl.textContent = e.message); return false; } }
+function stopScreenShare(){
+  if (screenStream){ screenStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); screenStream = null; }
+  $('screenVid').srcObject = null; $('sharePreview').srcObject = null; layoutTiles();
+}
+function stopCamera(){
+  if (stream){ stream.getTracks().forEach(t => { t.onended = null; t.stop(); }); stream = null; }
+  $('self').srcObject = null; $('preview').srcObject = null;
+  clearInterval(monTimer); try{ if (audioCtx && audioCtx.state !== 'closed') audioCtx.close(); }catch{}
+}
 $('shareBtn').onclick = () => shareClick(P.require_screen_share, $('checkMsg'));
-$('shareBtn2').onclick = () => shareClick(P.require_screen_share, null);
+$('shareBtn2').onclick = async () => {
+  if (screenStream && screenStream.active){
+    if (P.require_screen_share){ toast('Screen sharing is required and stays on until the interview ends.'); return; }
+    ev('screen_share_stopped', 'by candidate'); if (screenRec){ await stopRec(screenRec); screenRec = null; } stopScreenShare(); return;
+  }
+  await shareClick(P.require_screen_share, null);
+};
 $('reshareBtn').onclick = async () => { if (await shareClick(true, $('reshareErr'))) $('shareOverlay').classList.add('hidden'); };
+$('camBtn').onclick = () => toast('Your camera stays on for the whole interview.');
 
 // ---------------------------------------------------------------- recording: camera + BOTH voices, uploaded while recording
 function pickMime(video){ const t = video ? ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm','video/mp4'] : ['video/webm;codecs=vp8','video/webm','video/mp4'];
@@ -337,7 +642,7 @@ async function pump(){
 }
 function startCameraRecording(){
   // Mix the candidate's mic and the interviewer's voice, so the video has the whole conversation.
-  mixDest = audioCtx.createMediaStreamDestination(); aiAttached = false;
+  mixDest = audioCtx.createMediaStreamDestination();
   audioCtx.createMediaStreamSource(stream).connect(mixDest);
   const tracks = [...stream.getVideoTracks(), ...mixDest.stream.getAudioTracks()];
   camRec = startRec(new MediaStream(tracks), 'camera', 350000);
@@ -345,8 +650,8 @@ function startCameraRecording(){
   const t = setInterval(() => {
     const el = vapi?.getAudioPlayer?.() || document.querySelector('audio[data-participant-id]');
     const src = el?.srcObject;
-    if (src && src.getAudioTracks().length){ try{ audioCtx.createMediaStreamSource(src).connect(mixDest); aiAttached = true; }catch(e){ ev('ai_audio_not_recorded', e.message); } clearInterval(t); }
-    else if (++tries > 60){ ev('ai_audio_not_recorded', 'no assistant audio element'); clearInterval(t); }
+    if (src && src.getAudioTracks().length){ try{ audioCtx.createMediaStreamSource(src).connect(mixDest); }catch(e){ ev('ai_audio_not_recorded', e.message); } clearInterval(t); }
+    else if (++tries > 60 || !inCall){ if (inCall) ev('ai_audio_not_recorded', 'no assistant audio element'); clearInterval(t); }
   }, 500);
 }
 async function drainUploads(){
@@ -359,29 +664,55 @@ async function drainUploads(){
 
 // ---------------------------------------------------------------- call
 function setStatus(mode){
-  $('dot').className = 'dot ' + mode;
-  $('statusText').textContent = mode === 'speaking' ? 'Interviewer is speaking' : mode === 'listening' ? 'Listening. Take your time.' : 'Connecting...';
+  const t = $('aiTile'); t.classList.toggle('speaking', mode === 'speaking');
+  if (mode !== 'speaking') t.style.setProperty('--v', 0);
+  $('statusText').textContent = mode === 'speaking' ? 'Speaking' : mode === 'listening' ? 'Listening to you' : 'Connecting...';
+}
+function renderQuestion(q){
+  if (!q) return;
+  const key = `${q.kind}|${q.text}`; if (key === lastQKey) return; lastQKey = key;
+  const kind = $('qKind'), text = $('qText'), main = $('qMain');
+  if (q.kind === 'closing'){ kind.textContent = 'Wrapping up'; kind.className = 'q-kind'; main.classList.add('hidden'); text.textContent = "That's the end of the interview. Thank you for your time!"; }
+  else {
+    kind.textContent = q.kind === 'follow_up' ? 'Follow-up' : q.kind === 'rephrase' ? 'Question, rephrased' : 'Question';
+    kind.className = 'q-kind' + (q.kind === 'follow_up' ? ' fu' : '');
+    main.classList.toggle('hidden', q.kind !== 'follow_up' || !q.main);
+    main.innerHTML = ''; if (q.kind === 'follow_up' && q.main){ const b = document.createElement('b'); b.textContent = 'About: '; main.append(b, q.main); }
+    text.textContent = q.text;
+  }
+  text.style.animation = 'none'; void text.offsetWidth; text.style.animation = '';
+}
+function renderWarnings(n, max){
+  if (!n) return; const p = $('warnPill'); p.classList.remove('hidden');
+  p.innerHTML = `<svg><use href="#i-alert"/></svg>${n > max ? 'Stopped' : n === max ? 'Final warning' : `${n} warning${n === 1 ? '' : 's'}`}`;
+  p.className = 'pill ' + (n >= max ? 'bad' : 'warn');
 }
 async function pollProgress(){
-  try{ const p = await (await fetch(`/api/interviews/${iid}/progress`)).json(); qNum = p.q_num; qTotal = p.q_total; remainingSec = p.remaining_sec; renderProgress(); }catch{}
+  try{ const p = await (await fetch(`/api/interviews/${iid}/progress`)).json();
+    renderQuestion(p.question); renderWarnings(p.warnings, p.max_warnings);
+    if (p.disqualified && inCall && !terminated) handleTermination(); }catch{}
 }
-setInterval(() => { if (inCall && remainingSec > 0){ remainingSec--; renderProgress(); } }, 1000);
-function renderProgress(){
-  if (qNum == null) return;
-  const m = Math.floor((remainingSec || 0) / 60), s = String((remainingSec || 0) % 60).padStart(2, '0');
-  $('progText').textContent = `Question ${Math.min(qNum, qTotal)} of ${qTotal} · about ${m}:${s} left`;
-  $('progBar').style.width = Math.round((Math.min(qNum, qTotal) - 1) / qTotal * 100) + '%';
+function caption(role, text, final){
+  if (role === 'assistant'){ const el = $('capAiText'); el.textContent = text; el.classList.remove('muted'); $('capYou').replaceChildren(); }
+  else { const w = document.createElement('span'); w.className = 'who'; w.textContent = 'You'; const s = document.createElement('span'); s.textContent = text; s.style.opacity = final ? 1 : .7; $('capYou').replaceChildren(w, s); }
 }
+$('ccBtn').onclick = () => { const off = !$('captions').classList.toggle('hidden'); $('ccBtn').classList.toggle('on', off); try{ localStorage.setItem('tl_cc', off ? '1' : '0'); }catch{} };
+try{ if (localStorage.getItem('tl_cc') === '0'){ $('captions').classList.add('hidden'); $('ccBtn').classList.remove('on'); } }catch{}
 
 async function begin(){
   if (starting) return;
+  // A rejoin after a drop must share the screen again first (sharing stops when a call ends).
+  if (P.require_screen_share && !(screenStream && screenStream.active)){
+    if (!await shareClick(true, $('rejoinLeft'))) return;
+  }
   starting = true; $('startBtn').disabled = true; $('reconnectBtn').disabled = true;
   try{ await beginInner(); } finally { starting = false; $('reconnectBtn').disabled = false; }
 }
 async function beginInner(){
   show('s3'); ended = false; setStatus(''); $('err3').replaceChildren(); clearInterval(rejoinTimer);
   if (!stream){ show('s2'); errBox('err2', 'Camera is not ready. Please allow camera and microphone access.'); return; }
-  try{ await document.documentElement.requestFullscreen(); }catch{}
+  ['self'].forEach(id => $(id).play().catch(()=>{})); layoutTiles();
+  try{ await document.documentElement.requestFullscreen({navigationUI: 'hide'}); }catch{}
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   await vapiReady;
   if (!Vapi){ errBox('err3', 'Could not load the voice component. Check your internet connection and reload.'); return; }
@@ -393,17 +724,19 @@ async function beginInner(){
     inCall = true; setStatus('speaking'); ev('call_start');
     startCameraRecording();
     if (screenStream && screenStream.active && !screenRec) screenRec = startRec(new MediaStream(screenStream.getVideoTracks()), 'screen', 700000);
-    setTimeout(() => snap('reference'), 3000);
-    snapTimer = setInterval(() => snap('periodic'), 60000);
+    setTimeout(() => { snap('reference'); snapScreen('reference'); }, 3000);
+    snapTimer = setInterval(() => { snap('periodic'); snapScreen('periodic'); }, 60000);
     hbTimer = setInterval(() => post(`/api/interviews/${iid}/heartbeat`, {}).catch(()=>{}), 5000);
-    pollProgress(); progTimer = setInterval(pollProgress, 8000);
+    pollProgress(); progTimer = setInterval(pollProgress, 4000);
+    if (P.block_multi_monitor && extendedDisplay()) monTick();
   });
   vapi.on('speech-start', () => setStatus('speaking'));
   vapi.on('speech-end', () => setStatus('listening'));
+  vapi.on('volume-level', v => { if (!gotVolume){ gotVolume = true; $('aiTile').classList.remove('novol'); } $('aiTile').style.setProperty('--v', Math.min(1, (+v || 0) * 1.8)); });
   vapi.on('message', m => {
-    if (m.type !== 'transcript' || m.transcriptType !== 'final') return;
-    if (m.role === 'assistant'){ $('caption').textContent = m.transcript; $('youSaid').textContent = ''; pollProgress(); }
-    else if (m.role === 'user') $('youSaid').textContent = 'You: ' + m.transcript;
+    if (m.type !== 'transcript') return;
+    if (m.role === 'assistant' && m.transcriptType === 'final'){ caption('assistant', m.transcript, true); pollProgress(); }
+    else if (m.role === 'user') caption('user', m.transcript, m.transcriptType === 'final');
   });
   vapi.on('error', e => { ev('vapi_error', JSON.stringify(e).slice(0,200)); console.error(e); });
   vapi.on('call-end', finish);
@@ -417,38 +750,47 @@ $('reconnectBtn').onclick = begin;
 
 $('muteBtn').onclick = () => {
   if (!vapi) return; const m = !vapi.isMuted(); vapi.setMuted(m); ev(m ? 'mute_on' : 'mute_off');
-  $('muteBtn').textContent = m ? 'Unmute' : 'Mute'; $('muteBtn').classList.toggle('muted', m); $('mutedBanner').classList.toggle('hidden', !m);
-};
-$('endBtn').onclick = () => {
-  if (confirm('End the interview now? You will NOT be able to rejoin or continue it.')){ ev('ended_by_candidate'); endedByCandidate = true; vapi && vapi.stop(); }
+  $('muteBtn').classList.toggle('off', m); $('muteBtn').dataset.tip = m ? 'Unmute' : 'Mute'; $('muteBtn').setAttribute('aria-label', m ? 'Unmute microphone' : 'Mute microphone');
+  $('meMic').classList.toggle('on', m); $('mutedBanner').classList.toggle('hidden', !m);
 };
 let endedByCandidate = false;
+$('endBtn').onclick = () => $('endModal').classList.remove('hidden');
+$('endCancel').onclick = () => $('endModal').classList.add('hidden');
+$('endConfirm').onclick = () => { $('endModal').classList.add('hidden'); ev('ended_by_candidate'); endedByCandidate = true; vapi && vapi.stop(); };
 
 async function finish(){
   if (ended) return; ended = true; inCall = false;
   [hbTimer, progTimer, snapTimer].forEach(clearInterval);
+  if (away){ clearTimeout(away.timer); clearInterval(away.shotTimer); away = null; }
   if (faceState.missingOn){ faceState.missingOn = false; ev('face_missing_end'); }
   ev('call_end');
   show('s4');
   if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
-  $('fsOverlay').classList.add('hidden'); $('shareOverlay').classList.add('hidden');
+  ['fsOverlay','shareOverlay','monOverlay','endModal','dqOverlay'].forEach(id => $(id).classList.add('hidden'));
   await Promise.all([stopRec(camRec), stopRec(screenRec)]); camRec = screenRec = null;
+  stopScreenShare();   // the call is over: never keep capturing the candidate's screen
+  if (terminated){
+    closedScreen('Interview stopped', 'The interview was stopped because you left the interview screen after being warned. The hiring team has been informed.', true);
+    stopCamera();
+  }
   await flushEvents();
   await drainUploads();
   let res = {status: 'completed'};
   try{ res = await post(`/api/interviews/${iid}/complete`, {ended_by_candidate: endedByCandidate}); }catch{}
+  if (terminated) return;
   if (res.status === 'in_progress'){
     ev('call_dropped'); flushEvents();
-    $('doneTitle').textContent = 'The call dropped';
-    $('doneMsg').textContent = 'If this was a connection problem, rejoin now to continue from the same question.';
+    closedScreen('The call dropped', 'If this was a connection problem, rejoin now to continue from the same question.', true);
     $('reconnectBox').classList.remove('hidden');
     // The server's clock decides; the window started when the call dropped, not now.
     startRejoinCountdown(res.reconnect_seconds_left ?? res.reconnect_window_sec ?? P.reconnect_window_sec, $('rejoinLeft'));
-  } else if (res.status === 'incomplete'){
-    $('doneTitle').textContent = 'Interview ended'; $('doneMsg').textContent = 'You ended the interview. The HR team will review what was completed.'; showFeedback();
-  } else { showFeedback(); }
+    return;
+  }
+  stopCamera();
+  if (res.status === 'incomplete'){ closedScreen('Interview ended', 'You ended the interview. The HR team will review what was completed.'); }
+  showFeedback();
 }
-function closeFinal(msg){ show('s4'); $('doneTitle').textContent = 'Interview closed'; $('doneMsg').textContent = msg; $('reconnectBox').classList.add('hidden'); clearInterval(rejoinTimer); }
+function closeFinal(msg){ closedScreen('Interview closed', msg, true); $('reconnectBox').classList.add('hidden'); clearInterval(rejoinTimer); stopScreenShare(); stopCamera(); }
 function startRejoinCountdown(sec, el){
   let left = Math.max(0, Math.floor(sec)); clearInterval(rejoinTimer);
   const tick = () => {
@@ -464,19 +806,81 @@ function startRejoinCountdown(sec, el){
 let rating = 0;
 function showFeedback(){
   $('fbBox').classList.remove('hidden');
-  $('stars').replaceChildren(...[1,2,3,4,5].map(n => { const b = document.createElement('button'); b.textContent = '★'.repeat(1) + ' ' + n; b.type = 'button';
+  $('stars').replaceChildren(...[1,2,3,4,5].map(n => { const b = document.createElement('button'); b.textContent = '★'; b.type = 'button'; b.setAttribute('aria-label', `${n} star${n > 1 ? 's' : ''}`);
     b.onclick = () => { rating = n; [...$('stars').children].forEach((x, i) => x.classList.toggle('on', i < n)); $('fbSend').disabled = false; }; return b; }));
 }
 $('fbSend').onclick = async () => { try{ await post(`/api/interviews/${iid}/feedback`, {rating, comment: $('fbText').value}); $('fbDone').textContent = 'Thank you!'; $('fbSend').disabled = true; }catch(e){ $('fbDone').textContent = e.message; } };
 
+// ---------------------------------------------------------------- leaving the interview: warn, then stop
+// A short confirm delay filters out focus blips (OS notifications, the share-picker). What was on the screen
+// at that moment is captured from the screen share, and the interviewer says the warning out loud.
+const CONFIRM_MS = {tab_hidden: 1000, window_blur: 2000};
+function awayStart(kind){
+  if (!inCall || terminated || Date.now() < pickerUntil) return;
+  if (away){ if (kind === 'tab_hidden') away.kind = 'tab_hidden'; return; }
+  away = {kind, t0: Date.now(), confirmed: false, shots: 0};
+  away.timer = setTimeout(confirmAway, CONFIRM_MS[kind]);
+}
+const within = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))]);
+async function confirmAway(){
+  if (!away || away.confirmed || !inCall) return;
+  away.confirmed = true;
+  const a = away, kind = a.kind;
+  snap(kind);
+  a.shotTimer = setInterval(() => { if (away === a && a.shots++ < 3) snapScreen(kind + '_away'); }, 8000);
+  // Capture the screen before reporting: a final violation ends the call, and with it the screen share.
+  await within(snapScreen(kind), 1500);
+  violation(kind, `away ${Math.round((Date.now() - a.t0) / 1000)}s+`);
+}
+function awayEnd(){
+  if (!away) return; clearTimeout(away.timer); clearInterval(away.shotTimer);
+  const was = away; away = null;
+  if (was.confirmed && inCall){ setTimeout(() => snap('tab_return'), 500); }
+}
+async function violation(kind, detail){
+  if (!P.enforce_focus && kind !== 'multi_monitor') return;
+  let r;
+  try{ r = await post(`/api/interviews/${iid}/violation`, {type: kind, detail}); }catch(e){ ev('violation_report_failed', e.message); return; }
+  if (!r || r.action === 'ignored') return;
+  renderWarnings(r.warning, r.max_warnings ?? P.max_warnings);
+  if (r.action === 'terminate'){ handleTermination(r.say); return; }
+  showWarnBar(r.warning, r.max_warnings ?? P.max_warnings, kind);
+  speak(r.say, false);
+}
+function speak(text, endAfter){
+  if (!text || !vapi) return;
+  // interruptAssistantEnabled: cut in even if the interviewer is mid-sentence.
+  try{ vapi.say(text, endAfter, false, true); }catch(e){ ev('warning_not_spoken', e.message); }
+}
+let warnT = null;
+function showWarnBar(n, max, kind){
+  const what = kind === 'multi_monitor' ? 'A second screen was connected.' : kind === 'tab_hidden' ? 'You left the interview tab.' : 'You switched to another window.';
+  const final = n >= max;
+  $('warnTitle').textContent = final ? 'Final warning' : `Warning ${n} of ${max}`;
+  $('warnText').textContent = `${what} ${final ? 'If it happens again, the interview ends.' : 'Please stay on this screen. This has been noted for the hiring team.'}`;
+  $('warnBar').classList.toggle('final', final); $('warnBar').classList.remove('hidden');
+  clearTimeout(warnT); warnT = setTimeout(() => $('warnBar').classList.add('hidden'), 9000);
+}
+function handleTermination(say){
+  if (terminated) return; terminated = true;
+  $('warnBar').classList.add('hidden'); $('dqOverlay').classList.remove('hidden');
+  if (say) speak(say, true);
+  // The interviewer hangs up after speaking; if the call is still up, end it anyway.
+  setTimeout(() => { if (inCall && vapi) vapi.stop(); }, say ? 16000 : 4000);
+}
+
 // ---------------------------------------------------------------- integrity signals (only while the call is live)
-document.addEventListener('visibilitychange', () => { if (!inCall) return; ev(document.hidden ? 'tab_hidden' : 'tab_visible'); if (!document.hidden) setTimeout(() => snap('tab_return'), 500); });
-window.addEventListener('blur', () => { if (inCall && !document.hidden) ev('window_blur'); });
-window.addEventListener('focus', () => { if (inCall && !document.hidden) ev('window_focus'); });
+document.addEventListener('visibilitychange', () => {
+  if (!inCall) return;
+  if (document.hidden){ ev('tab_hidden'); awayStart('tab_hidden'); }
+  else { ev('tab_visible'); awayEnd(); }
+});
+window.addEventListener('blur', () => { if (!inCall || document.hidden || Date.now() < pickerUntil) return; ev('window_blur'); awayStart('window_blur'); });
+window.addEventListener('focus', () => { if (!inCall) return; if (!document.hidden) ev('window_focus'); awayEnd(); });
 document.addEventListener('fullscreenchange', () => {
   if (!inCall) return;
   if (!document.fullscreenElement){ ev('fullscreen_exit'); $('fsOverlay').classList.remove('hidden'); } else { ev('fullscreen_enter'); $('fsOverlay').classList.add('hidden'); } });
-$('fsBtn').onclick = async () => { try{ await document.documentElement.requestFullscreen(); }catch{} $('fsOverlay').classList.add('hidden'); };
+$('fsBtn').onclick = async () => { try{ await document.documentElement.requestFullscreen({navigationUI: 'hide'}); }catch{} $('fsOverlay').classList.add('hidden'); };
 ['copy','cut','paste'].forEach(t => document.addEventListener(t, e => { if (!inCall) return;
   const txt = t === 'paste' ? (e.clipboardData?.getData('text') || '') : String(getSelection() || '');
   ev(t, `${txt.length} chars`); if (t !== 'paste') e.preventDefault(); }, true));
@@ -491,11 +895,10 @@ document.addEventListener('keydown', e => {
 }, true);
 document.addEventListener('keyup', e => { if (inCall && e.key === 'PrintScreen'){ ev('print_screen'); } }, true);
 window.addEventListener('online', () => { if (inCall){ ev('network_online'); $('netPill').classList.add('hidden'); } });
-window.addEventListener('offline', () => { if (inCall){ ev('network_offline'); $('netPill').textContent = 'Connection lost, reconnecting...'; $('netPill').className = 'pill bad'; } });
-window.addEventListener('resize', () => { if (inCall && innerWidth < screen.availWidth * 0.6 && once('small', 30000)) ev('window_small', `${innerWidth}x${innerHeight}`); });
-if (window.screen && 'onchange' in screen) screen.addEventListener('change', () => { if (inCall && screen.isExtended && once('mm', 60000)) ev('multi_monitor', 'screen changed'); });
+window.addEventListener('offline', () => { if (inCall){ ev('network_offline'); $('netPill').innerHTML = '<svg><use href="#i-wifi-off"/></svg>Reconnecting...'; $('netPill').className = 'pill bad'; } });
+window.addEventListener('resize', () => { if (inCall && !isMobile && innerWidth < screen.availWidth * 0.6 && once('small', 30000)) ev('window_small', `${innerWidth}x${innerHeight}`); });
 setInterval(() => {  // docked developer tools make the page much smaller than the window
-  if (!inCall) return; const gapW = outerWidth - innerWidth * (devicePixelRatio || 1) / (window.visualViewport?.scale || 1), gapH = outerHeight - innerHeight;
+  if (!inCall || isMobile) return; const gapW = outerWidth - innerWidth * (devicePixelRatio || 1) / (window.visualViewport?.scale || 1), gapH = outerHeight - innerHeight;
   if ((gapW > 320 || gapH > 320) && !document.fullscreenElement && once('dev', 60000)) ev('devtools_suspected', `gap ${Math.round(gapW)}x${Math.round(gapH)}`);
 }, 3000);
 window.addEventListener('beforeunload', e => {

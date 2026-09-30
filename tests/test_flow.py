@@ -8,7 +8,7 @@ import os
 import tempfile
 
 os.environ.update({"LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com",
-                   "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "", "DATA_DIR": tempfile.mkdtemp()})
+                   "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "", "FINISH_DELAY_SEC": "0", "DATA_DIR": tempfile.mkdtemp()})
 
 from pathlib import Path  # noqa: E402
 
@@ -246,7 +246,10 @@ def main():
     buf = io.BytesIO(); Image.new("RGB", (64, 36)).save(buf, "JPEG")
     assert c.post(f"/api/interviews/{iid6}/snapshot?reason=reference", content=buf.getvalue()).json()["ok"]
     prog = c.get(f"/api/interviews/{iid6}/progress").json()
-    assert prog["q_num"] == 2 and prog["remaining_sec"] > 0, prog
+    assert prog["question"]["text"] == plan["questions"][1]["ask"] and prog["question"]["kind"] == "question", prog
+    assert "q_total" not in prog and "remaining_sec" not in prog, "the candidate must not see counts or a timer"
+    pub6 = c.get(f"/api/interviews/{iid6}/public").json()
+    assert "questions" not in pub6 and "duration_min" not in pub6, pub6
     pr = c.get(f"/api/interviews/{iid6}/proctoring").json()["proctoring"]
     assert pr["durations"]["tab_hidden"] >= 38 and pr["counts"]["paste"] == 1 and pr["risk"] in ("medium", "high"), pr
     assert c.get(f"/media/{iid6}/snap_001_reference.jpg").status_code == 200
@@ -281,8 +284,73 @@ def main():
     assert c.post(f"/api/interviews/{iid7}/close").json()["status"] == "cancelled"
     assert c.post(f"/api/interviews/{iid7}/assistant").status_code == 409
     print("HR FEATURES: OK")
+    integrity_checks(inp, plan)
 
     print("\nALL CHECKS PASSED")
+
+
+def integrity_checks(inp, plan):
+    """Leaving the interview: warnings spoken by the interviewer, then disqualification, enforced by the server."""
+    assert "minutes" not in brain.opening_message(plan), "opening must not announce the length"
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {
+        "max_warnings": 2, "candidate_email": "Cheat@Example.com"}}).json()["id"]
+    v = f"/api/interviews/{iid}/violation"
+    assert c.post(v, json={"type": "tab_hidden"}).json()["action"] == "ignored", "no call yet: nothing to enforce"
+    a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
+    p = llm_path(a)
+    assert c.post(v, json={"type": "rm -rf"}).status_code == 400
+    r1 = c.post(v, json={"type": "tab_hidden"}).json()
+    print("WARN1:", r1["say"])
+    assert r1["action"] == "warn" and r1["warning"] == 1 and "Rohan" in r1["say"]
+    assert c.post(v, json={"type": "window_blur"}).json().get("debounced"), "one away-episode must count once"
+    M_ = __import__("backend.main", fromlist=["x"])
+    rec = json.loads((store.INT_DIR / f"{iid}.json").read_text())
+    rec["warnings"][-1]["at"] -= 10
+    (store.INT_DIR / f"{iid}.json").write_text(json.dumps(rec))
+    r2 = c.post(v, json={"type": "window_blur"}).json()
+    assert r2["action"] == "warn" and "final warning" in r2["say"], r2
+    rec = json.loads((store.INT_DIR / f"{iid}.json").read_text())
+    rec["warnings"][-1]["at"] -= 10
+    (store.INT_DIR / f"{iid}.json").write_text(json.dumps(rec))
+    r3 = c.post(v, json={"type": "multi_monitor", "detail": "screen.isExtended"}).json()
+    print("TERMINATE:", r3["say"])
+    assert r3["action"] == "terminate" and "concludes our interview" in r3["say"]
+    rec = c.get(f"/api/interviews/{iid}").json()
+    assert rec["disqualified"] and rec["status"] == "incomplete" and len(rec["warnings"]) == 3
+    assert rec["proctoring"]["risk"] == "high" and rec["proctoring"]["reasons"][0].startswith("Disqualified")
+    # a tampered page cannot carry on: the interviewer only says goodbye, and rejoining is refused
+    say = turn(p, [{"role": "assistant", "content": a["firstMessage"]}, {"role": "user", "content": "anyway, my answer"}])
+    assert "concludes our interview" in say.lower(), say
+    r = c.post(f"/api/interviews/{iid}/assistant")
+    assert r.status_code == 409 and "rules" in r.json()["detail"]
+    assert c.get(f"/api/interviews/{iid}/public").json()["disqualified"]
+    # warnings are in the transcript, and the next link for the same email warns HR
+    txt = c.get(f"/api/interviews/{iid}/transcript.txt").text
+    assert "final warning" in txt and "integrity_termination" in txt and "=== Question 1" in txt, txt[:600]
+    again = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"candidate_email": "cheat@example.com"}}).json()
+    assert again["warnings"] and "disqualified" in again["warnings"][0], again
+    assert c.get("/api/candidates/history", params={"email": "CHEAT@example.com"}).json()["warnings"]
+    row = next(x for x in c.get("/api/interviews").json() if x["id"] == iid)
+    assert row["disqualified"] and row["warnings"] == 3
+    # HR turned the rule off: nothing is enforced
+    iid2 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"enforce_focus": False}}).json()["id"]
+    c.post(f"/api/interviews/{iid2}/assistant")
+    assert c.post(f"/api/interviews/{iid2}/violation", json={"type": "tab_hidden"}).json()["action"] == "ignored"
+    # max_warnings=0: the first violation ends it
+    iid3 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"max_warnings": 0}}).json()["id"]
+    c.post(f"/api/interviews/{iid3}/assistant")
+    assert c.post(f"/api/interviews/{iid3}/violation", json={"type": "tab_hidden"}).json()["action"] == "terminate"
+    # screen snapshot is stored separately from camera snapshots
+    from PIL import Image
+    import io
+    buf = io.BytesIO(); Image.new("RGB", (320, 180)).save(buf, "JPEG")
+    c.post(f"/api/interviews/{iid2}/snapshot?reason=tab_hidden&source=screen", content=buf.getvalue())
+    img = c.get(f"/api/interviews/{iid2}").json()["images"][-1]
+    assert img["source"] == "screen" and img["file"] == "snap_001_screen_tab_hidden.jpg", img
+    # readable question labels in HR text
+    assert brain.question_label(plan, plan["questions"][1]["id"]).startswith("Question 2 (")
+    _ = M_
+    print("INTEGRITY: OK")
 
 
 if __name__ == "__main__":

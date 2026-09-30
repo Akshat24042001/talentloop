@@ -1,0 +1,21 @@
+DevOps Engineer (3-6 years) - Hyderabad (Hybrid)
+
+About the role
+We run a multi-tenant SaaS platform on AWS serving 400 enterprise customers. You will own CI/CD, infrastructure as code, observability and on-call reliability for 40+ microservices.
+
+Must have
+- 3+ years in DevOps or SRE roles
+- AWS (EC2, VPC, IAM, RDS, EKS) and Kubernetes in production
+- Terraform for infrastructure as code
+- CI/CD pipelines (GitHub Actions, GitLab CI or Jenkins)
+- Monitoring and alerting: Prometheus, Grafana, CloudWatch; incident response
+
+Good to have
+- Helm, ArgoCD or GitOps
+- Cost optimisation on AWS
+- Security hardening, secrets management (Vault)
+
+Details
+- 2 days a week in office at HITEC City, Hyderabad
+- On-call rotation one week in six
+- Interview process: AI first round, systems design round, hands-on troubleshooting round
