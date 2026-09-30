@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import time
+from difflib import SequenceMatcher
 
 from . import llm, prompts
 from . import proctor as proctor_mod
@@ -21,6 +22,10 @@ log = logging.getLogger("brain")
 END_PHRASE = "this concludes our interview"
 CLOSING = ("That's everything I wanted to ask. Thanks so much for your time today, I really enjoyed the conversation. "
            "The HR team will go through it and get back to you soon. Take care, and " + END_PHRASE + ".")
+# Lines Vapi speaks by itself (silence hooks in vapi_config). They appear in the history but are not ours.
+IDLE_LINES = ("Take your time. Just let me know when you're ready.", "No rush. Are you still with me?")
+SILENCE_LINE = ("I haven't heard anything for a while, so I'll pause the interview here. "
+                "If this was a connection problem, please rejoin right away.")
 TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "8"))
 END_BUFFER_SEC = 40          # below this remaining time, wrap up
 MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "3")) + 1
@@ -248,13 +253,42 @@ def _content(m: dict) -> str:
     return (c or "").strip()
 
 
-def _same_utterance(ours: str, heard: str) -> bool:
-    """Does an assistant message in Vapi's history correspond to a line we produced?
-    Vapi keeps only the part actually spoken when the candidate interrupts, so allow a prefix."""
+_NUMBER_WORDS = set("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+                    "sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred "
+                    "thousand lakh lakhs crore million billion point and percent".split())
+MATCH_MIN = 0.8
+
+
+def _tokens(s: str) -> list[str]:
+    # Numbers are dropped on both sides: the voice pipeline may spell them out ("5 days" -> "five days").
+    return [w for w in _norm(s).split() if w not in _NUMBER_WORDS and not any(ch.isdigit() for ch in w)]
+
+
+def _match_score(ours: str, heard: str) -> float:
+    """How surely an assistant message in Vapi's history is a line we produced (0..1).
+    Vapi may keep only the part actually spoken (the candidate interrupted), and may keep the text as it was
+    formatted for speech (numbers spelled out, punctuation changed), so an exact comparison is not enough."""
     a, b = _norm(ours), _norm(heard)
     if not a or not b:
-        return False
-    return a == b or (len(b) >= 12 and a.startswith(b))
+        return 0.0
+    if a == b:
+        return 1.0
+    if len(b) >= 12 and a.startswith(b):
+        return 0.99
+    ta, tb = _tokens(ours), _tokens(heard)
+    if len(tb) < 3 or not ta:
+        return 0.0
+    full = SequenceMatcher(None, ta, tb, autojunk=False).ratio()
+    prefix = SequenceMatcher(None, ta[:len(tb)], tb, autojunk=False).ratio() if len(tb) < len(ta) else 0.0
+    return max(full, prefix)
+
+
+def _same_utterance(ours: str, heard: str) -> bool:
+    return _match_score(ours, heard) >= MATCH_MIN
+
+
+def _user_text_after(messages: list[dict], i: int) -> str:
+    return " ".join(_content(m) for m in messages[i + 1:] if m.get("role") == "user" and _content(m))
 
 
 def _locate(rec: dict, messages: list[dict]) -> tuple[dict | None, str, bool]:
@@ -265,20 +299,31 @@ def _locate(rec: dict, messages: list[dict]) -> tuple[dict | None, str, bool]:
       * re-requests for the same turn (candidate kept talking, text got longer),
       * a reply we generated that Vapi threw away unspoken (it is not in the history, so the
         state it produced is ignored instead of silently skipping a question),
-      * idle prompts spoken by Vapi itself ("Take your time...") that we never produced.
+      * idle prompts spoken by Vapi itself ("Take your time...") and the interviewer's integrity warnings,
+        which we recognise and skip.
+    An assistant line we cannot place is NOT skipped: skipping it used to rebuild the turn from an older
+    question, and because the re-asked line was unrecognisable too, the interviewer asked the same question
+    forever. Such a line is almost always our own latest reply, reworded by the voice pipeline, so the turn
+    builds on the committed state instead.
     Returns (base_state, candidate_text, matched)."""
     snaps = rec.get("snapshots") or []
+    others = list(IDLE_LINES) + [SILENCE_LINE] + [w.get("say", "") for w in rec.get("warnings") or []]
     ai_pos = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and _content(m)]
     for rank in range(len(ai_pos) - 1, -1, -1):
         i = ai_pos[rank]
         heard = _content(messages[i])
-        hits = [s for s in reversed(snaps) if _same_utterance(s["state"].get("last_say", ""), heard)]
-        if not hits:
+        scored = [(_match_score(s["state"].get("last_say", ""), heard), s) for s in reversed(snaps)]
+        best = max([sc for sc, _ in scored] or [0.0])
+        if best >= MATCH_MIN:
+            hits = [s for sc, s in scored if sc >= best - 0.02]          # newest first on ties
+            exact = [s for s in hits if s["state"].get("ai_n") == rank + 1]
+            return (exact or hits)[0]["state"], _user_text_after(messages, i), True
+        if any(_match_score(o, heard) >= 0.7 for o in others if o):
             continue
-        exact = [s for s in hits if s["state"].get("ai_n") == rank + 1]
-        base = (exact or hits)[0]["state"]
-        said = " ".join(_content(m) for m in messages[i + 1:] if m.get("role") == "user" and _content(m))
-        return base, said, True
+        if rec.get("state"):
+            log.warning("[%s] unrecognised interviewer line in Vapi history (%r); building on the current state",
+                        rec.get("id"), heard[:80])
+            return rec["state"], _user_text_after(messages, i), False
     # Nothing matched. Fall back to the committed state and trailing user text.
     parts = []
     for m in reversed(messages):

@@ -5,7 +5,7 @@ Our server handles: every word the interviewer says (Vapi calls us as a "custom-
 """
 import os
 
-from .brain import END_PHRASE
+from .brain import END_PHRASE, IDLE_LINES, SILENCE_LINE
 
 THINKING_REGEX = (r"(let me think|let me see|give me a (second|moment|minute)|one (second|moment|minute)|"
                   r"hmm+|umm+|uhh+|how do i put|what i mean is|so basically|actually)\s*[.,]?\s*$")
@@ -85,13 +85,11 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dic
             {"name": "idle_nudge", "on": "customer.speech.timeout",
              "options": {"timeoutSeconds": float(_env("IDLE_TIMEOUT_SEC", "25")), "triggerMaxCount": 2,
                          "triggerResetMode": "onUserSpeech"},
-             "do": [{"type": "say", "exact": ["Take your time. Just let me know when you're ready.",
-                                               "No rush. Are you still with me?"]}]},
+             "do": [{"type": "say", "exact": list(IDLE_LINES)}]},
             {"name": "silence_end", "on": "customer.speech.timeout",
              "options": {"timeoutSeconds": float(_env("SILENCE_TIMEOUT_SEC", "120")), "triggerMaxCount": 1,
                          "triggerResetMode": "never"},
-             "do": [{"type": "say", "exact": "I haven't heard anything for a while, so I'll pause the interview "
-                                             "here. If this was a connection problem, please rejoin right away."},
+             "do": [{"type": "say", "exact": SILENCE_LINE},
                     {"type": "tool", "tool": {"type": "endCall"}}]},
         ],
         "artifactPlan": {"recordingEnabled": True,

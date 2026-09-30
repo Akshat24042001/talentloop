@@ -285,8 +285,59 @@ def main():
     assert c.post(f"/api/interviews/{iid7}/assistant").status_code == 409
     print("HR FEATURES: OK")
     integrity_checks(inp, plan)
+    no_question_loop()
+    no_question_loop(split=True)
 
     print("\nALL CHECKS PASSED")
+
+
+NUM_WORDS = {"1.8": "one point eight", "350": "three hundred and fifty", "5": "five", "3": "three", "40": "forty", "60": "sixty"}
+
+
+def vapi_formatted(text: str) -> str:
+    """What Vapi may keep in its history for a line we produced: the TTS-formatted text (numbers spelled
+    out, punctuation changed, sentences split). Our server must still recognise it as its own line."""
+    import re
+    for k in sorted(NUM_WORDS, key=len, reverse=True):
+        text = re.sub(rf"(?<![\d.]){re.escape(k)}(?![\d.])", NUM_WORDS[k], text)
+    return text.replace("ms", " milliseconds").replace("?", " ?").replace(",", "")
+
+
+def no_question_loop(split: bool = False):
+    """Regression: the interviewer got stuck re-asking one question, acknowledging the previous answer each
+    time. Cause: Vapi's copy of our line differed slightly (numbers spelled out), the exact-text match failed,
+    and the turn was silently rebuilt from an OLDER question. It must move forward, one question at a time."""
+    plan = brain.normalize_plan({"duration_min": 20, "company": "Demo", "role": "Backend Developer",
+                                 "candidate_name": "Akshat Shah", "questions": [
+        {"id": "w", "type": "warmup", "ask": "Please introduce yourself.", "time_budget_sec": 60, "max_followups": 0},
+        {"id": "c", "type": "hr_mandatory", "ask": "Can you commute to our office 5 days a week?", "max_followups": 0},
+        {"id": "r", "type": "resume_probe", "ask": "You cut API latency from 1.8s to 350ms. What exactly did you change?", "max_followups": 0},
+        {"id": "t", "type": "resume_probe", "ask": "You led a team of 3. How did you split the work, given 40 tickets a sprint?", "max_followups": 0},
+        {"id": "n", "type": "hr_mandatory", "ask": "What is your notice period?", "max_followups": 0}]})
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": {}}).json()["id"]
+    a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
+    p = llm_path(a)
+    msgs = [{"role": "system", "content": "x"}, {"role": "assistant", "content": vapi_formatted(a["firstMessage"])}]
+    long_answer = " Honestly I have thought about this a lot and I can explain it properly with the details of what I did and why it mattered for the team."
+    asked = []
+    for ans in ["I'm Akshat, a backend developer.", "Yes, I stay nearby and I can commute easily.",
+                "I added indexes and Redis caching.", "I split the work by module and paired juniors with seniors.",
+                "My notice period is 60 days."]:
+        msgs.append({"role": "user", "content": ans + long_answer})
+        say = turn(p, msgs)
+        asked.append(state(iid)["q_idx"])
+        # Vapi keeps the reply as it was formatted for speech (numbers spelled out, punctuation changed),
+        # sometimes split into one message per sentence.
+        parts = [x for x in vapi_formatted(say).split(". ") if x] if split else [vapi_formatted(say)]
+        msgs.extend({"role": "assistant", "content": x} for x in parts)
+        if "concludes our interview" in say.lower():
+            break
+    print("LOOP CHECK q_idx after each answer:", asked)
+    assert asked == [1, 2, 3, 4, 4], f"interview did not move forward one question per answer: {asked}"
+    assert state(iid)["ended"], "interview should have reached its end"
+    cands = [e["q_id"] for e in state(iid)["log"] if e["role"] == "candidate"]
+    assert cands == ["w", "c", "r", "t", "n"], cands
+    print(f"NO QUESTION LOOP ({'split' if split else 'single'} messages): OK")
 
 
 def integrity_checks(inp, plan):
