@@ -40,7 +40,7 @@ The interviewer's possible actions each turn are: follow up, next question, repe
 ## Setup (about 20 minutes)
 
 1. `cd talentloop-ai-interview && python -m venv .venv && source .venv/bin/activate` (Windows: `.venv\Scripts\activate`)
-2. `pip install -r backend/requirements.txt`
+2. `pip install -r backend/requirements.txt`, then build the web interface once (needs Node 20+): `cd frontend && npm ci && npm run build && cd ..`. Rebuild after pulling changes to `frontend/`. (Docker and Render do this automatically.)
 3. Start a tunnel: `cloudflared tunnel --url http://localhost:8000`, then copy the `https://....trycloudflare.com` URL.
 4. `cp .env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `ADMIN_KEY`.
 5. `uvicorn backend.main:app --host 0.0.0.0 --port 8000` (one worker only: interview locks live in process memory)
@@ -150,6 +150,9 @@ Read `REVIEW.md` before running real candidates. Hosting: see `DEPLOY.md`. It li
 - `backend/prompts.py`: all prompts. Tune here first.
 - `backend/vapi_config.py`: voice, STT, turn-taking and end-call settings.
 - `backend/main.py`: API, custom LLM endpoint and webhook.
-- `web/dashboard.html` (all interviews), `web/hr.html` (new interview), `web/interview.html` (candidate call), `web/report.html` (report); `web/charts.js` draws the charts.
-- `web/samples/`: sample JD, resume and HR questions for 7 roles (`index.json` lists them).
+- `frontend/`: the web interface (React + TypeScript + Tailwind, built with Vite into `frontend/dist`, which the server serves). Pages keep their URLs: `/dashboard.html` (all interviews), `/hr.html` (new interview), `/interview.html?id=` (candidate call), `/report.html?id=` (report).
+  - `frontend/src/interview/engine.ts`: the candidate-side engine (devices, Vapi call, recording and upload, face checks, warnings, rejoin). `InterviewApp.tsx` is its UI.
+  - `frontend/src/hr/`: dashboard, new interview wizard, report. `frontend/src/components/`: UI kit and charts.
+  - Local UI development: run the server on port 8000, then `cd frontend && npm run dev` (Vite proxies `/api` to it).
+- `frontend/public/samples/`: sample JD, resume and HR questions for 7 roles (`index.json` lists them). `frontend/public/vendor/`: self-hosted Vapi SDK and face-detection model.
 - `tools/rehearse.py`: typed rehearsal. `tests/test_flow.py`: end-to-end API test. `tests/e2e_browser.py`: real-Chromium test (warnings, disqualification, second screen, recordings).

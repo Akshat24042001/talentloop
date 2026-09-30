@@ -72,6 +72,14 @@ Still unverifiable from here: a live Vapi call. Do the checklist below on your f
 
 Limits to know: `screen.isExtended` exists in Chrome and Edge only (other browsers show "not checkable"), and "Duplicate" display mode passes. A focus change shorter than 1 s (tab) or 2 s (window) is logged but not warned, so OS notifications don't cause warnings. `vapi.say` is used as the Vapi SDK defines it, but like the rest of the Vapi integration it has not yet run on a live call: check the first warning on your first real call.
 
+## Round 5: stall after a warning, and a new interface
+
+| # | Area | Problem | Change |
+|---|---|---|---|
+| 39 | Critical | **Interview stalled after a warning at the start.** The spoken warning interrupts the interviewer (often mid-question) and ended with "Let's continue". Vapi then waits for the candidate, who never heard a question, so the call went silent. | Every warning ends by asking the current question again; the history matcher recognises the warning line first. Regression test replays a tab switch during the opening. |
+| 40 | Interface | Static HTML pages; the candidate call looked unfinished. | Rebuilt as a React + TypeScript + Tailwind app (Vite, multi-page, same URLs). Candidate side: dark studio look, device lobby, call stage with a voice-reactive interviewer, picture-in-picture camera and screen, question and live transcript panel, control dock. HR side: sidebar app, sign-in dialog instead of a browser prompt, dashboard with a phone layout, wizard, report with section navigation. Hashed asset names end stale-cache problems for good. |
+| 41 | Deploy | The image needed Node to build the interface. | Two-stage Dockerfile: Node builds `frontend/dist`, the Python image serves it (no Node at runtime). Verified with a real image build and container boot. |
+
 ## Still open (not fixed, your call)
 
 1. **The whole Vapi assistant config passes through the candidate's browser.** That includes the LLM URL and the session token. A technical candidate can open devtools, copy the token and send made-up turns to your server. The token stops stale calls and outsiders, but it doesn't stop the candidate. The real fix: create the assistant server-side with the Vapi **private** key (`POST /assistant`), store the custom-LLM credential and the `server.secret` in Vapi, and give the browser only the `assistantId`. I didn't build this because I can't test it against Vapi from here.

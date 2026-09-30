@@ -1,0 +1,249 @@
+import { ArrowLeft, Check, Copy, ExternalLink, FileText, FileUp, Link2, ShieldCheck, Sparkles, TriangleAlert, Wand2 } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, cn, copyText, toast } from '../components/ui'
+import { api } from '../lib/api'
+import { TYPE_LABEL } from '../lib/format'
+import { AppShell, PageHeader, useHealth } from './shell'
+
+interface Sample { id: string; role: string; company: string; candidate: string; duration: number; jd: string; resume: string; questions: string }
+interface Question { id: string; type: string; ask: string; competency_id?: string; scored: boolean; good_answer_covers?: string[]; max_followups: number; time_budget_sec: number }
+interface Plan { duration_min: number; questions: Question[]; competencies?: { id: string; name: string }[]; keyterms?: string[]; resume_claims_to_verify?: string[] }
+
+function Steps({ step }: { step: number }) {
+  const items = ['Candidate & role', 'Review plan', 'Send link']
+  return (
+    <ol className="mb-6 flex flex-wrap items-center gap-2 text-sm">
+      {items.map((t, i) => {
+        const n = i + 1, state = n < step ? 'done' : n === step ? 'on' : ''
+        return (
+          <li key={t} className="flex items-center gap-2">
+            <span className={cn('flex items-center gap-2 rounded-full px-3 py-1.5 font-medium ring-1 ring-inset',
+              state === 'on' ? 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-200 dark:ring-brand-500/30'
+                : state === 'done' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30'
+                : 'bg-white text-slate-500 ring-slate-200 dark:bg-ink-900 dark:text-slate-400 dark:ring-ink-700')}>
+              <span className={cn('grid size-5 place-items-center rounded-full text-[11px] font-bold', state === 'on' ? 'bg-brand-600 text-white' : state === 'done' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-ink-800')}>
+                {state === 'done' ? <Check className="size-3" strokeWidth={3} /> : n}</span>{t}
+            </span>
+            {n < 3 && <span className="hidden h-px w-6 bg-slate-200 dark:bg-ink-700 sm:block" />}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function UploadLink({ onText }: { onText: (t: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  return (
+    <>
+      <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-300" onClick={() => ref.current?.click()}>
+        <FileUp className="size-3.5" />{busy ? 'Reading...' : 'Upload'}
+      </button>
+      <input ref={ref} type="file" accept=".pdf,.txt,.docx" className="hidden" onChange={async e => {
+        const f = e.target.files?.[0]; if (!f) return
+        const fd = new FormData(); fd.append('file', f); setBusy(true)
+        try { onText((await api<{ text: string }>('/api/extract', { method: 'POST', body: fd })).text) } catch (err: any) { toast(err.message) }
+        setBusy(false); e.target.value = ''
+      }} />
+    </>
+  )
+}
+
+export default function NewInterview() {
+  const health = useHealth()
+  const [samples, setSamples] = useState<Sample[] | null>(null)
+  const [sampleId, setSampleId] = useState('')
+  const [f, setF] = useState({ company: '', role: '', cand: '', email: '', dur: '15', jd: '', cv: '', qs: '' })
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(v => ({ ...v, [k]: e.target.value }))
+  const [hist, setHist] = useState<string[]>([])
+  const [plan, setPlan] = useState<Plan | null>(null)
+  const [inputs, setInputs] = useState<Record<string, unknown> | null>(null)
+  const [planWarn, setPlanWarn] = useState<string[]>([])
+  const [json, setJson] = useState('')
+  const [gen, setGen] = useState(false), [err1, setErr1] = useState('')
+  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, snap: true, rejoin: '30', openAt: '', validH: '72' })
+  const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
+  const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
+  const planRef = useRef<HTMLDivElement>(null), linkRef = useRef<HTMLDivElement>(null)
+  const base = (health?.public_url || location.origin).replace(/\/$/, '')
+
+  useEffect(() => {   // public static file: load it first, independent of the admin key and health check
+    fetch('/samples/index.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : []).then((s: Sample[]) => { setSamples(s); setSampleId(s[0]?.id || '') }).catch(() => setSamples([]))
+  }, [])
+
+  async function loadSample() {
+    const s = samples?.find(x => x.id === sampleId); if (!s) return
+    const [jd, cv, qs] = await Promise.all([s.jd, s.resume, s.questions].map(p => fetch('/samples/' + p).then(r => r.text())))
+    const email = s.candidate.toLowerCase().replace(/[^a-z]+/g, '.') + '@example.com'
+    setF({ company: s.company, role: s.role, cand: s.candidate, email, dur: String(s.duration || 15), jd: jd!, cv: cv!, qs: qs!.trim() })
+    toast(`Loaded sample: ${s.role}`); checkHistory(email)
+  }
+  async function checkHistory(email = f.email) {
+    setHist([]); if (!email.trim()) return
+    try { setHist((await api<{ warnings: string[] }>('/api/candidates/history?email=' + encodeURIComponent(email.trim()))).warnings || []) } catch { /* optional */ }
+  }
+  async function generate() {
+    setErr1('')
+    const inp = { company: f.company, role: f.role, candidate_name: f.cand, duration_min: +f.dur, jd: f.jd, resume: f.cv,
+      questions: f.qs.split('\n').map(s => s.trim()).filter(Boolean) }
+    if (!inp.jd.trim() || !inp.resume.trim()) return setErr1('The job description and the resume are required.')
+    setGen(true)
+    try {
+      const r = await api<{ plan: Plan; warnings: string[] }>('/api/plan', { json: inp })
+      setPlan(r.plan); setJson(JSON.stringify(r.plan, null, 2)); setPlanWarn(r.warnings || []); setInputs(inp); setLink(null)
+      setTimeout(() => planRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+    } catch (e: any) { setErr1(e.message) }
+    setGen(false)
+  }
+  async function create() {
+    setErr2(''); setCreating(true)
+    try {
+      const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 30,
+        available_from: st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap,
+        enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
+      const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings } })
+      setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [] })
+      setTimeout(() => linkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+    } catch (e: any) { setErr2(e.message) }
+    setCreating(false)
+  }
+
+  const step = link ? 3 : plan ? 2 : 1
+  const comps = Object.fromEntries((plan?.competencies || []).map(c => [c.id, c.name]))
+  const budget = plan ? plan.questions.reduce((a, q) => a + q.time_budget_sec, 0) : 0
+
+  return (
+    <AppShell active="new">
+      <PageHeader title="New interview" description="Job description + resume + your questions → a plan you approve → a link for the candidate." />
+      <Steps step={step} />
+      {health && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {health.mock ? <Badge tone="warning">Demo mode: simulated AI</Badge> : <Badge tone="neutral">Interviewer: {health.fast_model} · Plan and scoring: {health.smart_model}</Badge>}
+          {health.free_models && <Badge tone="warning">Free AI models: slower, rate-limited, may train on data</Badge>}
+          {health.model_note && <Badge tone="warning">{health.model_note}</Badge>}
+        </div>
+      )}
+
+      <Card>
+        <CardHeader title="Candidate & role" description="The length is used to plan the questions. The candidate is never told the length or the number of questions." />
+        <CardBody className="space-y-5">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl bg-gradient-to-r from-brand-50 to-violet-50 p-3 ring-1 ring-brand-100 dark:from-brand-500/10 dark:to-violet-500/10 dark:ring-brand-500/20">
+            <span className="flex items-center gap-2 text-sm font-semibold text-brand-800 dark:text-brand-200"><Sparkles className="size-4" />Try a sample role</span>
+            <Select id="sampleSel" aria-label="Sample role" className="min-w-0 flex-1 basis-60" value={sampleId} onChange={e => setSampleId(e.target.value)}>
+              {samples === null ? <option>Loading samples...</option> : samples.length ? samples.map(s => <option key={s.id} value={s.id}>{s.role} · {s.candidate}</option>) : <option value="">No samples available</option>}
+            </Select>
+            <Button id="sampleBtn" variant="primary" size="sm" disabled={!samples?.length} onClick={loadSample}>Load sample</Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <Field label="Company" htmlFor="company"><Input id="company" placeholder="RAC IT Solutions" value={f.company} onChange={set('company')} /></Field>
+            <Field label="Role" htmlFor="role"><Input id="role" placeholder="Java Backend Developer" value={f.role} onChange={set('role')} /></Field>
+            <Field label="Candidate name" htmlFor="cand"><Input id="cand" placeholder="Full name" value={f.cand} onChange={set('cand')} /></Field>
+            <Field label="Candidate email" htmlFor="email"><Input id="email" type="email" placeholder="name@example.com" value={f.email} onChange={set('email')} onBlur={() => checkHistory()} /></Field>
+            <Field label="Interview length" htmlFor="dur"><Select id="dur" value={f.dur} onChange={set('dur')}>{[10, 15, 20, 30].map(m => <option key={m} value={m}>{m} min</option>)}</Select></Field>
+          </div>
+          {hist.map(w => <Alert key={w} tone="danger" icon={<TriangleAlert />}>{w}</Alert>)}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field label="Job description" htmlFor="jd" action={<UploadLink onText={t => setF(v => ({ ...v, jd: t }))} />}>
+              <Textarea id="jd" className="min-h-56" placeholder="Paste the JD, or upload a PDF, TXT or DOCX" value={f.jd} onChange={set('jd')} /></Field>
+            <Field label="Resume" htmlFor="cv" action={<UploadLink onText={t => setF(v => ({ ...v, cv: t }))} />}>
+              <Textarea id="cv" className="min-h-56" placeholder="Paste the resume, or upload a PDF, TXT or DOCX" value={f.cv} onChange={set('cv')} /></Field>
+          </div>
+          <Field label="Your questions" htmlFor="qs" hint="One per line. Every one of them will be asked.">
+            <Textarea id="qs" className="min-h-24" placeholder={'Why are you looking for a change?\nWhat is your notice period?'} value={f.qs} onChange={set('qs')} /></Field>
+          {err1 && <Alert tone="danger" icon={<TriangleAlert />}>{err1}</Alert>}
+          <Button id="genBtn" variant="primary" size="lg" icon={<Wand2 />} loading={gen} onClick={generate}>{gen ? 'Generating the plan (20-60 s)...' : 'Generate interview plan'}</Button>
+        </CardBody>
+      </Card>
+
+      {plan && (
+        <div id="planCard" ref={planRef} className="mt-6 scroll-mt-6 space-y-6">
+          <Card>
+            <CardHeader title="Review the plan" description={<>This is exactly what the AI will ask, in order. Your approval is the control point. · {plan.questions.length} questions · about {Math.round(budget / 60)} of {plan.duration_min} min</>} />
+            <CardBody className="space-y-3">
+              {planWarn.map(w => <Alert key={w} icon={<TriangleAlert />}>{w}</Alert>)}
+              <ol className="space-y-2.5">
+                {plan.questions.map((q, i) => (
+                  <li key={q.id + i} className="rounded-xl p-4 ring-1 ring-slate-200 dark:ring-ink-700">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="grid size-6 place-items-center rounded-full bg-brand-600 text-[11px] font-bold text-white">{i + 1}</span>
+                      <Badge tone={q.type === 'hr_mandatory' ? 'brand' : q.type === 'warmup' ? 'neutral' : 'violet'}>{TYPE_LABEL[q.type] || q.type}</Badge>
+                      {comps[q.competency_id || ''] && <Badge>{comps[q.competency_id || '']}</Badge>}
+                      <Badge>{q.time_budget_sec}s</Badge><Badge>follow-ups ≤ {q.max_followups}</Badge>{!q.scored && <Badge>not scored</Badge>}
+                    </div>
+                    <p className="mt-2 font-semibold text-slate-900 dark:text-white">{q.ask}</p>
+                    {!!q.good_answer_covers?.length && <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400">A good answer covers: {q.good_answer_covers.join(' · ')}</p>}
+                  </li>
+                ))}
+              </ol>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Speech recognition key terms: {(plan.keyterms || []).join(', ') || 'none'}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Resume claims to verify: {(plan.resume_claims_to_verify || []).join(' · ') || 'none'}</p>
+              <details className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70 dark:bg-ink-850 dark:ring-ink-700">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700 dark:text-slate-200">Edit plan JSON (wording, time budgets, follow-ups)</summary>
+                <Textarea className="mt-3 min-h-80 font-mono text-xs" value={json} onChange={e => setJson(e.target.value)} />
+                <Button className="mt-3" size="sm" onClick={() => { try { const p = JSON.parse(json); setPlan(p); toast('Plan updated') } catch (e: any) { toast('Invalid JSON: ' + e.message) } }}>Apply JSON edits</Button>
+              </details>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="Interview rules" description="How strict the interview is, and how the link behaves." />
+            <CardBody className="grid gap-6 lg:grid-cols-2">
+              <Group title="Integrity" icon={<ShieldCheck />}>
+                <Switch id="focusOn" checked={st.focus} onChange={v => setSt(s => ({ ...s, focus: v }))} label="Warn when the candidate leaves the interview" description="Switching tabs, windows or apps. The AI interviewer says the warning out loud and repeats the question." />
+                <div className={cn('pb-3', !st.focus && 'opacity-50')}>
+                  <Field label="Warnings before the interview is stopped" htmlFor="maxW">
+                    <Select id="maxW" disabled={!st.focus} value={st.maxW} onChange={e => setSt(s => ({ ...s, maxW: e.target.value }))}>
+                      <option value="0">None: stop the first time</option><option value="1">1 warning</option><option value="2">2 warnings</option><option value="3">3 warnings</option>
+                    </Select></Field>
+                </div>
+                <Switch id="monOn" checked={st.mon} onChange={v => setSt(s => ({ ...s, mon: v }))} label="One screen only" description="A second monitor blocks the start; connecting one mid-interview counts as leaving." />
+                <Switch id="reqShare" checked={st.share} onChange={v => setSt(s => ({ ...s, share: v }))} label="Require entire-screen sharing" description="HR sees the screen, with a screenshot whenever the candidate switches away. Laptops and desktops only." />
+                <Switch id="faceOn" checked={st.face} onChange={v => setSt(s => ({ ...s, face: v }))} label="Face check" description="No face, or more than one person on camera." />
+                <Switch id="snapOn" checked={st.snap} onChange={v => setSt(s => ({ ...s, snap: v }))} label="Snapshots" description="Camera every minute, and the screen when shared." />
+              </Group>
+              <Group title="Link" icon={<Link2 />}>
+                <div className="grid gap-4 py-3">
+                  <Field label="Rejoin window after a dropped call" htmlFor="rejoin" hint="Seconds (10 to 900)."><Input id="rejoin" type="number" min={10} max={900} value={st.rejoin} onChange={e => setSt(s => ({ ...s, rejoin: e.target.value }))} /></Field>
+                  <Field label="Link opens at (optional)" htmlFor="openAt"><Input id="openAt" type="datetime-local" value={st.openAt} onChange={e => setSt(s => ({ ...s, openAt: e.target.value }))} /></Field>
+                  <Field label="Link valid for" htmlFor="validH" hint="Hours."><Input id="validH" type="number" min={1} max={720} value={st.validH} onChange={e => setSt(s => ({ ...s, validH: e.target.value }))} /></Field>
+                </div>
+              </Group>
+            </CardBody>
+            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-5 py-4 dark:border-ink-800">
+              <Button id="createBtn" variant="primary" size="lg" icon={<Link2 />} loading={creating} onClick={create}>Create candidate link</Button>
+              {err2 && <span className="text-sm text-red-600 dark:text-red-300">{err2}</span>}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {link && (
+        <div ref={linkRef} className="mt-6 scroll-mt-6">
+          <Card id="linkOut" className="ring-2 ring-emerald-500/30">
+            <CardHeader title={<span className="flex items-center gap-2"><span className="grid size-6 place-items-center rounded-full bg-emerald-500 text-white"><Check className="size-3.5" strokeWidth={3} /></span>Link ready</span>}
+              description="Send this link to the candidate. You'll find the interview on the Interviews page." />
+            <CardBody className="space-y-4">
+              {link.warnings.map(w => <Alert key={w} tone="danger" icon={<TriangleAlert />}>{w}</Alert>)}
+              <div className="flex gap-2"><Input id="candLink" readOnly value={link.url} onFocus={e => e.target.select()} /><Button id="copyBtn" variant="primary" icon={<Copy />} onClick={() => copyText(link.url, 'Candidate link copied')}>Copy</Button></div>
+              <div className="flex flex-wrap gap-2">
+                <Button href={link.report} icon={<FileText />}>Open report page</Button>
+                <Button href={link.path} target="_blank" icon={<ExternalLink />}>Preview candidate page</Button>
+                <Button variant="ghost" href="/dashboard.html" icon={<ArrowLeft />}>Back to all interviews</Button>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+      )}
+    </AppShell>
+  )
+}
+
+function Group({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <div>
+      <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white [&_svg]:size-4 [&_svg]:text-brand-600 dark:[&_svg]:text-brand-300">{icon}{title}</h3>
+      <div className="divide-y divide-slate-100 dark:divide-ink-800">{children}</div>
+    </div>
+  )
+}

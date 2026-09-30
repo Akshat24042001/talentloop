@@ -30,7 +30,8 @@ log = logging.getLogger("app")
 
 ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
 WEAK_ADMIN = ADMIN_KEY in ("", "change-me") or len(ADMIN_KEY) < 12
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+# The React frontend (frontend/, built with `npm run build`). WEB_DIR overrides it.
+WEB_DIR = Path(os.getenv("WEB_DIR") or Path(__file__).resolve().parent.parent / "frontend" / "dist")
 MEDIA_CAP_BYTES = int(os.getenv("MEDIA_CAP_MB", "900")) * 1024 * 1024
 MAX_EVENTS = 5000
 MAX_IMAGES = 300
@@ -67,8 +68,11 @@ async def _no_stale_pages(req: Request, call_next):
     which breaks the page."""
     resp = await call_next(req)
     p = req.url.path
-    if req.method == "GET" and (p == "/" or p.endswith((".html", ".js", ".mjs", ".css", ".json"))) \
-            and not p.startswith(("/api/", "/media/", "/vendor/")):
+    if req.method != "GET" or p.startswith(("/api/", "/media/", "/llm/", "/webhook/")):
+        return resp
+    if p.startswith("/assets/") and resp.status_code == 200:
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"   # content-hashed file names
+    elif p == "/" or p.endswith((".html", ".js", ".mjs", ".css", ".json")):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -1039,4 +1043,12 @@ async def _download_and_attach(iid: str, url: str, kind: str):
         store.save(rec)
 
 
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+if (WEB_DIR / "dashboard.html").exists():
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+else:
+    log.error("Frontend not built: %s is missing. Run: cd frontend && npm ci && npm run build", WEB_DIR)
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def frontend_missing(path: str):
+        return PlainTextResponse("The web interface has not been built. Run: cd frontend && npm ci && npm run build",
+                                 status_code=503)

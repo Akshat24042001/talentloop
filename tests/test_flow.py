@@ -18,7 +18,7 @@ from backend import brain, store  # noqa: E402
 from backend.main import app  # noqa: E402
 from backend.media import public_https_url  # noqa: E402
 
-S = Path(__file__).resolve().parent.parent / "web" / "samples"
+S = Path(__file__).resolve().parent.parent / "frontend" / "public" / "samples"
 c = TestClient(app)
 ANSWER = ("Sure. In my current role I built the tracking API, added composite indexes and Redis caching which "
           "cut p95 latency from 1.8 seconds to 350 ms, and we moved notifications to Kafka consumers.")

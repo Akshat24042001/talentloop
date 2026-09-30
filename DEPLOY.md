@@ -32,7 +32,7 @@ About 10 GB holds roughly 250 to 400 fifteen-minute interviews with camera and s
    | `ADMIN_KEY` | a random string of 20+ characters (your HR password) |
    | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT_URL` | from step 3 |
    | `VAPI_PRIVATE_KEY` | optional: Vapi **private** key, lets the server fetch Vapi's cloud video backup |
-4. Advanced > Health Check Path: `/api/health`. Then click **Deploy**.
+4. Advanced > Health Check Path: `/api/health`. Then click **Deploy**. The Docker build compiles the web interface first (Node), then builds the Python server; the first build takes a few minutes.
 
 Or use **New + > Blueprint** with this repo: `render.yaml` is set to the free plan and generates `ADMIN_KEY` for you.
 

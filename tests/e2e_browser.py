@@ -129,7 +129,7 @@ def tone_power(path: Path, freq: float, start: float, dur: float = 3.0) -> float
 
 
 def create(c: httpx.Client, **settings) -> str:
-    s = ROOT / "web" / "samples"
+    s = ROOT / "frontend" / "public" / "samples"
     inp = {"company": "Demo Tech", "role": "Java Backend Developer", "candidate_name": "Rohan Mehta", "duration_min": 15,
            "jd": (s / "sample_jd.txt").read_text(), "resume": (s / "sample_resume.txt").read_text(),
            "questions": [q for q in (s / "sample_questions.txt").read_text().splitlines() if q.strip()]}
@@ -153,7 +153,8 @@ def wait_question(pg):
 
 
 def tracks_stopped(pg) -> bool:
-    return pg.evaluate("!document.getElementById('screenVid').srcObject && !document.getElementById('self').srcObject")
+    """No camera, microphone or screen track is still live."""
+    return pg.evaluate("window.__mediaLive() === 0")
 
 
 def main():
@@ -231,7 +232,7 @@ def main():
             pg.bring_to_front()
             other.close()
             pg.wait_for_selector("#s4:not(.hidden)", timeout=180000)
-            pg.wait_for_function("document.getElementById('uploadMsg').textContent.includes('saved') || document.getElementById('uploadMsg').textContent === ''", timeout=60000)
+            pg.wait_for_function("document.getElementById('uploadMsg')?.textContent.includes('saved') || document.getElementById('uploadMsg')?.textContent === ''", timeout=60000)
             pg.wait_for_selector("#fbBox:not(.hidden)", timeout=30000)
             assert tracks_stopped(pg), "camera or screen sharing still running after the interview"
             pg.click("#stars button:nth-child(5)")
@@ -303,7 +304,7 @@ def main():
             if hr_errs:
                 failures.append(f"report page JS errors: {hr_errs}")
             hr.goto(f"{BASE}/dashboard.html")
-            hr.wait_for_selector("text=Rohan Mehta", timeout=15000)
+            hr.wait_for_selector("tbody >> text=Rohan Mehta", timeout=15000)
             hr.fill("#q", "nobody-matches")
             assert hr.locator("text=No interviews match").count()
             if hr_errs:
@@ -335,7 +336,7 @@ def main():
             pg3.click("#startBtn")
             pg3.wait_for_selector("#reconnectBox:not(.hidden)", timeout=60000)
             # the page itself closes the door when the countdown ends
-            pg3.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview closed'", timeout=40000)
+            pg3.wait_for_function("document.getElementById('doneTitle')?.textContent === 'Interview closed'", timeout=40000)
             # and the server refuses a late rejoin even if the page is bypassed (after its 2 s grace)
             time.sleep(3)
             late = httpx.post(f"{BASE}/api/interviews/{iid3}/assistant")
@@ -356,7 +357,7 @@ def main():
             pg4.click("#endBtn")
             pg4.wait_for_selector("#endModal:not(.hidden)")
             pg4.click("#endConfirm")
-            pg4.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview ended'", timeout=30000)
+            pg4.wait_for_function("document.getElementById('doneTitle')?.textContent === 'Interview ended'", timeout=30000)
             assert httpx.post(f"{BASE}/api/interviews/{iid4}/assistant").status_code == 409
             assert tracks_stopped(pg4)
             print("deliberate end: closed, no rejoin")
@@ -384,7 +385,7 @@ def main():
             pg5.wait_for_selector("#monOverlay.hidden", state="attached", timeout=10000)
             time.sleep(4.5)                                          # past the server's one-episode debounce
             pg5.evaluate("window.dispatchEvent(new Event('blur'))")  # switched to another window
-            pg5.wait_for_function("document.getElementById('doneTitle').textContent === 'Interview stopped'", timeout=30000)
+            pg5.wait_for_function("document.getElementById('doneTitle')?.textContent === 'Interview stopped'", timeout=30000)
             said = pg5.evaluate("window.__said")
             print("interviewer said:", [s["text"][:60] for s in said])
             assert len(said) == 2 and said[0]["endAfter"] is False and said[1]["endAfter"] is True, said

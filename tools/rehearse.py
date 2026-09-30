@@ -41,7 +41,7 @@ def main():
 
     iid = a.id
     if not iid:
-        s = ROOT / "web" / "samples"
+        s = ROOT / "frontend" / "public" / "samples"
         inp = {"company": "Demo Tech Pvt Ltd", "role": "Java Backend Developer", "candidate_name": "Rohan Mehta",
                "duration_min": 15, "jd": (s / "sample_jd.txt").read_text(), "resume": (s / "sample_resume.txt").read_text(),
                "questions": [q for q in (s / "sample_questions.txt").read_text().splitlines() if q.strip()]}
