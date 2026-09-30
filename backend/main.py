@@ -613,7 +613,9 @@ async def violation(iid: str, req: Request):
             return {"action": "ignored", "say": "", "warning": len(warns), "debounced": True}
         max_w = int(s.get("max_warnings", 2))
         n = len(warns) + 1
-        say, terminate = brain.integrity_message(rec["plan"], kind, n, max_w)
+        disp = st.get("display") or {}
+        question = disp.get("text", "") if disp.get("kind") != "closing" else ""
+        say, terminate = brain.integrity_message(rec["plan"], kind, n, max_w, question)
         q_id = (st.get("display") or {}).get("q_id")
         warns.append({"n": n, "type": kind, "at": now, "say": say, "q_id": q_id, "detail": detail,
                       "action": "terminate" if terminate else "warn"})

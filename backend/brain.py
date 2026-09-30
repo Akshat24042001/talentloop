@@ -177,9 +177,12 @@ VIOLATION_WHAT = {
 }
 
 
-def integrity_message(plan: dict, kind: str, n: int, max_warnings: int) -> tuple[str, bool]:
-    """n = this violation's number (1-based). Returns (words to speak, terminate)."""
+def integrity_message(plan: dict, kind: str, n: int, max_warnings: int, question: str = "") -> tuple[str, bool]:
+    """n = this violation's number (1-based). Returns (words to speak, terminate).
+    A warning interrupts the interviewer (often mid-question) and after it Vapi just waits for the candidate,
+    so it must end by asking the current question again, or the interview silently stalls."""
     name = _first_name(plan)
+    again = f" Let's pick up where we were. {question}" if question else " Let's continue."
     what = VIOLATION_WHAT.get(kind, "broke the interview rules")
     if n > max_warnings:
         after = " after your final warning" if max_warnings else ""
@@ -188,9 +191,9 @@ def integrity_message(plan: dict, kind: str, n: int, max_warnings: int) -> tuple
     if n == max_warnings:
         lead = f"{name}, you {what}." if n == 1 else f"{name}, you {what}. That's the second time."
         return (f"{lead} This is your final warning. If it happens once more, "
-                "I'll have to end the interview. Please stay on this screen. Let's continue."), False
+                f"I'll have to end the interview. Please stay on this screen.{again}"), False
     return (f"{name}, I noticed you {what} just now. Please stay on this interview screen until we finish. "
-            "This has been noted for the hiring team. Let's continue."), False
+            f"This has been noted for the hiring team.{again}"), False
 
 
 def _snap(st: dict) -> dict:
@@ -312,6 +315,9 @@ def _locate(rec: dict, messages: list[dict]) -> tuple[dict | None, str, bool]:
     for rank in range(len(ai_pos) - 1, -1, -1):
         i = ai_pos[rank]
         heard = _content(messages[i])
+        # A warning repeats the current question, so recognise it before comparing with our question lines.
+        if any(_match_score(o, heard) >= 0.9 for o in others if o):
+            continue
         scored = [(_match_score(s["state"].get("last_say", ""), heard), s) for s in reversed(snaps)]
         best = max([sc for sc, _ in scored] or [0.0])
         if best >= MATCH_MIN:

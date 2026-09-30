@@ -294,6 +294,7 @@ def main():
     assert len(idx) >= 7 and all(c.get("/samples/" + s[k]).status_code == 200 for s in idx for k in ("jd", "resume", "questions"))
     print("HR FEATURES: OK")
     integrity_checks(inp, plan)
+    warning_at_start_does_not_stall(inp, plan)
     no_question_loop()
     no_question_loop(split=True)
 
@@ -347,6 +348,29 @@ def no_question_loop(split: bool = False):
     cands = [e["q_id"] for e in state(iid)["log"] if e["role"] == "candidate"]
     assert cands == ["w", "c", "r", "t", "n"], cands
     print(f"NO QUESTION LOOP ({'split' if split else 'single'} messages): OK")
+
+
+def warning_at_start_does_not_stall(inp, plan):
+    """Regression: a tab switch during the opening. The spoken warning cut the interviewer off mid-question and
+    ended with "Let's continue.", so the candidate never heard a question and the call sat silent.
+    The warning must re-ask the current question, and the next answer must count for that question."""
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"max_warnings": 2}}).json()["id"]
+    a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
+    p = llm_path(a)
+    q1 = plan["questions"][0]["ask"]
+    w = c.post(f"/api/interviews/{iid}/violation", json={"type": "tab_hidden"}).json()
+    print("WARN AT START:", w["say"])
+    assert w["action"] == "warn" and w["say"].rstrip().endswith(q1), "the warning must end by asking the question again"
+    # Vapi history: the opening was interrupted after a few words, then the warning was spoken, then the answer.
+    msgs = [{"role": "system", "content": "x"}, {"role": "assistant", "content": a["firstMessage"][:22]},
+            {"role": "assistant", "content": w["say"]},
+            {"role": "user", "content": "Sure. I'm Rohan, I have three years of backend experience with Spring Boot at ShipKart."}]
+    say = turn(p, msgs)
+    st = state(iid)
+    print("AFTER WARNING:", say)
+    assert [e["q_id"] for e in st["log"] if e["role"] == "candidate"] == [plan["questions"][0]["id"]]
+    assert st["q_idx"] == 1 and plan["questions"][1]["ask"] in say, "the interview must move on to the next question"
+    print("WARNING AT START: OK")
 
 
 def integrity_checks(inp, plan):
