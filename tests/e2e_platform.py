@@ -165,6 +165,8 @@ def main():
             expect(cand.get_by_role("heading", name="Apply for Customer Support Specialist")).to_be_visible()
             cand.get_by_role("button", name="Build my resume").click()
             cand.fill("#ap-name", "Tara Fernandes"); cand.fill("#ap-email", "tara@example.com"); cand.fill("#ap-loc", "Hyderabad")
+            cand.fill("#ap-phone", "+91 98765 43210"); cand.fill("#ap-notice", "30"); cand.fill("#ap-sal", "600000")
+            expect(cand.get_by_text("Phone *")).to_be_visible()
             cand.fill("#ap-sum", "Support specialist with two years on chat and email.")
             cand.get_by_placeholder("Job title").fill("Support Associate"); cand.get_by_placeholder("Company").first.fill("Helio Health")
             cand.select_option("#q-auth", "yes"); cand.fill("#q-notice", "30")

@@ -6,7 +6,7 @@ import { ApiError } from '../lib/api'
 
 interface Org { name: string; slug: string; about: string; website: string; logo_url: string; brand_color: string; headline: string; industry: string; size: string; country: string }
 interface JobItem { id: string; ref: string; title: string; department: string; location: string; workplace_type: string; employment_type: string; experience: string; salary: string; published_at: number }
-interface PublicJob { id: string; org: Org; jd: { title: string; company: string; facts: string[]; sections: { title: string; body?: string; items?: string[] }[]; contact?: string }; questions: { id: string; question: string; kind: string; required: boolean }[]; deadline?: string }
+interface PublicJob { id: string; org: Org; jd: { title: string; company: string; facts: string[]; sections: { title: string; body?: string; items?: string[] }[]; contact?: string }; questions: { id: string; question: string; kind: string; required: boolean }[]; deadline?: string; required_fields?: string[] }
 
 async function getJSON(url: string) { const r = await fetch(url); const d = await r.json().catch(() => ({})); if (!r.ok) throw new ApiError(d.detail || r.statusText, r.status); return d }
 async function postForm(url: string, fd: FormData) { const r = await fetch(url, { method: 'POST', body: fd }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new ApiError(d.detail || r.statusText, r.status); return d }
@@ -100,7 +100,7 @@ export function PublicJobPage({ slug, id }: { slug: string; id: string }) {
         </Card>
         <div ref={formRef} className="scroll-mt-6"><Card className="mt-6 p-6 sm:p-8"><h2 className="text-xl font-semibold">Apply for {j.jd.title}</h2>
           {j.deadline && <p className="mt-1 text-sm text-slate-500">Applications close {j.deadline}.</p>}
-          <div className="mt-5"><ApplyForm url={`/api/public/orgs/${slug}/jobs/${id}/apply`} orgName={j.jd.company} questions={j.questions} /></div></Card></div>
+          <div className="mt-5"><ApplyForm url={`/api/public/orgs/${slug}/jobs/${id}/apply`} orgName={j.jd.company} questions={j.questions} required={j.required_fields} /></div></Card></div>
       </main>
       <Foot />
     </div>
@@ -108,7 +108,8 @@ export function PublicJobPage({ slug, id }: { slug: string; id: string }) {
 }
 
 type Exp = { title: string; company: string; start: string; end: string; description: string }
-function ApplyForm({ url, orgName, questions, talentPool }: { url: string; orgName: string; questions: PublicJob['questions']; talentPool?: boolean }) {
+function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url: string; orgName: string; questions: PublicJob['questions']; talentPool?: boolean; required?: string[] }) {
+  const rq = (k: string) => required.includes(k), star = (label: string, k: string) => rq(k) ? `${label} *` : label
   const [mode, setMode] = useState<'upload' | 'build'>('upload')
   const [f, setF] = useState({ name: '', email: '', phone: '', location: '', headline: '', current_company: '', total_experience_years: '', notice_days: '', expected_salary: '', linkedin: '', portfolio: '', summary: '', cover_letter: '', how_heard: '' })
   const [skills, setSkills] = useState<string[]>([]), [exp, setExp] = useState<Exp[]>([{ title: '', company: '', start: '', end: '', description: '' }])
@@ -154,14 +155,14 @@ function ApplyForm({ url, orgName, questions, talentPool }: { url: string; orgNa
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Full name *" htmlFor="ap-name"><Input id="ap-name" required autoComplete="name" value={f.name} onChange={set('name')} /></Field>
         <Field label="Email *" htmlFor="ap-email"><Input id="ap-email" type="email" required autoComplete="email" value={f.email} onChange={set('email')} /></Field>
-        <Field label="Phone" htmlFor="ap-phone"><Input id="ap-phone" type="tel" autoComplete="tel" value={f.phone} onChange={set('phone')} /></Field>
-        <Field label="Current city" htmlFor="ap-loc"><Input id="ap-loc" autoComplete="address-level2" value={f.location} onChange={set('location')} /></Field>
+        <Field label={star('Phone', 'phone')} htmlFor="ap-phone"><Input id="ap-phone" type="tel" required={rq('phone')} autoComplete="tel" value={f.phone} onChange={set('phone')} /></Field>
+        <Field label={star('Current city', 'location')} htmlFor="ap-loc"><Input id="ap-loc" required={rq('location')} autoComplete="address-level2" value={f.location} onChange={set('location')} /></Field>
         <Field label="Current job title" htmlFor="ap-title"><Input id="ap-title" value={f.headline} onChange={set('headline')} /></Field>
-        <Field label="Current company" htmlFor="ap-co"><Input id="ap-co" value={f.current_company} onChange={set('current_company')} /></Field>
-        <Field label="Total experience (years)" htmlFor="ap-yrs"><Input id="ap-yrs" type="number" min={0} step="0.5" value={f.total_experience_years} onChange={set('total_experience_years')} /></Field>
-        <Field label="Notice period (days)" htmlFor="ap-notice"><Input id="ap-notice" type="number" min={0} value={f.notice_days} onChange={set('notice_days')} /></Field>
-        <Field label="Expected salary (per year)" htmlFor="ap-sal"><Input id="ap-sal" type="number" min={0} value={f.expected_salary} onChange={set('expected_salary')} /></Field>
-        <Field label="LinkedIn" htmlFor="ap-li"><Input id="ap-li" value={f.linkedin} onChange={set('linkedin')} placeholder="linkedin.com/in/…" /></Field>
+        <Field label={star('Current company', 'current_company')} htmlFor="ap-co"><Input id="ap-co" required={rq('current_company')} value={f.current_company} onChange={set('current_company')} /></Field>
+        <Field label={star('Total experience (years)', 'total_experience_years')} htmlFor="ap-yrs"><Input id="ap-yrs" required={rq('total_experience_years')} type="number" min={0} step="0.5" value={f.total_experience_years} onChange={set('total_experience_years')} /></Field>
+        <Field label={star('Notice period (days)', 'notice_days')} htmlFor="ap-notice"><Input id="ap-notice" required={rq('notice_days')} type="number" min={0} value={f.notice_days} onChange={set('notice_days')} /></Field>
+        <Field label={star('Expected salary (per year)', 'expected_salary')} htmlFor="ap-sal"><Input id="ap-sal" required={rq('expected_salary')} type="number" min={0} value={f.expected_salary} onChange={set('expected_salary')} /></Field>
+        <Field label={star('LinkedIn', 'linkedin')} htmlFor="ap-li"><Input id="ap-li" required={rq('linkedin')} value={f.linkedin} onChange={set('linkedin')} placeholder="linkedin.com/in/…" /></Field>
         <Field className="sm:col-span-2" label="Skills"><TagInput value={skills} onChange={setSkills} placeholder="Type a skill and press Enter" /></Field>
       </div>
       {mode === 'build' && (

@@ -5,7 +5,7 @@ are marked (jobs: fields["_sample"], candidates: source "demo") so they can be r
 import random
 import time
 
-from . import db, docs_pdf, jd_schema, matching, resumes
+from . import db, docs_pdf, flows, jd_schema, matching, resumes
 
 FIRST = ["Aarav", "Ananya", "Rohan", "Priya", "Vikram", "Sneha", "Arjun", "Kavya", "Rahul", "Meera", "Karan", "Isha", "Aditya", "Neha",
          "Siddharth", "Pooja", "Nikhil", "Divya", "Manish", "Riya", "Farhan", "Zoya", "Harpreet", "Lakshmi", "Tenzin", "Joseph", "Fatima",
@@ -145,9 +145,13 @@ def seed(s, org: db.Org, user_id: str | None) -> dict:
     for kind, j in jobs:
         pool = [c for k, c in cands if k == kind]
         for n, c in enumerate(rnd.sample(pool, k=min(len(pool), 4))):
-            s.add(db.Application(org_id=org.id, job_id=j.id, candidate_id=c.id, stage=stages[(n * 2) % len(stages)], source="careers",
-                                 answers={"auth": "yes", "notice": str((c.profile or {}).get("notice_days", 30))},
-                                 created_at=time.time() - rnd.randint(0, 13) * 86400))
+            a = db.Application(org_id=org.id, job_id=j.id, candidate_id=c.id, stage=stages[(n * 2) % len(stages)], source="careers",
+                               answers={"auth": "yes", "notice": str((c.profile or {}).get("notice_days", 30))},
+                               created_at=time.time() - rnd.randint(0, 13) * 86400)
+            s.add(a); s.flush()
+            flows.on_applied(s, a, j, notify=False)      # samples enter the job's flow like real applicants, without messages
+            if a.stage != "rejected" and stages[(n * 2) % len(stages)] == "rejected":
+                flows.reject(s, a, "Sample rejection", actor=None, notify=False)
     return {"jobs": len(jobs), "candidates": len(cands)}
 
 
@@ -156,7 +160,9 @@ def clear(s, org_id: str) -> dict:
     jobs = [j for j in s.query(db.Job).filter_by(org_id=org_id) if (j.fields or {}).get("_sample")]
     cands = s.query(db.Candidate).filter_by(org_id=org_id, source="demo").all()
     jids, cids = [j.id for j in jobs], [c.id for c in cands]
-    for model, col, ids in ((db.Match, "job_id", jids), (db.Application, "job_id", jids), (db.JobCollaborator, "job_id", jids),
+    for model, col, ids in ((db.Match, "job_id", jids), (db.RoundResult, "job_id", jids), (db.Slot, "job_id", jids),
+                            (db.Message, "candidate_id", cids), (db.RoundResult, "candidate_id", cids),
+                            (db.Application, "job_id", jids), (db.JobCollaborator, "job_id", jids),
                             (db.Match, "candidate_id", cids), (db.Application, "candidate_id", cids)):
         if ids:
             s.query(model).filter(getattr(model, col).in_(ids)).delete(synchronize_session=False)

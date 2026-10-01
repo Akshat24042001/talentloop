@@ -329,6 +329,10 @@ def demo_and_import():
     assert r.status_code == 200 and r.content.startswith(b"%PDF")
     d = ok(c.get("/api/dashboard"))
     assert d["applications"] == 24 and d["candidates"] == 40
+    apps = ok(c.get(f"/api/jobs/{be['id']}/applications"))
+    apps = apps.get("items", apps) if isinstance(apps, dict) else apps
+    assert apps and all(a.get("round_id") for a in apps), "sample applications enter the job's flow"
+    assert ok(c.get("/api/messages"))["items"] == [], "sample data sends no messages"
     # JD import from a file
     jd = b"""Senior Data Engineer
 We are looking for a data engineer to build our pipelines and own the warehouse used across the company for reporting and machine learning work.

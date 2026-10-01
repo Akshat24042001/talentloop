@@ -1153,5 +1153,7 @@ else:
 
     @app.get("/{path:path}", include_in_schema=False)
     def frontend_missing(path: str):
+        if path.startswith(("api/", "media/", "llm/", "webhook/")):
+            raise HTTPException(404)
         return PlainTextResponse("The web interface has not been built. Run: cd frontend && npm ci && npm run build",
                                  status_code=503)
