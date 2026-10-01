@@ -11,7 +11,7 @@ Pick one way to host them:
 |---|---|---|
 | Setup | One service, one address | Two services; Vercel forwards `/api` to Render |
 | Speed | Pages load from Render (free plan sleeps after 15 min idle, first load about 30 s) | Pages load instantly from Vercel's CDN; data calls still wake Render |
-| Env vars | Backend only | Backend only, plus the Render address in `frontend/vercel.json` |
+| Env vars | Backend only | Backend, plus `BACKEND_URL` on Vercel |
 | Uploads | No extra limits | Requests pass through Vercel; resume uploads are sent in batches of at most 4 MB to stay small. I couldn't confirm Vercel's body-size limit for forwarded requests, so a single resume over about 4 MB may fail on Vercel. Test a large file once |
 
 Complete env files: `deploy/backend.env.example` (every backend setting, explained) and `deploy/frontend.env.example`.
@@ -85,20 +85,20 @@ Or **New + > Blueprint** with this repo: `render.yaml` creates the service and a
 **B1. Backend on Render.** Do Option A steps 1 to 4 exactly (it still serves the website too; candidate links keep
 working either way). Note the service address, e.g. `https://talentloop-ai-interview.onrender.com`.
 
-**B2. Point the frontend at it.** In `frontend/vercel.json`, replace `YOUR-BACKEND.onrender.com` (2 places) with your
-Render address, commit and push to `main`.
-
-**B3. Frontend on Vercel.**
+**B2. Frontend on Vercel.**
 1. https://vercel.com > **Add New > Project** > import `Akshat24042001/talentloop`.
 2. **Root Directory**: `frontend`. Framework preset: **Vite** (or Other). Build command, output (`dist`) and install
-   command are read from `vercel.json`.
-3. **Environment Variables**: none.
+   command are read from `vercel.json`; don't change them.
+3. **Environment Variables**: add `BACKEND_URL` = your Render address (e.g. `https://talentloop-ai-interview.onrender.com`)
+   for Production, Preview and Development.
 4. **Deploy**. You get an address like `https://talentloop.vercel.app` (add your own domain under **Settings > Domains**).
+   If you add or change `BACKEND_URL` later, redeploy (Deployments > ... > Redeploy).
 
-**B4. Tell the backend the website address.** Render > Environment > add `APP_URL` = your Vercel address
+**B3. Tell the backend the website address.** Render > Environment > add `APP_URL` = your Vercel address
 (e.g. `https://talentloop.vercel.app`, no trailing slash). Save; Render redeploys. Candidate interview links now use it.
 
-How it works: the browser only talks to the Vercel address. Vercel forwards `/api/...` and `/media/...` to Render, so
+How it works: the browser only talks to the Vercel address. A small Vercel middleware (`frontend/middleware.ts`) forwards
+`/api/...` and `/media/...` to `BACKEND_URL`, so
 sign-in cookies belong to the Vercel address and no CORS setup is needed. Vapi talks to Render directly during
 interviews (Render's own address, detected automatically).
 
