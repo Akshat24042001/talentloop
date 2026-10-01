@@ -23,7 +23,8 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
-from . import api_accounts, api_hiring, auth, brain, db, exports, ivindex, llm, matching, media, proctor, refs, store  # noqa: E402
+from . import (api_accounts, api_flows, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
+               matching, media, messages, proctor, refs, store, worker)
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -70,6 +71,7 @@ async def _startup():
     await llm.resolve_models()
     if SWEEP_EVERY_SEC > 0:
         asyncio.create_task(_sweeper())
+    asyncio.create_task(_messages_loop())
 
 
 @app.middleware("http")
@@ -176,6 +178,8 @@ def health():
             "llm_key_set": bool(llm.API_KEY), "fast_chain": llm.FAST_CHAIN, "smart_chain": llm.SMART_CHAIN,
             "free_models": any(m.endswith(":free") or m == "openrouter/free" for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
             "model_note": llm.MODEL_CHECK["note"],
+            "messages": messages.status(), "phone": __import__("backend.phone", fromlist=["enabled"]).enabled(),
+            "transcription": bool(os.getenv("DEEPGRAM_API_KEY")),
             "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
             "vapi_private_key_set": bool(os.getenv("VAPI_PRIVATE_KEY")),
             "admin_protected": True, "admin_weak": WEAK_ADMIN, "platform": api_accounts.platform_status(),
@@ -226,27 +230,8 @@ async def make_plan(req: Request):
             "ms": int((time.time() - t0) * 1000)}
 
 
-def _intish(v, default: int) -> int:
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return default
-
-
 def _settings(body: dict) -> dict:
-    s = body.get("settings") or {}
-    out = {"candidate_email": str(s.get("candidate_email") or "")[:200],
-           "require_screen_share": bool(s.get("require_screen_share")),
-           "reconnect_window_sec": max(10, min(900, int(s.get("reconnect_window_sec") or RECONNECT_WINDOW_SEC))),
-           "face_detection": s.get("face_detection", True) is not False,
-           "snapshots": s.get("snapshots", True) is not False,
-           "enforce_focus": s.get("enforce_focus", True) is not False,
-           "block_multi_monitor": s.get("block_multi_monitor", True) is not False,
-           "max_warnings": max(0, min(5, _intish(s.get("max_warnings"), 2))),
-           "hr_note": str(s.get("hr_note") or "")[:500]}
-    af = s.get("available_from")
-    out["available_from"] = float(af) if isinstance(af, (int, float)) and af > 0 else None
-    return out
+    return interviews.settings_from(body.get("settings"))
 
 
 @app.post("/api/interviews")
@@ -275,24 +260,11 @@ async def create_interview(req: Request):
         plan = brain.normalize_plan(plan)
     except Exception as e:
         raise HTTPException(400, f"Invalid plan: {e}")
-    iid = secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
-    now = time.time()
     settings = _settings(body)
-    starts = settings["available_from"] or now
-    rec = {"id": iid, "created_at": now, "org_id": ctx.org_id, "created_by": ctx.user_id, "job_id": job_id,
-           "candidate_id": cand_id, "application_id": str(body.get("application_id") or "") or None,
-           "expires_at": starts + max(0.5, float(body.get("expires_hours") or 72)) * 3600,
-           "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
-           "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
-           "scoring": None, "settings": settings}
-    store.save(rec)
-    if rec["application_id"]:
-        with db.session() as s:
-            app_ = s.get(db.Application, rec["application_id"])
-            if app_ and app_.org_id == ctx.org_id:
-                app_.interview_id = iid
-                if app_.stage in ("applied", "screening", "shortlisted"):
-                    app_.stage = "interview"
+    rec = interviews.create_record(org_id=ctx.org_id, created_by=ctx.user_id, job_id=job_id, candidate_id=cand_id,
+                                   application_id=str(body.get("application_id") or "") or None, plan=plan, inputs=inputs,
+                                   settings=settings, expires_hours=body.get("expires_hours") or 72)
+    iid = rec["id"]
     with db.session() as s:
         row = s.get(db.InterviewIndex, iid)
         ref = ivindex.ref_of(row) if row else iid
@@ -593,7 +565,7 @@ async def assistant_for_call(iid: str, req: Request, bg: BackgroundTasks):
         except ValueError as e:
             raise HTTPException(409, str(e))
         try:
-            assistant = build_assistant(iid, rec["plan"], first, rec["state"]["token"])
+            assistant = build_assistant(iid, rec["plan"], first, rec["state"]["token"], language=(rec.get("settings") or {}).get("language") or "en")
         except RuntimeError as e:
             raise HTTPException(500, str(e))
         prev = rec["sessions"][-1] if rec["sessions"] else None
@@ -896,6 +868,12 @@ async def run_scoring(iid: str, force: bool = False) -> None:
         else:
             rec["scoring"] = {"state": "failed", "at": time.time(), "error": err}
         store.save(rec)
+    if report and rec.get("round_result_id"):
+        try:
+            worker.on_interview_scored(rec)           # an AI interview round: its score feeds the hiring flow
+            worker.kick()
+        except Exception:
+            log.exception("[%s] could not update the hiring round", iid)
 
 
 async def _finish_up(iid: str):
@@ -994,6 +972,20 @@ async def _sweeper():
             await sweep_once()
         except Exception:
             log.exception("sweeper failed")
+        try:
+            await worker.tick()                      # hiring flows: AI interview setup, scoring, deadlines, reminders
+        except Exception:
+            log.exception("flow worker failed")
+
+
+async def _messages_loop():
+    """Send queued emails and WhatsApp messages every few seconds."""
+    while True:
+        await asyncio.sleep(float(os.getenv("MESSAGES_EVERY_SEC", "5")))
+        try:
+            await messages.dispatch_once()
+        except Exception:
+            log.exception("message dispatch failed")
 
 
 # ---------------------------------------------------------------------------
@@ -1089,6 +1081,11 @@ async def vapi_webhook(iid: str, token: str, req: Request, bg: BackgroundTasks):
             ended = bool((rec.get("state") or {}).get("ended"))
             if ended and rec["status"] == "in_progress":
                 rec["status"] = "completed"
+            elif not ended and rec["status"] == "in_progress" and (rec.get("settings") or {}).get("channel") == "phone" and _spoke(rec):
+                # a phone call has no browser to rejoin from: the hang-up ends the interview
+                rec["status"], rec["ended_early"] = "incomplete", True
+                server_event(rec, "phone_hangup", str(msg.get("endedReason") or "")[:100])
+                ended = True
             store.save(rec)
         for kind, url in (("call_audio", audio), ("call_video", video)):
             if url:
@@ -1117,9 +1114,12 @@ async def _download_and_attach(iid: str, url: str, kind: str):
 # Jobs, candidates, matching and careers. Included after the routes above so fixed paths such as
 # /api/candidates/history win over /api/candidates/{id}.
 app.include_router(api_hiring.router)
+app.include_router(api_flows.router)
+app.include_router(api_portal.router)
 
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
-SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}"]
+SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
+              "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
 
 
 def _spa(rest: str = ""):

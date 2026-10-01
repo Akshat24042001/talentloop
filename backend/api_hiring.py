@@ -578,19 +578,45 @@ async def update_candidate(cid: str, req: Request):
         return cand_summary(c)
 
 
+def erase_candidate(org_id: str, cand_id: str, by: str) -> dict:
+    """Erase a candidate completely (data deletion on request): profile, resume, photo, applications, round results
+    and their files (videos, tests, uploads), AI interviews and recordings, messages and matches. The audit log keeps
+    that an erasure happened, without the person's details."""
+    with db.session() as s:
+        c = s.get(db.Candidate, cand_id)
+        if not c or c.org_id != org_id:
+            return {"ok": False}
+        rr_ids = [r.id for r in s.query(db.RoundResult.id).filter(db.RoundResult.candidate_id == cand_id)]
+        iv_ids = [r.id for r in s.query(db.InterviewIndex.id).filter(db.InterviewIndex.candidate_id == cand_id)]
+        iv_ids += [a.interview_id for a in s.query(db.Application.interview_id).filter(db.Application.candidate_id == cand_id) if a.interview_id]
+        s.query(db.Slot).filter(db.Slot.booked_by.in_(rr_ids or [""])).update({db.Slot.booked_by: None}, synchronize_session=False)
+        s.query(db.RoundResult).filter(db.RoundResult.candidate_id == cand_id).delete(synchronize_session=False)
+        s.query(db.Message).filter(db.Message.candidate_id == cand_id).delete(synchronize_session=False)
+        s.query(db.Match).filter_by(candidate_id=cand_id).delete()
+        s.query(db.Application).filter_by(candidate_id=cand_id).delete()
+        s.query(db.Activity).filter(db.Activity.candidate_id == cand_id).update({db.Activity.detail: "Candidate data erased"}, synchronize_session=False)
+        s.add(db.Activity(org_id=org_id, action="candidate_erased", detail=f"A candidate's data was erased by {by}"))
+        s.delete(c)
+    store.delete_files(f"{org_id}/candidates/{cand_id}")
+    for rid in rr_ids:
+        store.delete_files(f"{org_id}/rounds/{rid}")
+    for iid in dict.fromkeys(iv_ids):
+        try:
+            store.delete(iid)
+        except Exception:
+            pass
+    return {"ok": True, "interviews": len(set(iv_ids)), "rounds": len(rr_ids)}
+
+
 @router.delete("/api/candidates/{cid}")
 def delete_candidate(cid: str, req: Request):
     with db.session() as s:
         ctx = ctx_of(req, s)
         auth.require(ctx, auth.MANAGE_JOBS, "delete candidates")
         c = get_candidate(s, ctx, cid)
-        s.query(db.Match).filter_by(candidate_id=c.id).delete()
-        s.query(db.Application).filter_by(candidate_id=c.id).delete()
-        log_activity(s, ctx, "candidate_deleted", c.name or c.email)
         org_id, cand_id = c.org_id, c.id
-        s.delete(c)
-    store.delete_files(f"{org_id}/candidates/{cand_id}")
-    return {"ok": True}
+        who = (ctx.user.name or ctx.user.email) if ctx.user else "API"
+    return erase_candidate(org_id, cand_id, who)
 
 
 @router.get("/api/candidates/{cid}/resume")
@@ -629,7 +655,7 @@ def _interview_refs(s, ids: list[str]) -> dict[str, str]:
 
 
 def app_row(a: db.Application, c: db.Candidate, m: db.Match | None, iv_ref: str | None = None) -> dict:
-    return {"id": a.id, "stage": a.stage, "interview_ref": iv_ref, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at, "updated_at": a.updated_at,
+    return {"id": a.id, "stage": a.stage, "round_id": a.round_id, "round_status": a.round_status, "interview_ref": iv_ref, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at, "updated_at": a.updated_at,
             "rating": a.rating, "notes": a.notes, "knockout_failed": a.knockout_failed, "answers": a.answers, "cover_letter": a.cover_letter,
             "interview_id": a.interview_id, "source": a.source, "candidate": cand_summary(c),
             "match": {"score": m.score, "rank": m.rank, "ai_score": m.ai_score, "verdict": (m.ai_report or {}).get("verdict")} if m else None}
@@ -657,12 +683,17 @@ async def add_to_job(job_id: str, req: Request):
         c = get_candidate(s, ctx, str(body.get("candidate_id") or ""))
         a = s.query(db.Application).filter_by(job_id=job.id, candidate_id=c.id).first()
         if not a:
-            a = db.Application(org_id=job.org_id, job_id=job.id, candidate_id=c.id, stage=body.get("stage") if body.get("stage") in STAGES else "shortlisted",
-                               source="sourced")
+            a = db.Application(org_id=job.org_id, job_id=job.id, candidate_id=c.id, stage="applied", source="sourced")
             s.add(a)
+            s.flush()
             log_activity(s, ctx, "candidate_added_to_job", f"{c.name} → {job.title}", job_id=job.id, candidate_id=c.id)
+            from . import flows
+            flows.on_applied(s, a, job, notify=body.get("notify", True) is not False, sourced=True)
         s.flush()
-        return app_row(a, c, s.query(db.Match).filter_by(job_id=job.id, candidate_id=c.id).first())
+        out = app_row(a, c, s.query(db.Match).filter_by(job_id=job.id, candidate_id=c.id).first())
+    from . import worker
+    worker.kick()
+    return out
 
 
 @router.patch("/api/applications/{aid}")
@@ -681,7 +712,17 @@ async def update_application(aid: str, req: Request):
                 raise HTTPException(400, "Unknown stage")
             c = s.get(db.Candidate, a.candidate_id)
             log_activity(s, ctx, "stage_changed", f"{c.name}: {STAGE_LABEL[a.stage]} → {STAGE_LABEL[body['stage']]}", job_id=job.id, candidate_id=a.candidate_id)
-            a.stage = body["stage"]
+            from . import flows
+            notify = body.get("notify", True) is not False
+            if body["stage"] == "rejected":
+                flows.reject(s, a, str(body.get("reason") or "Not progressed")[:500], ctx.user_id, notify=notify)
+            elif body["stage"] in ("offer", "hired") and a.stage not in ("offer", "hired"):
+                flows.select(s, a, ctx.user_id, notify=notify and body["stage"] == "offer")
+                a.stage = body["stage"]
+            elif body["stage"] == "withdrawn":
+                flows.withdraw(s, a, "Marked withdrawn by HR")
+            else:
+                a.stage = body["stage"]
         if "rating" in body:
             a.rating = max(1, min(5, int(body["rating"]))) if body["rating"] not in (None, "") else None
         if "notes" in body:
@@ -941,7 +982,7 @@ def public_job(job_id: str):
             raise HTTPException(404, "This job is no longer open.")
         jd = jd_schema.compose(job.fields or {}, org.name, org_settings(org), public=True)
         qs = [{k: q.get(k) for k in ("id", "question", "kind", "required")} for q in (job.fields or {}).get("screening_questions") or []]
-        return {"id": job.id, "ref": refs.job_ref(job), "org": public_org(org) if not (job.fields or {}).get("confidential") else {**public_org(org), "name": jd["company"], "about": "", "website": ""},
+        return {"id": job.id, "ref": refs.job_ref(job), "required_fields": [k for k, on in org_settings(org)["application_fields"].items() if on], "org": public_org(org) if not (job.fields or {}).get("confidential") else {**public_org(org), "name": jd["company"], "about": "", "website": ""},
                 "jd": jd, "questions": qs, "published_at": job.published_at, "deadline": (job.fields or {}).get("deadline")}
 
 
@@ -1008,6 +1049,16 @@ def evaluate_knockouts(questions: list[dict], answers: dict) -> tuple[list[str],
     return missing, failed
 
 
+FIELD_LABEL = {"phone": "Phone", "location": "Current city", "expected_salary": "Expected salary", "notice_days": "Notice period",
+               "total_experience_years": "Total experience", "current_company": "Current company", "linkedin": "LinkedIn"}
+
+
+def required_missing(org: db.Org, profile: dict) -> list[str]:
+    """The company's mandatory application fields that are empty (the proposal: details candidates can't skip)."""
+    req_ = org_settings(org)["application_fields"]
+    return [FIELD_LABEL[k] for k, on in req_.items() if on and k in FIELD_LABEL and profile.get(k) in (None, "")]
+
+
 async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | None, source: str):
     auth.rate_limit(f"apply:{auth.client_ip(req)}", 12, 3600)
     try:
@@ -1018,6 +1069,9 @@ async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | Non
     if not profile.get("name") or not profile.get("email"):
         raise HTTPException(400, "Your name and email are required.")
     auth.norm_email(profile["email"])
+    missing = required_missing(org, profile) if source == "careers" else []
+    if missing:
+        raise HTTPException(400, "Please fill in: " + ", ".join(missing))
     if not d.get("consent"):
         raise HTTPException(400, "Please agree to the privacy notice to apply.")
     raw, text, fname = None, "", ""
@@ -1056,10 +1110,18 @@ async def apply(job_id: str, req: Request, data: str = Form(...), resume: Upload
         a = db.Application(org_id=org.id, job_id=job_id, candidate_id=cand.id, answers=answers, cover_letter=str(d.get("cover_letter") or "")[:5000],
                            knockout_failed=failed, stage="rejected" if failed else "applied", source=str(d.get("how_heard") or "careers")[:30])
         s.add(a)
+        s.flush()
         s.query(db.Job).filter_by(id=job_id).update({db.Job.matched_at: None})
         log_activity(s, None, "application_received", f"{cand.name} applied" + (" (screened out by a screening question)" if failed else ""),
                      org_id=org.id, job_id=job_id, candidate_id=cand.id)
-        return {"ok": True, "application_id": a.id, "job": job.title}
+        from . import flows, worker
+        flows.on_applied(s, a, s.get(db.Job, job_id), knockout_failed=failed)
+        status = flows.status_link(a)
+        rr = flows.get_result(s, a, a.round_id) if a.round_id else None
+        nxt = flows.invite_link(s, rr) if rr and rr.status == "invited" and (rr.data or {}).get("t") else None
+        out = {"ok": True, "application_id": a.id, "job": job.title, "status_link": status, "next_link": nxt}
+    worker.kick()
+    return out
 
 
 @router.post("/api/public/orgs/{slug}/talent-pool")

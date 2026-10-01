@@ -23,7 +23,40 @@ def public_url() -> str:
     return url.rstrip("/")
 
 
-def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dict:
+# Interview languages. Speech-to-text: Deepgram Nova-3 handles English (en-IN), Hindi and Hindi-English code-switching
+# ("multi"); other Indian languages default to Azure speech through Vapi. Voices: Vapi's Naina for English, Azure
+# neural voices for Indian languages. Override any language with STT_<CODE>="provider:model:language" and
+# VOICE_<CODE>="provider:voiceId" (code upper-cased, '-' as '_', e.g. VOICE_HI, STT_HI_EN). Verify each language on a
+# live call before using it with candidates.
+LANG_STT = {"en": ("deepgram", "nova-3", None), "hi": ("deepgram", "nova-3", "hi"), "hi-en": ("deepgram", "nova-3", "multi"),
+            "ta": ("azure", "", "ta-IN"), "te": ("azure", "", "te-IN"), "kn": ("azure", "", "kn-IN"), "mr": ("azure", "", "mr-IN"),
+            "bn": ("azure", "", "bn-IN"), "gu": ("azure", "", "gu-IN"), "ml": ("azure", "", "ml-IN")}
+LANG_VOICE = {"hi": ("azure", "hi-IN-SwaraNeural"), "ta": ("azure", "ta-IN-PallaviNeural"), "te": ("azure", "te-IN-ShrutiNeural"),
+              "kn": ("azure", "kn-IN-SapnaNeural"), "mr": ("azure", "mr-IN-AarohiNeural"), "bn": ("azure", "bn-IN-TanishaaNeural"),
+              "gu": ("azure", "gu-IN-DhwaniNeural"), "ml": ("azure", "ml-IN-SobhanaNeural")}
+
+
+def _lang_env(prefix: str, lang: str) -> list[str] | None:
+    v = _env(f"{prefix}_{lang.upper().replace('-', '_')}")
+    return v.split(":") if v else None
+
+
+def build_transcriber(plan: dict, language: str = "en") -> dict:
+    over = _lang_env("STT", language)
+    provider, model, code = (over + ["", "", ""])[:3] if over else LANG_STT.get(language, LANG_STT["en"])
+    if provider == "deepgram":
+        t = {"provider": "deepgram", "model": model or _env("STT_MODEL", "nova-3"), "language": code or _env("STT_LANGUAGE", "en-IN"), "smartFormat": True}
+        kt = [k for k in plan.get("keyterms", []) if k][:50]
+        if kt and _env("STT_KEYTERMS", "1") == "1" and t["language"] != "multi":
+            t["keyterm"] = kt
+        return t
+    t = {"provider": provider, "language": code}
+    if model:
+        t["model"] = model
+    return t
+
+
+def build_assistant(iid: str, plan: dict, first_message: str, token: str, language: str = "en", phone: bool = False) -> dict:
     """token: per-session secret placed in the LLM and webhook URLs, so a dead or duplicate call
     can't write into the current session. NOTE: this whole config passes through the candidate's
     browser (vapi.start), so the token is visible to the candidate. It protects against stale calls
@@ -48,15 +81,7 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dic
                           {"type": "customer", "regex": THINKING_REGEX,
                            "regexOptions": [{"type": "ignore-case", "enabled": True}], "timeoutSeconds": 5.0}]}
 
-    transcriber = {
-        "provider": "deepgram",
-        "model": _env("STT_MODEL", "nova-3"),
-        "language": _env("STT_LANGUAGE", "en-IN"),
-        "smartFormat": True,
-    }
-    kt = [k for k in plan.get("keyterms", []) if k][:50]
-    if kt and _env("STT_KEYTERMS", "1") == "1":
-        transcriber["keyterm"] = kt
+    transcriber = build_transcriber(plan, language)
 
     return {
         "name": "TalentLoop Interviewer",
@@ -72,7 +97,7 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dic
             # Free LLMs can be slow; our server itself falls back after TURN_TIMEOUT_SEC.
             "timeoutSeconds": 25,
         },
-        "voice": build_voice(),
+        "voice": build_voice(language),
         "transcriber": transcriber,
         "startSpeakingPlan": start_plan,
         "stopSpeakingPlan": {"numWords": 3, "voiceSeconds": 0.3, "backoffSeconds": 1},
@@ -94,17 +119,21 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str) -> dic
         ],
         "artifactPlan": {"recordingEnabled": True,
                          # Vapi's own cloud video (camera + both voices), a server-side backup of our recording.
-                         "videoRecordingEnabled": _env("VAPI_VIDEO_RECORDING", "1") == "1"},
+                         "videoRecordingEnabled": _env("VAPI_VIDEO_RECORDING", "1") == "1" and not phone},
         "server": {"url": f"{public}/webhook/vapi/{iid}/{token}"},
         "serverMessages": ["end-of-call-report"],
-        "metadata": {"interview_id": iid},
+        "metadata": {"interview_id": iid, "channel": "phone" if phone else "web", "language": language},
     }
 
 
-def build_voice() -> dict:
+def build_voice(language: str = "en") -> dict:
     """Default: Vapi's own 'Naina' voice on their Version 2 model (female, Indian accent, the most
     natural option in Vapi's current catalogue, included in Vapi's price). Override with
     VOICE_PROVIDER / VOICE_ID (e.g. azure + en-IN-NeerjaNeural, or an 11labs voice)."""
+    over = _lang_env("VOICE", language) if language != "en" else None
+    if over or language in LANG_VOICE:
+        provider, voice_id = (over[0], ":".join(over[1:])) if over else LANG_VOICE[language]
+        return {"provider": provider, "voiceId": voice_id}
     provider = _env("VOICE_PROVIDER", "vapi")
     voice_id = _env("VOICE_ID", "Naina" if provider == "vapi" else "")
     v = {"provider": provider, "voiceId": voice_id}

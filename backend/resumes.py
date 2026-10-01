@@ -137,3 +137,63 @@ def profile_text(p: dict) -> str:
     if p.get("total_experience_years") not in (None, ""):
         lines.append(f"{p['total_experience_years']} years of experience")
     return "\n".join(x for x in lines if x)
+
+
+def tenures(text: str, profile: dict | None = None) -> list[dict]:
+    """Jobs with start/end dates, newest first: from the structured profile when present, else date ranges in the text."""
+    out = []
+    today = date.today()
+
+    def parse_d(v: str):
+        v = (v or "").strip().lower()
+        if not v or v.startswith(("present", "current", "now", "till")):
+            return today
+        m = re.match(r"([a-z]{3})[a-z]*\.?\s*(\d{4})", v)
+        if m and m.group(1) in MONTHS:
+            return date(int(m.group(2)), MONTHS[m.group(1)], 1)
+        m = re.match(r"(\d{1,2})[/-](\d{4})", v)
+        if m:
+            return date(int(m.group(2)), max(1, min(12, int(m.group(1)))), 1)
+        m = re.match(r"(\d{4})", v)
+        return date(int(m.group(1)), 1, 1) if m else None
+
+    for e in (profile or {}).get("experience") or []:
+        if not isinstance(e, dict):
+            continue
+        a, b = parse_d(e.get("start", "")), parse_d(e.get("end", "") or "present")
+        if a and b and a <= b:
+            out.append({"title": e.get("title", ""), "company": e.get("company", ""), "start": a, "end": b})
+    if not out:
+        for m in RANGE.finditer(text or ""):
+            try:
+                a = date(int(m.group(2)), MONTHS[m.group(1)[:3].lower()], 1)
+                b = parse_d(m.group(3))
+                if b and 1970 < a.year <= today.year and a <= b:
+                    out.append({"title": "", "company": "", "start": a, "end": b})
+            except (KeyError, ValueError):
+                continue
+    out.sort(key=lambda x: x["start"], reverse=True)
+    return out
+
+
+def stability(text: str, profile: dict | None = None) -> dict:
+    """Job-stability indicator from tenure history: average tenure, short stints, moves in the last 3 years."""
+    jobs = tenures(text, profile)
+    if len(jobs) < 2:
+        return {"level": "unknown", "label": "Not enough history", "jobs": len(jobs), "avg_months": None, "short_stints": 0, "moves_3y": 0}
+    months = [max(1, (j["end"].year - j["start"].year) * 12 + j["end"].month - j["start"].month) for j in jobs]
+    past = months[1:] if len(months) > 1 else months        # the current job is still running
+    avg = sum(past) / len(past)
+    short = sum(1 for m in past if m < 12)
+    cutoff = date.today().replace(year=date.today().year - 3)
+    moves = sum(1 for j in jobs[1:] if j["end"] >= cutoff)
+    if short >= 3 or (avg < 14 and len(past) >= 2):
+        level, label = "low", "Frequent job changes"
+    elif short >= 1 or avg < 24:
+        level, label = "medium", "Some short stints"
+    else:
+        level, label = "high", "Stable"
+    return {"level": level, "label": label, "jobs": len(jobs), "avg_months": round(avg, 1), "short_stints": short, "moves_3y": moves,
+            "history": [{"title": j["title"], "company": j["company"], "start": j["start"].isoformat()[:7],
+                         "end": "present" if j["end"] >= date.today().replace(day=1) else j["end"].isoformat()[:7], "months": m}
+                        for j, m in zip(jobs, months)][:8]}

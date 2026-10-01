@@ -244,20 +244,24 @@ def hiring(cs):
     assert pj["questions"][0]["id"] == "auth" and "required_answer" not in pj["questions"][0], "the expected answer is never sent to candidates"
     assert client().get(f"/api/public/jobs/{draft['id']}x").status_code == 404
     cand = client()
-    form = {"name": "Neha Gupta", "email": "neha@mail.test", "location": "Bengaluru", "consent": True, "answers": {"auth": "yes"}}
+    must = {"phone": "+91 98450 12345", "expected_salary": 1800000, "notice_days": 30}
+    form = {"name": "Neha Gupta", "email": "neha@mail.test", "location": "Bengaluru", "consent": True, "answers": {"auth": "yes"}, **must}
     res_file = ("neha.txt", b"Neha Gupta\nneha@mail.test\nBackend developer, 5 years: Java, Spring Boot, PostgreSQL, Kafka, AWS.", "text/plain")
     import json as _json
     assert cand.post(f"/api/public/jobs/{jid}/apply", data={"data": _json.dumps({**form, "answers": {}})}, files={"resume": res_file}).status_code == 400
     assert cand.post(f"/api/public/jobs/{jid}/apply", data={"data": _json.dumps({**form, "consent": False})}, files={"resume": res_file}).status_code == 400
+    r = cand.post(f"/api/public/jobs/{jid}/apply", data={"data": _json.dumps({**form, "phone": ""})}, files={"resume": res_file})
+    assert r.status_code == 400 and "Phone" in r.text, "mandatory application fields are enforced"
     ok(cand.post(f"/api/public/jobs/{jid}/apply", data={"data": _json.dumps(form)}, files={"resume": res_file}))
     assert cand.post(f"/api/public/jobs/{jid}/apply", data={"data": _json.dumps(form)}, files={"resume": res_file}).status_code == 409
     # knockout: not authorised -> screened out, but still on file
-    built = {"name": "Tom Builder", "email": "tom@mail.test", "consent": True, "answers": {"auth": "no"}, "skills": ["Java", "Spring Boot"],
+    built = {"name": "Tom Builder", "email": "tom@mail.test", "location": "Pune", "consent": True, **must, "answers": {"auth": "no"}, "skills": ["Java", "Spring Boot"],
              "experience": [{"title": "Developer", "company": "Acme", "start": "2020", "description": "Built APIs in Java"}], "total_experience_years": 4}
     ok(cand.post(f"/api/public/jobs/{jid}/apply", data={"data": _json.dumps(built)}))
     apps = ok(hr.get(f"/api/jobs/{jid}/applications"))["items"]
     by = {a["candidate"]["name"]: a for a in apps}
-    assert by["Neha Gupta"]["stage"] == "applied" and by["Tom Builder"]["stage"] == "rejected" and by["Tom Builder"]["knockout_failed"]
+    assert by["Neha Gupta"]["stage"] in ("applied", "screening"), "applying enters the job's hiring flow"
+    assert by["Tom Builder"]["stage"] == "rejected" and by["Tom Builder"]["knockout_failed"]
     tom = by["Tom Builder"]["candidate"]
     assert tom["has_resume"], "a resume built in the form becomes a PDF"
     rp = hr.get(f"/api/candidates/{tom['id']}/resume")
@@ -280,7 +284,7 @@ def hiring(cs):
     ok(mgr.patch(f"/api/applications/{neha_app}", json={"rating": 4, "notes": "Strong on Kafka"}))
     assert any(c["name"] == "Neha Gupta" for c in ok(mgr.get("/api/candidates"))["items"]), "managers see candidates of their jobs"
     added = ok(hr.post(f"/api/jobs/{jid}/applications", json={"candidate_id": anita["id"]}))
-    assert added["stage"] == "shortlisted" and added["source"] == "sourced"
+    assert added["stage"] in ("screening", "shortlisted") and added["source"] == "sourced" and added.get("round_id"), added
     det = ok(owner.get(f"/api/candidates/{anita['id']}"))
     assert det["applications"][0]["job_id"] == jid and det["best_jobs"][0]["ai_report"]
 

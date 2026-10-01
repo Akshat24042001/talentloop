@@ -202,6 +202,7 @@ class Application(Base):
     round_status: Mapped[str] = mapped_column(String(20), default="")              # see flows.ROUND_STATUSES
     drive_id: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
     portal_token_hash: Mapped[str] = mapped_column(String(64), default="", index=True)   # candidate status page
+    portal_token: Mapped[str] = mapped_column(String(64), default="")                    # so HR can copy the link
     human_requested_at: Mapped[float | None] = mapped_column(Float, nullable=True)       # asked for a human instead of AI
     human_request_note: Mapped[str] = mapped_column(Text, default="")
     accommodation: Mapped[dict | None] = mapped_column(JSON, nullable=True)        # {request, status, extra_time_pct}
@@ -405,7 +406,7 @@ def migrate() -> None:
                        "notice_days": "FLOAT", "expected_salary": "FLOAT", "current_company": "VARCHAR(200) DEFAULT ''",
                        "college": "VARCHAR(200) DEFAULT ''", "content_hash": "VARCHAR(64) DEFAULT ''", "photo_file": "VARCHAR(200) DEFAULT ''"},
         "applications": {"round_id": "VARCHAR(24)", "round_status": "VARCHAR(20) DEFAULT ''", "drive_id": "VARCHAR(24)",
-                         "portal_token_hash": "VARCHAR(64) DEFAULT ''", "human_requested_at": "FLOAT", "human_request_note": "TEXT DEFAULT ''",
+                         "portal_token_hash": "VARCHAR(64) DEFAULT ''", "portal_token": "VARCHAR(64) DEFAULT ''", "human_requested_at": "FLOAT", "human_request_note": "TEXT DEFAULT ''",
                          "accommodation": js, "decided_at": "FLOAT"},
     }
     for table, cols in want.items():

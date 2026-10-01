@@ -19,6 +19,16 @@ DEFAULT_SETTINGS = {
     "interview_defaults": {"max_warnings": 2, "enforce_focus": True, "block_multi_monitor": True, "require_screen_share": False,
                            "duration_min": 15},
     "retention_days": 0,
+    # Proposal: mandatory details candidates can't skip (careers form and campus registration)
+    "application_fields": {"phone": True, "location": True, "expected_salary": True, "notice_days": True, "total_experience_years": False,
+                           "current_company": False, "linkedin": False, "resume": True},
+    # HR-approved answers the AI interviewer may give when a candidate asks about the company (nothing else)
+    "faq": [],
+    # Columns for the HROne employee import export: header in HROne's template -> TalentLoop field
+    "hrone_columns": [],
+    # Delete recordings, snapshots and uploads of closed candidates (rejected, withdrawn, hired) after this many days; 0 = keep
+    "recording_retention_days": 0,
+    "sender_name": "",
 }
 
 
@@ -27,6 +37,7 @@ def org_settings(org: db.Org) -> dict:
     s.update(org.settings or {})
     s["match_weights"] = {**DEFAULT_SETTINGS["match_weights"], **((org.settings or {}).get("match_weights") or {})}
     s["interview_defaults"] = {**DEFAULT_SETTINGS["interview_defaults"], **((org.settings or {}).get("interview_defaults") or {})}
+    s["application_fields"] = {**DEFAULT_SETTINGS["application_fields"], **((org.settings or {}).get("application_fields") or {})}
     return s
 
 
@@ -376,8 +387,16 @@ async def update_org(req: Request):
                 v = max(1, min(50, int(v or 5)))
             if k == "ai_reports_per_run":
                 v = max(0, min(500, int(v or 0)))
-            if k == "retention_days":
+            if k in ("retention_days", "recording_retention_days"):
                 v = max(0, min(3650, int(v or 0)))
+            if k == "faq":
+                v = [{"q": str(x.get("q") or "").strip()[:300], "a": str(x.get("a") or "").strip()[:1500]} for x in (v or [])
+                     if isinstance(x, dict) and str(x.get("q") or "").strip() and str(x.get("a") or "").strip()][:40]
+            if k == "hrone_columns":
+                v = [{"header": str(x.get("header") or "").strip()[:80], "field": str(x.get("field") or "").strip()[:40]} for x in (v or [])
+                     if isinstance(x, dict) and str(x.get("header") or "").strip()][:80]
+            if k == "application_fields":
+                v = {str(f): bool(r) for f, r in (v or {}).items() if f in DEFAULT_SETTINGS["application_fields"]}
             cur[k] = v
         org.settings = cur
         log_activity(s, ctx, "settings_updated", ", ".join(sorted(incoming))[:300])
