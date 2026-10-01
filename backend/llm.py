@@ -22,7 +22,7 @@ API_KEY = (os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip(
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 BASE_URL = (os.getenv("LLM_BASE_URL") or "").strip() or (OPENROUTER_URL if API_KEY.startswith("sk-or-") else "")
 OPENROUTER = "openrouter.ai" in BASE_URL
-JSON_MODE = os.getenv("LLM_JSON_MODE", "1") == "1"
+JSON_MODE = (os.getenv("LLM_JSON_MODE") or "1") == "1"
 
 # Free OpenRouter models, best first (checked against OpenRouter's free list on 2026-09-26).
 # The live turn needs speed; plan and scoring need quality. "openrouter/free" is OpenRouter's own

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm ci",
+  "redirects": [
+    { "source": "/dashboard.html", "destination": "/app/interviews", "permanent": true },
+    { "source": "/hr.html", "destination": "/app/interviews/new", "permanent": true },
+    { "source": "/report.html", "has": [{ "type": "query", "key": "id", "value": "(?<id>.+)" }], "destination": "/app/interviews/:id", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://YOUR-BACKEND.onrender.com/api/:path*" },
+    { "source": "/media/:path*", "destination": "https://YOUR-BACKEND.onrender.com/media/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
+    { "source": "/((?!assets/).*)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+  ]
+}

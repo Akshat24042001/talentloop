@@ -77,7 +77,7 @@ The interviewer's possible actions each turn are: follow up, next question, repe
 1. `cd talentloop-ai-interview && python -m venv .venv && source .venv/bin/activate` (Windows: `.venv\Scripts\activate`)
 2. `pip install -r backend/requirements.txt`, then build the web interface once (needs Node 20+): `cd frontend && npm ci && npm run build && cd ..`. Rebuild after pulling changes to `frontend/`. (Docker and Render do this automatically.)
 3. Start a tunnel: `cloudflared tunnel --url http://localhost:8000`, then copy the `https://....trycloudflare.com` URL.
-4. `cp .env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `PLATFORM_ADMIN_EMAILS` (your email). Leave `DATABASE_URL` empty to use a local SQLite file.
+4. `cp deploy/backend.env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `PLATFORM_ADMIN_EMAILS` (your email). Leave `DATABASE_URL` and `S3_*` empty to use local files. Hosting: see `DEPLOY.md`.
 5. `uvicorn backend.main:app --host 0.0.0.0 --port 8000` (one worker only: interview locks live in process memory)
 6. Open `http://localhost:8000`, click **Start free** and sign up. Load the sample data from the dashboard. No yellow warnings should show at the top (on a laptop, temporary storage warnings are expected).
 

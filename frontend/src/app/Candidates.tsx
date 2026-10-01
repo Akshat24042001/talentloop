@@ -66,10 +66,16 @@ function UploadDialog({ open, onClose, onDone }: { open: boolean; onClose: () =>
   async function go() {
     setBusy(true); setRes(null)
     const all = { created: 0, updated: 0, failed: [] as any[] }
-    for (let i = 0; i < files.length; i += 50) {            // batches keep each request small
-      const fd = new FormData(); files.slice(i, i + 50).forEach(f => fd.append('files', f))
+    const batches: File[][] = []                             // at most 25 files / 4 MB per request
+    for (const f of files) {
+      const last = batches[batches.length - 1]
+      if (last && last.length < 25 && last.reduce((a, x) => a + x.size, 0) + f.size <= 4e6) last.push(f)
+      else batches.push([f])
+    }
+    for (const b of batches) {
+      const fd = new FormData(); b.forEach(f => fd.append('files', f))
       try { const r = await api('/api/candidates/upload', { method: 'POST', body: fd }); all.created += r.created; all.updated += r.updated; all.failed.push(...r.failed) }
-      catch (e: any) { all.failed.push({ file: `batch ${i / 50 + 1}`, error: e.message }) }
+      catch (e: any) { all.failed.push(...b.map(f => ({ file: f.name, error: e.message }))) }
     }
     setRes(all); setBusy(false); setFiles([]); onDone()
   }

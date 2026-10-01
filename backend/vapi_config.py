@@ -12,7 +12,7 @@ THINKING_REGEX = (r"(let me think|let me see|give me a (second|moment|minute)|on
 
 
 def _env(k, d=""):
-    return os.getenv(k, d).strip()
+    return (os.getenv(k) or d).strip()       # an empty value means "use the default"
 
 
 def public_url() -> str:

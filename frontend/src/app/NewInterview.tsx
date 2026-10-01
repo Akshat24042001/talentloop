@@ -68,7 +68,7 @@ export default function NewInterview() {
   const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
   const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
   const planRef = useRef<HTMLDivElement>(null), linkRef = useRef<HTMLDivElement>(null)
-  const base = (health?.public_url || location.origin).replace(/\/$/, '')
+  const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
   const { query } = useLocation()
   const link_ = { job_id: query.get('job') || '', candidate_id: query.get('candidate') || '', application_id: query.get('application') || '' }
   const [fromJob, setFromJob] = useState('')

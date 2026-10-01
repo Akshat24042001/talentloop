@@ -20,7 +20,7 @@ export default function Interviews() {
   const [cal, setCal] = useState<Calib | null>(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState(''), [fs, setFs] = useState(''), [fr, setFr] = useState(''), [role, setRole] = useState(''), [sort, setSort] = useState('new')
-  const base = (health?.public_url || location.origin).replace(/\/$/, '')
+  const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
 
   const load = useCallback(async () => {
     try { const [r, c] = await Promise.all([api<Row[]>('/api/interviews'), api<Calib>('/api/calibration')]); setRows(r); setCal(c); setErr('') }

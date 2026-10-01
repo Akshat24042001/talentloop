@@ -158,7 +158,7 @@ def health():
             "llm_key_set": bool(llm.API_KEY), "fast_chain": llm.FAST_CHAIN, "smart_chain": llm.SMART_CHAIN,
             "free_models": any(m.endswith(":free") or m == "openrouter/free" for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
             "model_note": llm.MODEL_CHECK["note"],
-            "public_url": public_url(), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
+            "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
             "vapi_private_key_set": bool(os.getenv("VAPI_PRIVATE_KEY")),
             "admin_protected": True, "admin_weak": WEAK_ADMIN, "platform": api_accounts.platform_status(),
             "storage": {"s3": store.S3_ENABLED, "s3_error": store.S3_STATUS["last_error"],
