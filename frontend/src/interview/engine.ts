@@ -2,13 +2,14 @@
 // integrity signals (warnings spoken by the interviewer), rejoin window. Framework-free; React subscribes to
 // `state` (useSyncExternalStore) and to `onLevels` for the 60 fps audio meters.
 import { post } from '../lib/api'
+import { AnswerTiming, FaceMatch, HeadTurn, VoiceWatch, virtualCameraLabel, yaw } from './signals'
 
 const CHUNK_MS = 5000
 const CONFIRM_MS: Record<string, number> = { tab_hidden: 1000, window_blur: 2000 }
 
 export type CheckState = '' | 'ok' | 'bad'
 export interface Check { state: CheckState; text: string; hidden: boolean }
-export type CheckKey = 'cam' | 'mic' | 'face' | 'screen' | 'share'
+export type CheckKey = 'cam' | 'mic' | 'face' | 'live' | 'screen' | 'share'
 export interface Display { q_id: string; main: string; text: string; kind: 'question' | 'follow_up' | 'rephrase' | 'closing' }
 export interface Line { id: number; role: 'ai' | 'you'; text: string; final: boolean; warn?: boolean }
 export interface PublicInfo {
@@ -16,6 +17,7 @@ export interface PublicInfo {
   enforce_focus: boolean; block_multi_monitor: boolean; max_warnings: number; expired: boolean
   available_from?: number | null; not_open_yet: boolean; require_screen_share: boolean; face_detection: boolean
   snapshots: boolean; reconnect_window_sec: number; resuming: boolean; reconnect_seconds_left: number | null
+  liveness_check?: boolean; identity_check?: boolean; has_reference_photo?: boolean
 }
 export interface State {
   step: 'loading' | 'blocked' | 'consent' | 'check' | 'call' | 'done'
@@ -57,7 +59,7 @@ export class InterviewEngine {
   state: State = {
     step: 'loading', blocked: '', P: null,
     checks: { cam: { state: '', text: 'Camera', hidden: false }, mic: { state: '', text: 'Microphone', hidden: false },
-      face: { state: '', text: 'Your face is clearly visible', hidden: false }, screen: { state: '', text: 'Single screen', hidden: true },
+      face: { state: '', text: 'Your face is clearly visible', hidden: false }, live: { state: '', text: 'Turn your head slowly to one side, then the other', hidden: true }, screen: { state: '', text: 'Single screen', hidden: true },
       share: { state: '', text: 'Entire screen shared', hidden: true } },
     startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false,
     status: 'connecting', question: null, lines: [], muted: false, sharing: false, hasVolume: false,
@@ -99,6 +101,12 @@ export class InterviewEngine {
   private warnTimer?: number
   private aiLevel = 0
   private lastWarnSay = ''
+  private head = new HeadTurn()
+  private liveDone = false
+  private liveSince = 0
+  private match = new FaceMatch()
+  private matchMiss = 0
+  private timing = new AnswerTiming()
 
   constructor() {
     this.vapiReady = import(/* @vite-ignore */ '/vendor/vapi-web.mjs' as string)
@@ -149,7 +157,8 @@ export class InterviewEngine {
     document.title = `Interview · ${P.role || ''}`
     const ch = this.state.checks
     this.set({ checks: { ...ch, screen: { ...ch.screen, hidden: !P.block_multi_monitor }, share: { ...ch.share, hidden: !P.require_screen_share },
-      face: { ...ch.face, hidden: !P.face_detection } } })
+      face: { ...ch.face, hidden: !P.face_detection }, live: { ...ch.live, hidden: !P.liveness_check || P.resuming } } })
+    if (!P.liveness_check || P.resuming) this.liveDone = true
     if (P.disqualified) return this.closed('Interview closed', 'This interview was stopped because the interview rules were broken after warnings. Please contact HR if you think this is a mistake.')
     if (P.status === 'completed' || P.status === 'scored') return this.closed('Thank you', 'Your interview is complete. The HR team will get back to you.', 'ok')
     if (P.status === 'incomplete' || P.status === 'cancelled') return this.closed('Interview closed', 'This interview is closed. Please contact HR if you think this is a mistake.')
@@ -186,6 +195,8 @@ export class InterviewEngine {
     this.meterLoop()
     this.sendDevice()
     this.initFace()
+    virtualCameraLabel(this.stream.getVideoTracks()[0]).then(l => { if (l) { this.ev('virtual_camera', l); setTimeout(() => this.snap('virtual_camera'), 1500) } })
+    if (this.P.identity_check) this.initMatch()
     this.checkMonitors()
     this.timers.mon = window.setInterval(() => this.monTick(), 2000)
     ;(screen as any).addEventListener?.('change', () => this.monTick())
@@ -242,10 +253,12 @@ export class InterviewEngine {
     const faceNeeded = P.face_detection && !!this.faceDet
     const monOk = !P.block_multi_monitor || extendedDisplay() !== true
     const shareOk = !P.require_screen_share || !!this.screenStream?.active
-    const ready = !!this.stream && this.micOk && (!faceNeeded || this.faceOk) && monOk && shareOk
+    const liveOk = this.liveDone || !faceNeeded
+    const ready = !!this.stream && this.micOk && (!faceNeeded || this.faceOk) && liveOk && monOk && shareOk
     this.set({ startReady: ready, checkMsg: ready ? 'All set. Join when you are ready.'
       : !this.micOk ? 'Say a few words so we can check your microphone.'
       : faceNeeded && !this.faceOk ? 'Position your face in the camera, in good light.'
+      : !liveOk ? 'Turn your head slowly to one side, then the other.'
       : !monOk ? 'Disconnect the second screen to continue.'
       : !shareOk ? 'Share your entire screen to continue.' : '' })
   }
@@ -281,7 +294,7 @@ export class InterviewEngine {
         runningMode: 'VIDEO', minDetectionConfidence: 0.5 })
     } catch (e: any) {
       console.warn('face detection unavailable', e); this.ev('face_check_unavailable', e?.message)
-      this.setCheck('face', 'ok', 'Face check unavailable on this browser (skipped)'); this.faceDet = null; this.updateStart(); return
+      this.setCheck('face', 'ok', 'Face check unavailable on this browser (skipped)'); this.setCheck('live', '', undefined, true); this.liveDone = true; this.faceDet = null; this.updateStart(); return
     }
     this.timers.face = window.setInterval(() => this.faceTick(), 1000)
   }
@@ -289,9 +302,10 @@ export class InterviewEngine {
     const v = this.inCall ? this.videos.self : this.videos.preview
     if (!this.faceDet || !this.stream || !v || !v.videoWidth || document.hidden) return
     // Real faces score ~0.85+. Present: >= 0.6. A second person must be clear (>= 0.75) to avoid shadows/posters.
-    let n = 0, strong = 0
+    let n = 0, strong = 0, dets: any[] = []
     try {
-      const sc: number[] = this.faceDet.detectForVideo(v, performance.now()).detections.map((d: any) => d.categories?.[0]?.score ?? 1)
+      dets = this.faceDet.detectForVideo(v, performance.now()).detections
+      const sc: number[] = dets.map((d: any) => d.categories?.[0]?.score ?? 1)
       n = sc.filter(x => x >= 0.6).length; strong = sc.filter(x => x >= 0.75).length
     } catch { return }
     if (!this.inCall) {
@@ -299,13 +313,60 @@ export class InterviewEngine {
       if (ok !== this.faceOk || (n > 1) !== this.state.checks.face.text.startsWith('Only')) {
         this.faceOk = ok
         this.setCheck('face', ok ? 'ok' : '', n > 1 ? 'Only you should be visible on camera' : 'Your face is clearly visible'); this.updateStart()
+        if (ok) this.checkIdentityAtStart()
       }
+      if (ok && !this.liveDone) this.liveTick(dets[0]?.keypoints)
       return
     }
     const fs = this.faceState
     if (n === 0) { fs.missing++; if (fs.missing === 3 && !fs.missingOn) { fs.missingOn = true; this.ev('face_missing_start'); this.snap('no_face') } }
     else { if (fs.missingOn) { fs.missingOn = false; this.ev('face_missing_end') } fs.missing = 0 }
     if (strong >= 2) { if (++fs.multi >= 2 && this.once('multi', 30000)) { this.ev('multiple_faces', `${n} faces`); this.snap('multiple_faces') } } else fs.multi = 0
+  }
+
+  // ------------------------------------------------------------ liveness (head turn) and face match
+  private liveTick(kp: { x: number; y: number }[] | undefined) {
+    if (!this.liveSince) this.liveSince = Date.now()
+    const before = this.head.progress()
+    if (this.head.feed(yaw(kp))) {
+      this.liveDone = true; this.ev('liveness_passed'); this.setCheck('live', 'ok', 'Head-turn check done'); this.updateStart(); return
+    }
+    if (this.head.progress() > before) this.setCheck('live', '', 'Good. Now turn to the other side')
+    if (Date.now() - this.liveSince > 30000) {   // never block a candidate on it: note it for HR and move on
+      this.liveDone = true; this.ev('liveness_failed', 'not completed in 30 seconds'); this.snap('liveness')
+      this.setCheck('live', 'ok', 'Head-turn check skipped'); this.updateStart()
+    }
+  }
+  private async initMatch() {
+    try {
+      await this.match.load()
+      if (this.P.has_reference_photo && !await this.match.setReferenceImage(`/api/interviews/${this.iid}/reference-photo`))
+        this.ev('identity_check_unavailable', 'no clear face in the registration photo')
+    } catch (e: any) { this.ev('identity_check_unavailable', e?.message || 'face match failed to load') }
+  }
+  private matchedAtStart = false
+  private async checkIdentityAtStart() {
+    if (this.matchedAtStart || this.match.refSource !== 'registration' || !this.videos.preview) return
+    this.matchedAtStart = true
+    try {
+      const d = await this.match.distance(this.videos.preview)
+      if (d == null) { this.matchedAtStart = false; return }
+      if (d > 0.6) { this.ev('identity_mismatch', `at the system check (distance ${d.toFixed(2)})`); this.snap('identity_mismatch') }
+      else this.ev('identity_match', `distance ${d.toFixed(2)}`)
+    } catch { /* face match is best effort */ }
+  }
+  private async matchTick() {
+    const v = this.videos.self
+    if (!v?.videoWidth || document.hidden) return
+    try {
+      if (!this.match.ready) { await this.match.setReferenceFrame(v); return }
+      const d = await this.match.distance(v)
+      if (d == null) return
+      this.matchMiss = d > 0.6 ? this.matchMiss + 1 : 0
+      if (this.matchMiss >= 2 && this.once('idmatch', 120000)) {
+        this.ev(this.match.refSource === 'registration' ? 'identity_mismatch' : 'person_changed', `distance ${d.toFixed(2)}`); this.snap('identity_mismatch'); this.matchMiss = 0
+      }
+    } catch { /* best effort */ }
   }
 
   // ------------------------------------------------------------ snapshots: camera, and a frame of the shared screen
@@ -504,9 +565,26 @@ export class InterviewEngine {
       this.timers.snap = window.setInterval(() => { this.snap('periodic'); this.snapScreen('periodic') }, 60000)
       this.timers.hb = window.setInterval(() => post(`/api/interviews/${this.iid}/heartbeat`, {}).catch(() => {}), 5000)
       this.pollProgress(); this.timers.prog = window.setInterval(() => this.pollProgress(), 4000)
+      if (this.P.identity_check) this.timers.match = window.setInterval(() => this.matchTick(), 45000)
+      if (this.P.identity_check) setTimeout(() => this.matchTick(), 8000)
+      try {
+        const an = this.audioCtx!.createAnalyser(); an.fftSize = 2048
+        this.audioCtx!.createMediaStreamSource(this.stream!).connect(an)
+        const watch = new VoiceWatch(an, this.audioCtx!.sampleRate)
+        this.timers.voice = window.setInterval(() => {
+          if (this.state.status === 'speaking' || this.state.muted || document.hidden) return
+          const r = watch.tick()
+          if (r && this.once('voice2', 90000)) { this.ev('second_voice', r); this.snap('second_voice') }
+        }, 100)
+      } catch { /* no audio analysis on this browser */ }
     })
-    vapi.on('speech-start', () => this.setStatus('speaking'))
-    vapi.on('speech-end', () => this.setStatus('listening'))
+    vapi.on('speech-start', () => {
+      this.setStatus('speaking')
+      const t = this.timing.aiStarted()
+      if (t) this.ev('answer_timing', `${t.delay.toFixed(1)}s pause, ${t.words} words, ${t.wpm} wpm`)
+      if (this.timing.pattern()) this.ev('answer_pattern', 'three or more long pauses followed by long, fast answers')
+    })
+    vapi.on('speech-end', () => { this.setStatus('listening'); this.timing.aiEnded() })
     vapi.on('volume-level', (v: number) => { if (!this.state.hasVolume) this.set({ hasVolume: true }); this.aiLevel = Math.min(1, (+v || 0) * 1.8) })
     vapi.on('message', (m: any) => {
       if (m.type !== 'transcript') return
@@ -516,7 +594,7 @@ export class InterviewEngine {
         if (this.lastWarnSay && t && this.lastWarnSay.includes(t)) return
         this.addLine('ai', m.transcript, true); this.pollProgress()
       }
-      else if (m.role === 'user') this.addLine('you', m.transcript, m.transcriptType === 'final')
+      else if (m.role === 'user') { this.addLine('you', m.transcript, m.transcriptType === 'final'); this.timing.heard(m.transcriptType === 'final', m.transcript || '') }
     })
     vapi.on('error', (e: unknown) => { this.ev('vapi_error', JSON.stringify(e).slice(0, 200)); console.error(e) })
     vapi.on('call-end', () => this.finish())
@@ -535,7 +613,7 @@ export class InterviewEngine {
   private async finish() {
     if (this.ended) return
     this.ended = true; this.inCall = false
-    ;['hb', 'prog', 'snap'].forEach(k => clearInterval(this.timers[k]))
+    ;['hb', 'prog', 'snap', 'match', 'voice'].forEach(k => clearInterval(this.timers[k]))
     if (this.away) { clearTimeout(this.away.timer); clearInterval(this.away.shotTimer); this.away = null }
     if (this.faceState.missingOn) { this.faceState.missingOn = false; this.ev('face_missing_end') }
     this.ev('call_end')

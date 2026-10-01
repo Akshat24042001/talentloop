@@ -252,18 +252,112 @@ def template_plan(inp: dict) -> dict:
 SNAPSHOTS_KEPT = 12
 
 
+# Fixed lines the interviewer speaks, per language. English, Hindi and Hinglish are written here; other languages
+# are translated once by the AI when an interview is created (localize_lines) and fall back to English.
+# END_PHRASE stays in English in every language: Vapi hangs up when it hears it.
+LINES = {
+    "en": {
+        "opening": ("Hi {name}, thanks for joining. I'm an AI interviewer, not a person, and I'll talk with you about the {role} role{company}. "
+                    "This conversation is recorded and transcribed so the hiring team can review it, and a person makes the final decision. "
+                    "If you're not comfortable being recorded, just say so and we'll stop here. If you'd like me to repeat anything, just ask."),
+        "practice": "Before we begin, here's a quick practice question that doesn't count, just to check we can hear each other well. How is your day going so far?",
+        "after_practice": "Thanks, I can hear you clearly. That one didn't count. Now let's begin.",
+        "start": "Okay, let's get started.",
+        "welcome_back": "Welcome back {name}. It looks like we got disconnected. Let's continue from where we stopped.",
+        "declined": ("No problem at all, {name}. I'll stop here and let the hiring team know you'd prefer a different format, "
+                     "such as an interview with a person. Thank you for your time, and " + END_PHRASE + "."),
+        "closing": CLOSING,
+    },
+    "hi": {
+        "opening": ("नमस्ते {name}, जुड़ने के लिए धन्यवाद। मैं एक AI इंटरव्यूअर हूँ, कोई इंसान नहीं, और हम {role} रोल{company} के बारे में बात करेंगे। "
+                    "यह बातचीत रिकॉर्ड और ट्रांसक्राइब की जाती है ताकि हायरिंग टीम इसे देख सके, और आख़िरी फ़ैसला एक इंसान लेता है। "
+                    "अगर आप रिकॉर्डिंग से सहज नहीं हैं, तो बस बता दीजिए, हम यहीं रोक देंगे। कुछ दोबारा सुनना हो तो बेझिझक कहिए।"),
+        "practice": "शुरू करने से पहले एक छोटा सा अभ्यास सवाल, जो गिना नहीं जाएगा, बस यह देखने के लिए कि आवाज़ ठीक आ रही है। आपका दिन अब तक कैसा रहा?",
+        "after_practice": "धन्यवाद, आपकी आवाज़ साफ़ आ रही है। वह सवाल गिना नहीं गया। अब शुरू करते हैं।",
+        "start": "ठीक है, शुरू करते हैं।",
+        "welcome_back": "वापस आने के लिए धन्यवाद {name}। लगता है कनेक्शन टूट गया था। जहाँ रुके थे वहीं से आगे बढ़ते हैं।",
+        "declined": "कोई बात नहीं {name}। मैं यहीं रोक रहा हूँ और हायरिंग टीम को बता दूँगा कि आप किसी और तरीके से, जैसे किसी इंसान के साथ, इंटरव्यू देना चाहेंगे। धन्यवाद, and " + END_PHRASE + ".",
+        "closing": "मेरे सारे सवाल हो गए। अपना समय देने के लिए बहुत धन्यवाद। हायरिंग टीम इसे देखकर जल्द आपसे संपर्क करेगी। ध्यान रखिए, and " + END_PHRASE + ".",
+    },
+    "hi-en": {
+        "opening": ("Hi {name}, join karne ke liye thanks. Main ek AI interviewer hoon, koi insaan nahi, aur hum {role} role{company} ke baare mein baat karenge. "
+                    "Yeh conversation record aur transcribe hoti hai taaki hiring team ise review kar sake, aur final decision ek insaan leta hai. "
+                    "Agar aap recording se comfortable nahi hain, toh bas bata dijiye, hum yahin rok denge. Kuch repeat karna ho toh bol dijiye. "
+                    "Aap Hindi, English ya dono mix karke jawab de sakte hain."),
+        "practice": "Shuru karne se pehle ek chhota practice question, jo count nahi hoga, bas yeh check karne ke liye ki awaaz theek aa rahi hai. Aapka din ab tak kaisa raha?",
+        "after_practice": "Thanks, aapki awaaz clear aa rahi hai. Woh question count nahi hua. Ab shuru karte hain.",
+        "start": "Theek hai, shuru karte hain.",
+        "welcome_back": "Welcome back {name}. Lagta hai connection toot gaya tha. Jahan ruke the wahin se continue karte hain.",
+        "declined": "Koi baat nahi {name}. Main yahin rok raha hoon aur hiring team ko bata doonga ki aap kisi aur format mein, jaise kisi insaan ke saath, interview dena chahenge. Thank you, and " + END_PHRASE + ".",
+        "closing": "Mere saare questions ho gaye. Apna time dene ke liye bahut thanks. Hiring team ise review karke jaldi aapse contact karegi. Take care, and " + END_PHRASE + ".",
+    },
+}
+_LINE_CACHE: dict[str, dict] = {}
+
+
+def lines_for(rec: dict | None) -> dict:
+    lang = ((rec or {}).get("settings") or {}).get("language") or "en"
+    return {**LINES["en"], **LINES.get(lang, {}), **((rec or {}).get("lines") or {})}
+
+
+async def localize_lines(language: str) -> dict:
+    """Fixed lines for languages without a written set: translated once by the AI (cached), else English."""
+    lang = (language or "en").lower()
+    if lang in LINES or llm.MOCK:
+        return {}
+    if lang in _LINE_CACHE:
+        return _LINE_CACHE[lang]
+    name = prompts.LANGUAGE_NAMES.get(lang, lang)
+    src = {k: v for k, v in LINES["en"].items()}
+    try:
+        out = await llm.complete_json(
+            "Translate the values of this JSON object into natural spoken " + name + " for a polite job interview. Keep {name}, {role} "
+            "and {company} placeholders exactly. Keep the English phrase '" + END_PHRASE + "' unchanged at the end where it appears. "
+            "Output ONLY the JSON object with the same keys.", json.dumps(src, ensure_ascii=False), llm.FAST_MODEL, temperature=0.2,
+            max_tokens=1500, timeout=30)
+        good = {k: str(v) for k, v in (out or {}).items() if k in src and isinstance(v, str) and v.strip()
+                and all(ph in v for ph in ("{name}", "{role}", "{company}") if ph in src[k])
+                and (END_PHRASE not in src[k] or END_PHRASE in v)}
+    except Exception as e:
+        log.warning("could not translate interview lines to %s: %s", lang, e)
+        good = {}
+    _LINE_CACHE[lang] = good
+    return good
+
+
+def add_practice(plan: dict, rec: dict | None) -> None:
+    """An unscored practice question first, so candidates can check their audio and settle in."""
+    qs = plan.get("questions") or []
+    if not qs or qs[0].get("practice"):
+        return
+    qs.insert(0, {"id": "practice", "type": "warmup", "practice": True, "ask": lines_for(rec)["practice"], "scored": False,
+                  "competency_id": qs[0].get("competency_id") or "c1", "good_answer_covers": [], "red_flags": [], "max_followups": 0,
+                  "time_budget_sec": 40})
+
+
+# Saying no to recording at the start of the interview (English, Hindi, Hinglish).
+_DECLINE_RE = re.compile(
+    r"(\b(i\s+)?(do\s+not|don'?t|dont)\s+(consent|agree|want\s+(this|it|to\s+be)\s+record)|\bnot\s+(ok(ay)?|comfortable)\s+(with\s+)?(being\s+)?record"
+    r"|\b(no|stop|don'?t|do\s+not)\s+(the\s+)?record(ing)?\b|\brecord(ing)?\s+(mat|nahi|nahin|na)\b|\bcomfortable\s+nahi"
+    r"|रिकॉर्ड(िंग)?\s*(मत|नहीं)|सहज\s*नहीं|सहमत\s*नहीं)", re.I)
+
+
+def declines_recording(said: str) -> bool:
+    return bool(_DECLINE_RE.search(said or ""))
+
+
 def _first_name(plan: dict) -> str:
     name = (plan.get("candidate_name") or "").strip()
     return name.split()[0] if name else "there"
 
 
-def opening_message(plan: dict) -> str:
-    q0 = plan["questions"][0]["ask"]
+def opening_message(plan: dict, rec: dict | None = None) -> str:
+    """AI disclosure and recording consent first, then the practice question (or the first question)."""
+    L = lines_for(rec)
+    q0 = plan["questions"][0]
     company = f" at {plan['company']}" if plan.get("company") else ""
-    return (f"Hi {_first_name(plan)}, thanks for joining! I'm the AI interviewer for the {plan.get('role', 'open')} "
-            f"role{company}. There are no trick questions, "
-            "so just answer the way you normally would, and take a moment to think whenever you need to. "
-            "If you'd like me to repeat anything, just ask. Okay, let's get started. " + q0)
+    intro = L["opening"].format(name=_first_name(plan), role=plan.get("role") or "open", company=company)
+    return f"{intro} {q0['ask'] if q0.get('practice') else L['start'] + ' ' + q0['ask']}"
 
 
 def _display(q: dict, text: str | None = None, kind: str = "question") -> dict:
@@ -336,8 +430,7 @@ def start_session(rec: dict) -> str:
         st["session_started"] = now
         st["stall"] = 0
         q = plan["questions"][st["q_idx"]]
-        first = (f"Welcome back {_first_name(plan)}. It looks like we got disconnected. "
-                 f"Let's continue from where we stopped. {q['ask']}")
+        first = f"{lines_for(rec)['welcome_back'].format(name=_first_name(plan))} {q['ask']}"
         st["display"] = _display(q)
         action = "resume"
     else:
@@ -347,7 +440,7 @@ def start_session(rec: dict) -> str:
               "ended": False, "active_before": 0.0, "last_active": 0.0, "q_started_active": 0.0,
               "session_started": now, "log": [], "tokens": tokens, "seq": 0,
               "display": _display(plan["questions"][0])}
-        first = opening_message(plan)
+        first = opening_message(plan, rec)
         action = "open"
     st["token"] = secrets.token_urlsafe(16)
     st["tokens"] = (st.get("tokens") or [])[-10:] + [st["token"]]
@@ -500,7 +593,7 @@ def _recent(st: dict, k: int = 6) -> str:
     return "\n".join(lines)
 
 
-async def _judge(st: dict, plan: dict, said: str, allowed: list[str]) -> dict:
+async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list | None = None, lang: str = "en") -> dict:
     q = plan["questions"][st["q_idx"]]
     ctx = {
         "allowed": allowed, "q": q, "said": said,
@@ -510,7 +603,9 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str]) -> dict:
         return _mock_turn(ctx)
     user = prompts.TURN_USER_TEMPLATE.format(
         allowed=json.dumps(allowed), role=plan.get("role", ""),
-        facts=json.dumps(plan.get("company_facts", [])[:8]),
+        facts=json.dumps(plan.get("company_facts", [])[:8], ensure_ascii=False),
+        faq=json.dumps([{"q": f.get("q"), "a": f.get("a")} for f in (faq or [])][:30], ensure_ascii=False),
+        language=prompts.LANGUAGE_NAMES.get(lang, lang),
         question=q["ask"], covers=json.dumps(q["good_answer_covers"]),
         already=json.dumps(ctx["already"]), fu_used=st["fu_used"], fu_max=q["max_followups"],
         next_q=(plan["questions"][st["q_idx"] + 1]["ask"] if st["q_idx"] + 1 < len(plan["questions"]) else "(none, this is the last question)"),
@@ -553,16 +648,25 @@ def prepare_turn(rec: dict, messages: list[dict]) -> dict:
     active = st["active_before"] + (time.time() - st["session_started"])
     allowed, progress = _allowed_actions(st, plan, active)
     rec["turn_seq"] = rec.get("turn_seq", 0) + 1
-    return {"st": st, "said": said, "active": active, "allowed": allowed, "progress": progress, "ts": time.time(),
-            "req": rec["turn_seq"], "ai_n": sum(1 for m in messages if m.get("role") == "assistant" and _content(m)) + 1}
+    out = {"st": st, "said": said, "active": active, "allowed": allowed, "progress": progress, "ts": time.time(),
+           "req": rec["turn_seq"], "ai_n": sum(1 for m in messages if m.get("role") == "assistant" and _content(m)) + 1,
+           "lang": (rec.get("settings") or {}).get("language") or "en", "faq": rec.get("company_faq") or [], "lines": lines_for(rec)}
+    first_turn = not any(e["role"] == "candidate" for e in st["log"])
+    if first_turn and declines_recording(said):
+        out["fixed"] = {"action": "declined"}
+    elif plan["questions"][st["q_idx"]].get("practice"):
+        out["fixed"] = {"action": progress if progress == "end" else "next_question", "ack": out["lines"]["after_practice"]}
+    return out
 
 
 async def judge_turn(prep: dict, plan: dict) -> tuple[dict, int, bool]:
     """Phase 2 (NO lock held): ask the LLM. Never raises."""
     t0 = time.time()
     failed = False
+    if prep.get("fixed"):
+        return dict(prep["fixed"]), 0, False
     try:
-        d = await _judge(prep["st"], plan, prep["said"], prep["allowed"])
+        d = await _judge(prep["st"], plan, prep["said"], prep["allowed"], prep.get("faq") or [], prep.get("lang") or "en")
         if not isinstance(d, dict):
             raise ValueError("judge returned non-object")
     except Exception as e:  # never let the interview stall on an LLM failure
@@ -582,6 +686,21 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
     st, said, active, allowed, progress = prep["st"], prep["said"], prep["active"], prep["allowed"], prep["progress"]
     q = qs[st["q_idx"]]
 
+    L = prep.get("lines") or lines_for(rec)
+    if d.get("action") == "declined":
+        rec["consent_declined"] = {"at": time.time(), "said": said[:300]}
+        say = L["declined"].format(name=_first_name(plan))
+        st["ended"] = True
+        st["display"] = {"q_id": q["id"], "main": "", "text": "", "kind": "closing"}
+        st["log"].append({"role": "candidate", "text": said, "q_id": q["id"], "t": round(active), "ts": prep.get("ts", time.time())})
+        st["log"].append({"role": "ai", "text": say, "q_id": q["id"], "action": "end", "t": round(active), "ts": time.time(), "judge_ms": 0})
+        st["last_active"], st["last_say"], st["ai_n"] = active, say, prep["ai_n"]
+        rec["committed_req"] = max(prep["req"], rec.get("committed_req", 0))
+        st["seq"] = max(x["seq"] for x in rec.get("snapshots") or [{"seq": 0}]) + 1
+        rec.setdefault("snapshots", []).append(_snap(st))
+        rec["state"] = st
+        rec["status"] = "completed"
+        return say
     action = d.get("action") if d.get("action") in allowed else progress
     if action == "follow_up" and not _clean(d.get("followup")):
         action = progress
@@ -618,7 +737,7 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
         st["q_started_active"] = active
         st["display"] = _display(nq)
     else:  # end
-        say = f"{ack} {CLOSING}"
+        say = f"{ack} {L['closing']}"
         st["ended"] = True
         st["display"] = {"q_id": q["id"], "main": "", "text": "", "kind": "closing"}
 

@@ -42,7 +42,7 @@ async def setup_ai_interview(rr_id: str) -> None:
     hours = max(24.0, ((ctx["deadline_at"] or time.time() + 3 * 86400) - time.time()) / 3600)
     rec = interviews.create_record(org_id=ctx["org_id"], created_by=ctx["created_by"], job_id=ctx["job_id"], candidate_id=ctx["candidate_id"],
                                    application_id=ctx["application_id"], round_result_id=rr_id, plan=plan, inputs=inp, settings=settings,
-                                   expires_hours=hours)
+                                   expires_hours=hours, lines=await brain.localize_lines(settings.get("language") or "en"))
     with db.session() as s:
         rr = s.get(db.RoundResult, rr_id)
         app = s.get(db.Application, rr.application_id)
@@ -104,9 +104,16 @@ def on_interview_scored(rec: dict) -> None:
         risk = (rec.get("proctoring") or {}).get("risk")
         from . import proctor
         pr = proctor.summary(rec) if rec.get("state") else {}
-        flagged = bool(dq) or pr.get("risk") == "high" or bool(rec.get("liveness_failed"))
+        counts = pr.get("counts") or {}
+        flagged = bool(dq) or pr.get("risk") == "high" or bool(rec.get("liveness_failed")) \
+            or any(counts.get(k) for k in ("virtual_camera", "identity_mismatch", "person_changed"))
         rr.integrity = {"flagged": flagged, "risk": pr.get("risk") or risk, "reasons": pr.get("reasons", [])[:6],
                         "disqualified": bool(dq), "warnings": len(rec.get("warnings") or [])}
+        if rec.get("consent_declined"):           # said no to recording: HR offers another format
+            app = s.get(db.Application, rr.application_id)
+            if app and not app.human_requested_at:
+                app.human_requested_at, app.human_request_note = time.time(), "Declined to be recorded at the start of the AI interview."
+            rr.integrity = {**(rr.integrity or {}), "consent_declined": True}
         score = None if overall is None else round(float(overall) / 5 * 100, 1)
         flows.submit(s, rr, score, {"interview_id": rec["id"], "recommendation": rep.get("recommendation"),
                                     "recommendation_label": REC_TO_LABEL.get(rep.get("recommendation") or "", ""),

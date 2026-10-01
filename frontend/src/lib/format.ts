@@ -44,7 +44,9 @@ export function initials(name?: string | null): string {
   return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('')
 }
 
-export const REC_LABEL: Record<string, string> = { strong_yes: 'Strong yes', yes: 'Yes', maybe: 'Maybe', no: 'No' }
+// Three levels for HR (Strong / Maybe / No); the AI's finer grade is shown as detail where there is room.
+export const REC_LABEL: Record<string, string> = { strong_yes: 'Strong', yes: 'Strong', maybe: 'Maybe', no: 'No' }
+export const REC_DETAIL: Record<string, string> = { strong_yes: 'clear yes', yes: 'yes', maybe: 'borderline', no: 'not recommended' }
 export const REC_TONE: Record<string, Tone> = { strong_yes: 'success', yes: 'success', maybe: 'warning', no: 'danger' }
 export const STATUS_LABEL: Record<string, string> = { created: 'Not started', in_progress: 'In progress', completed: 'Completed',
   incomplete: 'Ended early', scored: 'Scored', cancelled: 'Cancelled' }

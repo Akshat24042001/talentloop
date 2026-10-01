@@ -1,6 +1,6 @@
 import {
   AudioLines, Bot, Captions, CaptionsOff, Check, Eye, Lock, MessageSquareText, Mic, MicOff, Monitor, MonitorUp, PhoneOff,
-  RefreshCw, ScreenShare, ScreenShareOff, ShieldCheck, Sun, TriangleAlert, UserRound, Video, Volume2, WifiOff, X,
+  RefreshCw, ScanFace, ScreenShare, ScreenShareOff, ShieldCheck, Sun, TriangleAlert, UserRound, Video, Volume2, WifiOff, X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, Logo, Modal, Spinner, Tip, Toaster, TooltipProvider, cn, toast } from '../components/ui'
@@ -157,6 +157,7 @@ function Lobby({ s }: { s: State }) {
             <CheckRow id="ckCam" c={s.checks.cam} icon={<Video />} />
             <CheckRow id="ckMic" c={s.checks.mic} icon={<Mic />} />
             <CheckRow id="ckFace" c={s.checks.face} icon={<UserRound />} />
+            <CheckRow id="ckLive" c={s.checks.live} icon={<ScanFace />} />
             <CheckRow id="ckScreen" c={s.checks.screen} icon={<Monitor />} />
             <CheckRow id="ckShare" c={s.checks.share} icon={<ScreenShare />} />
           </ul>

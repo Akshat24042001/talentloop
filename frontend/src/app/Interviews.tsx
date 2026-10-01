@@ -68,7 +68,7 @@ export default function Interviews() {
       </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Card><CardHeader title="AI recommendations" /><CardBody>
-          <SplitBar parts={[{ label: 'Strong yes', n: rc('strong_yes'), color: '#0b7a55' }, { label: 'Yes', n: rc('yes'), color: '#35b27f' },
+          <SplitBar parts={[{ label: 'Strong', n: rc('strong_yes') + rc('yes'), color: 'var(--status-good)' },
             { label: 'Maybe', n: rc('maybe'), color: 'var(--status-warn)' }, { label: 'No', n: rc('no'), color: 'var(--status-critical)' }]} />
         </CardBody></Card>
         <Card><CardHeader title="Integrity risk" /><CardBody>

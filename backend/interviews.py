@@ -41,7 +41,7 @@ def settings_from(s: dict | None) -> dict:
 
 def create_record(*, org_id: str | None, created_by: str | None, job_id: str | None, candidate_id: str | None,
                   application_id: str | None, round_result_id: str | None = None, plan: dict, inputs: dict, settings: dict,
-                  expires_hours: float = 72) -> dict:
+                  expires_hours: float = 72, lines: dict | None = None) -> dict:
     iid = secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
     now = time.time()
     starts = settings.get("available_from") or now
@@ -50,7 +50,10 @@ def create_record(*, org_id: str | None, created_by: str | None, job_id: str | N
            "expires_at": starts + max(0.5, float(expires_hours or 72)) * 3600,
            "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
            "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
-           "scoring": None, "settings": settings}
+           "scoring": None, "settings": settings, "lines": lines or {}}
+    if settings.get("practice_question", True):
+        from . import brain
+        brain.add_practice(plan, rec)
     if org_id:
         with db.session() as s:          # FAQ answers and disclosure come from the company (HR-approved)
             org = s.get(db.Org, org_id)

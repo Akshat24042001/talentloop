@@ -263,7 +263,8 @@ async def create_interview(req: Request):
     settings = _settings(body)
     rec = interviews.create_record(org_id=ctx.org_id, created_by=ctx.user_id, job_id=job_id, candidate_id=cand_id,
                                    application_id=str(body.get("application_id") or "") or None, plan=plan, inputs=inputs,
-                                   settings=settings, expires_hours=body.get("expires_hours") or 72)
+                                   settings=settings, expires_hours=body.get("expires_hours") or 72,
+                                   lines=await brain.localize_lines(settings.get("language") or "en"))
     iid = rec["id"]
     with db.session() as s:
         row = s.get(db.InterviewIndex, iid)
@@ -508,6 +509,8 @@ def public_info(iid: str):
             "available_from": s.get("available_from"), "not_open_yet": bool(s.get("available_from") and time.time() < s["available_from"]),
             "require_screen_share": bool(s.get("require_screen_share")),
             "face_detection": s.get("face_detection", True), "snapshots": s.get("snapshots", True),
+            "liveness_check": s.get("liveness_check", True) is not False and s.get("face_detection", True) is not False,
+            "identity_check": s.get("identity_check", True) is not False, "has_reference_photo": bool(_reference_photo_key(rec)),
             "reconnect_window_sec": reconnect_window(rec), "resuming": resuming,
             "reconnect_seconds_left": max(0, int(deadline - time.time())) if deadline else None,
             "server_time": time.time()}
@@ -687,6 +690,28 @@ async def _finish_up_later(iid: str):
     await _finish_up(iid)
 
 
+def _reference_photo_key(rec: dict) -> str:
+    """The live photo the candidate took when registering (campus drives), for the in-browser face match."""
+    if not rec.get("candidate_id") or (rec.get("settings") or {}).get("identity_check") is False:
+        return ""
+    with db.session() as s:
+        c = s.get(db.Candidate, rec["candidate_id"])
+        return c.photo_file if c and c.org_id == rec.get("org_id") else ""
+
+
+@app.get("/api/interviews/{iid}/reference-photo")
+async def reference_photo(iid: str):
+    """The candidate's own registration photo, only while their interview is open. Compared in their browser."""
+    rec = get_rec(iid)
+    if rec["status"] not in ("created", "in_progress") or time.time() > rec.get("expires_at", 1e18):
+        raise HTTPException(404)
+    key = _reference_photo_key(rec)
+    p = await asyncio.to_thread(store.get_file, key) if key else None
+    if not p:
+        raise HTTPException(404)
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/interviews/{iid}/events")
 async def add_events(iid: str, req: Request):
     body = await req.json()
@@ -707,6 +732,8 @@ async def add_events(iid: str, req: Request):
             if ts is not None and offset is not None:
                 ev["server_ts"] = (ts + offset) / 1000
             rec["events"].append(ev)
+            if ev["type"] == "liveness_failed":
+                rec["liveness_failed"] = True
         store.save(rec)
     return {"ok": True}
 

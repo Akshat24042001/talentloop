@@ -80,8 +80,10 @@ export default class FakeVapi {
 # Face detector stand-in: detections controlled by window.__FACES (default 1).
 FAKE_VISION = r"""
 export const FilesetResolver = { forVisionTasks: async () => ({}) };
+// Keypoints 0 right eye, 1 left eye, 2 nose tip. The nose swings left and right like a head turn (window.__YAW pins it).
+const kp = () => { const y = window.__YAW ?? Math.sin(Date.now() / 400) * 0.6; return [{x: 0.45, y: 0.4}, {x: 0.55, y: 0.4}, {x: 0.5 + y * 0.1, y: 0.5}]; };
 export const FaceDetector = { createFromOptions: async () => ({
-  detectForVideo: () => ({ detections: Array.from({length: window.__FACES ?? 1}, () => ({categories: [{score: 0.9}]})) }) }) };
+  detectForVideo: () => ({ detections: Array.from({length: window.__FACES ?? 1}, () => ({categories: [{score: 0.9}], keypoints: kp()})) }) }) };
 """
 
 ANSWERS = ["Hi, I'm Rohan. I have three years of backend experience with Spring Boot at ShipKart, building shipment APIs.",
@@ -185,6 +187,9 @@ def main():
                 # screen.isExtended (second monitor) is controlled by window.__EXT, like a real display change.
                 init = (f"window.__ANSWERS = {json.dumps(answers)}; window.__TURN_MS = {flags.get('turn_ms', 1200)}; window.__DROP_AFTER = {flags.get('drop_after', 0)}; window.__FACES = 1;"
                         "Object.defineProperty(Screen.prototype, 'isExtended', {get: () => !!window.__EXT, configurable: true});")
+                if flags.get("vcam"):      # a virtual camera driver, as OBS installs it
+                    init += ("const _l = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'label');"
+                             "Object.defineProperty(MediaStreamTrack.prototype, 'label', {get() { return this.kind === 'video' ? 'OBS Virtual Camera' : _l.get.call(this) }});")
                 pg.add_init_script(init)
                 pg.goto(f"{BASE}/interview.html?id={iid}")
                 return pg, errs
@@ -195,6 +200,7 @@ def main():
                 pg.wait_for_selector("#ckCam.ok", timeout=15000)
                 pg.wait_for_selector("#ckMic.ok", timeout=20000)   # the fake mic plays a beep tone
                 pg.wait_for_selector("#ckFace.ok", timeout=15000)
+                pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckLive'))", timeout=15000)   # head turn
                 if share:
                     assert pg.is_enabled("#startBtn") is False, "start must wait for screen sharing"
                     pg.click("#shareBtn")
@@ -261,8 +267,11 @@ def main():
             scr = next(m for m in rec["media"] if m["kind"] == "screen_video")
             assert scr["playable"] and "Video:" in ffprobe(Path(data) / "media" / iid / scr["file"])
             cnt = rec["proctoring"]["counts"]
-            for k in ("paste", "multiple_faces", "face_missing_start", "mute_on", "screen_share_started", "call_start"):
+            for k in ("paste", "multiple_faces", "face_missing_start", "mute_on", "screen_share_started", "call_start", "liveness_passed", "answer_timing"):
                 assert cnt.get(k), f"missing proctoring event {k}: {cnt}"
+            assert not cnt.get("virtual_camera"), "the test camera is not a virtual camera"
+            assert not cnt.get("identity_check_unavailable"), "face-api and its self-hosted models must load"
+            assert rec["plan"]["questions"][0].get("practice"), "the interview starts with a practice question"
             assert rec["proctoring"]["risk"] in ("medium", "high")
             assert any(i["reason"] == "reference" for i in rec["images"]), rec["images"]
             assert any(i["reason"] == "reference" and i.get("source") == "screen" for i in rec["images"]), "no screen snapshot"
@@ -324,7 +333,8 @@ def main():
             pg2.click("#reconnectBtn")
             pg2.wait_for_function("window.__asst && window.__asst.firstMessage.startsWith('Welcome back')", timeout=20000)
             pg2.wait_for_selector("#s4:not(.hidden)", timeout=120000)
-            r2 = wait(lambda: (lambda r: r if r.get("report") else None)(c.get(f"/api/interviews/{iid2}").json()), 60, what="rejoined interview scored")
+            r2 = wait(lambda: (lambda r: r if r.get("report") and all(m.get("finalized") for m in r["media"] if m["kind"] == "candidate_video") else None)(
+                c.get(f"/api/interviews/{iid2}").json()), 90, what="rejoined interview scored and its recordings saved")
             assert r2["state"]["reconnects"] == 1 and r2["state"]["ended"], r2["state"].get("reconnects")
             parts = [m for m in r2["media"] if m["kind"] == "candidate_video"]
             assert len(parts) == 2 and all(m.get("playable") for m in parts), parts
@@ -352,7 +362,7 @@ def main():
 
             # ---------------------------------------------------------- 4. candidate ends deliberately
             iid4 = create(c)
-            pg4, _ = page_for(iid4, ANSWERS, turn_ms=1500)
+            pg4, _ = page_for(iid4, ANSWERS, turn_ms=1500, vcam=True)
             pass_checks(pg4)
             pg4.click("#startBtn")
             wait_question(pg4)
@@ -363,7 +373,9 @@ def main():
             pg4.wait_for_function("document.getElementById('doneTitle')?.textContent === 'Interview ended'", timeout=30000)
             assert httpx.post(f"{BASE}/api/interviews/{iid4}/assistant").status_code == 409
             assert tracks_stopped(pg4)
-            print("deliberate end: closed, no rejoin")
+            ev4 = wait(lambda: [e for e in c.get(f"/api/interviews/{iid4}").json()["events"] if e["type"] == "virtual_camera"], 20, what="virtual camera event")
+            assert "OBS" in ev4[0]["detail"], ev4
+            print("deliberate end: closed, no rejoin; virtual camera flagged")
 
             # ---------------------------------------------------------- 5. second screen + leaving the window -> warned, then stopped
             iid5 = create(c, require_screen_share=True, max_warnings=1, candidate_email="multi@example.com")

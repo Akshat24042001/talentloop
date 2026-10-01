@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { HBarChart, TimelineChart, type BarRow } from '../components/charts'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Select, Spinner, Textarea, cn, copyText, toast } from '../components/ui'
 import { api, mediaUrl, withKey } from '../lib/api'
-import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, TYPE_LABEL, initials, mb, mmss, norm, short, when } from '../lib/format'
+import { REC_DETAIL, REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, TYPE_LABEL, initials, mb, mmss, norm, short, when } from '../lib/format'
 
 let iid = ''
 const REASON_LABEL: Record<string, string> = { reference: 'Start of interview', periodic: 'Routine', tab_hidden: 'Left the interview tab', window_blur: 'Switched to another window',
@@ -194,7 +194,7 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
         <Card className="p-6">
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">AI recommendation <span className="normal-case tracking-normal font-normal">(HR decides)</span></div>
           {rep ? <><div className={cn('mt-2 text-4xl font-bold tracking-tight', REC_TONE[rep.recommendation] === 'success' ? 'text-emerald-600 dark:text-emerald-400' : REC_TONE[rep.recommendation] === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>{REC_LABEL[rep.recommendation] || rep.recommendation}</div>
-            <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">Confidence: {rep.confidence || '-'}</div></>
+            <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{REC_DETAIL[rep.recommendation] ? `AI grade: ${REC_DETAIL[rep.recommendation]} · ` : ''}Confidence: {rep.confidence || '-'}</div></>
             : <div className="mt-2 text-xl font-semibold text-slate-400">{rec.status === 'in_progress' ? 'Interview in progress' : rec.status === 'created' ? 'Not taken yet' : 'Not scored yet'}</div>}
           <div className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Overall score</div>
           <div className="tabular mt-1 text-5xl font-bold tracking-tight text-slate-900 dark:text-white">{overall != null ? overall.toFixed(1) : '-'}<span className="text-xl font-semibold text-slate-400"> / 5</span></div>

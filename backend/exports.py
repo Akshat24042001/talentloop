@@ -12,7 +12,7 @@ from xml.sax.saxutils import escape
 
 from . import proctor, store
 
-REC_LABEL = {"strong_yes": "Strong yes", "yes": "Yes", "maybe": "Maybe", "no": "No"}
+REC_LABEL = {"strong_yes": "Strong", "yes": "Strong", "maybe": "Maybe", "no": "No"}     # three levels for HR
 
 
 def _mmss(t) -> str:

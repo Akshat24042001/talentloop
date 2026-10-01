@@ -46,8 +46,11 @@ def state(iid):
     return c.get(f"/api/interviews/{iid}").json()["state"]
 
 
+NOP = {"practice_question": False}   # these checks index the plan's questions; the practice question has its own test
+
+
 def new_interview(inp, plan):
-    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp}).json()["id"]
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": NOP}).json()["id"]
     a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
     return iid, a, llm_path(a)
 
@@ -226,13 +229,13 @@ def main():
     import time as _t
     from backend import main as M
     future = _t.time() + 3600
-    iid5 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "expires_hours": 2, "settings": {
+    iid5 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "expires_hours": 2, "settings": {**NOP, 
         "available_from": future, "require_screen_share": True, "reconnect_window_sec": 5, "candidate_email": "a@b.c"}}).json()["id"]
     pub = c.get(f"/api/interviews/{iid5}/public").json()
     assert pub["not_open_yet"] and pub["require_screen_share"] and pub["reconnect_window_sec"] == 10  # clamped to >= 10
     assert c.post(f"/api/interviews/{iid5}/assistant").status_code == 425, "scheduled link opened early"
 
-    iid6 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"reconnect_window_sec": 10}}).json()["id"]
+    iid6 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {**NOP, "reconnect_window_sec": 10}}).json()["id"]
     assert c.post(f"/api/interviews/{iid6}/consent", json={"version": "t"}).status_code == 200
     a6 = c.post(f"/api/interviews/{iid6}/assistant").json()["assistant"]
     p6 = llm_path(a6)
@@ -280,7 +283,7 @@ def main():
     assert c.post(f"/api/interviews/{iid6}/feedback", json={"rating": 9}).json()["ok"]
     assert c.get(f"/api/interviews/{iid6}").json()["feedback"]["rating"] == 5
     # HR can close a link that was never used
-    iid7 = c.post("/api/interviews", json={"plan": plan, "inputs": inp}).json()["id"]
+    iid7 = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": NOP}).json()["id"]
     assert c.post(f"/api/interviews/{iid7}/close").json()["status"] == "cancelled"
     assert c.post(f"/api/interviews/{iid7}/assistant").status_code == 409
     # after a deploy, a browser must never pair a new page with an old cached script
@@ -298,6 +301,7 @@ def main():
     assert len(idx) >= 7 and all(c.get("/samples/" + s[k]).status_code == 200 for s in idx for k in ("jd", "resume", "questions"))
     print("HR FEATURES: OK")
     integrity_checks(inp, plan)
+    opening_checks(inp, plan)
     warning_at_start_does_not_stall(inp, plan)
     no_question_loop()
     no_question_loop(split=True)
@@ -328,7 +332,7 @@ def no_question_loop(split: bool = False):
         {"id": "r", "type": "resume_probe", "ask": "You cut API latency from 1.8s to 350ms. What exactly did you change?", "max_followups": 0},
         {"id": "t", "type": "resume_probe", "ask": "You led a team of 3. How did you split the work, given 40 tickets a sprint?", "max_followups": 0},
         {"id": "n", "type": "hr_mandatory", "ask": "What is your notice period?", "max_followups": 0}]})
-    iid = c.post("/api/interviews", json={"plan": plan, "inputs": {}}).json()["id"]
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": {}, "settings": NOP}).json()["id"]
     a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
     p = llm_path(a)
     msgs = [{"role": "system", "content": "x"}, {"role": "assistant", "content": vapi_formatted(a["firstMessage"])}]
@@ -358,7 +362,7 @@ def warning_at_start_does_not_stall(inp, plan):
     """Regression: a tab switch during the opening. The spoken warning cut the interviewer off mid-question and
     ended with "Let's continue.", so the candidate never heard a question and the call sat silent.
     The warning must re-ask the current question, and the next answer must count for that question."""
-    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"max_warnings": 2}}).json()["id"]
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {**NOP, "max_warnings": 2}}).json()["id"]
     a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
     p = llm_path(a)
     q1 = plan["questions"][0]["ask"]
@@ -377,10 +381,57 @@ def warning_at_start_does_not_stall(inp, plan):
     print("WARNING AT START: OK")
 
 
+def opening_checks(inp, plan):
+    """The opening discloses the AI and asks for recording consent; an unscored practice question comes first; saying no
+    to recording ends politely; Hinglish gets its own lines; company questions are answered from the HR-approved FAQ."""
+    import asyncio
+    from backend import llm
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp}).json()["id"]
+    a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
+    first = a["firstMessage"]
+    assert "AI interviewer, not a person" in first and "recorded" in first and "practice question that doesn't count" in first, first
+    p = llm_path(a)
+    msgs = [{"role": "system", "content": "x"}, {"role": "assistant", "content": first}, {"role": "user", "content": "Pretty good, thanks"}]
+    say = turn(p, msgs)
+    assert say.startswith("Thanks, I can hear you clearly.") and plan["questions"][0]["ask"] in say, say
+    st = state(iid)
+    assert st["q_idx"] == 1 and st["log"][-1]["action"] == "next_question", st["log"][-1]
+    # saying no to recording ends the interview and tells HR
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp}).json()["id"]
+    a = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]
+    say = turn(llm_path(a), [{"role": "system", "content": "x"}, {"role": "assistant", "content": a["firstMessage"]},
+                             {"role": "user", "content": "Sorry, I don't want this recorded."}])
+    assert "different format" in say and say.count("concludes our interview") == 1, say
+    rec = c.get(f"/api/interviews/{iid}").json()
+    assert rec["state"]["ended"] and rec["status"] in ("completed", "scored", "incomplete"), rec["status"]
+    assert brain.declines_recording("recording mat karo please") and brain.declines_recording("मुझे रिकॉर्डिंग नहीं चाहिए")
+    assert not brain.declines_recording("I recorded a demo for the client") and not brain.declines_recording("Pretty good, thanks")
+    # Hinglish lines
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {"language": "hi-en"}}).json()["id"]
+    first = c.post(f"/api/interviews/{iid}/assistant").json()["assistant"]["firstMessage"]
+    assert "Main ek AI interviewer hoon" in first and "practice question" in first, first
+    # the live judge sees the HR FAQ and the language
+    seen = {}
+
+    async def fake(system, user, *a, **k):
+        seen["system"], seen["user"] = system, user
+        return {"action": "answer_candidate_question", "reply": "Yes, three days a week in the office."}
+    real, mock = llm.complete_json, llm.MOCK
+    llm.complete_json, llm.MOCK = fake, False
+    try:
+        st = {"q_idx": 0, "fu_used": 0, "covered": {}, "log": []}
+        asyncio.run(brain._judge(st, plan, "Is this role hybrid?", ["answer_candidate_question"],
+                                 [{"q": "Is the role hybrid?", "a": "Yes, three days a week in the office."}], "hi-en"))
+    finally:
+        llm.complete_json, llm.MOCK = real, mock
+    assert "three days a week" in seen["user"] and "Hinglish" in seen["user"] and "ONLY company_faq" in seen["system"], seen["user"][:400]
+    print("OPENING (AI disclosure, consent, practice question, Hinglish, FAQ): OK")
+
+
 def integrity_checks(inp, plan):
     """Leaving the interview: warnings spoken by the interviewer, then disqualification, enforced by the server."""
     assert "minutes" not in brain.opening_message(plan), "opening must not announce the length"
-    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {
+    iid = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": {**NOP,
         "max_warnings": 2, "candidate_email": "Cheat@Example.com"}}).json()["id"]
     v = f"/api/interviews/{iid}/violation"
     assert c.post(v, json={"type": "tab_hidden"}).json()["action"] == "ignored", "no call yet: nothing to enforce"
