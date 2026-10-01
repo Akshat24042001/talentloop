@@ -24,7 +24,7 @@ from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
 from . import (api_accounts, api_flows, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
-               matching, media, messages, proctor, refs, store, worker)
+               mailbox, matching, media, messages, proctor, refs, retention, store, worker)
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -993,12 +993,25 @@ async def _fetch_vapi_video(rec: dict) -> None:
 
 
 async def _sweeper():
+    last_retention = last_mail = 0.0
     while True:
         await asyncio.sleep(SWEEP_EVERY_SEC)
         try:
             await sweep_once()
         except Exception:
             log.exception("sweeper failed")
+        if time.time() - last_retention > float(os.getenv("RETENTION_EVERY_SEC", "3600")):
+            last_retention = time.time()
+            try:
+                await asyncio.to_thread(retention.sweep)    # companies' retention settings (recordings, photos, interviews)
+            except Exception:
+                log.exception("retention sweep failed")
+        if mailbox.enabled() and time.time() - last_mail > mailbox.every_sec():
+            last_mail = time.time()
+            try:
+                await asyncio.to_thread(mailbox.import_once)        # resumes emailed to the careers mailbox
+            except Exception:
+                log.exception("mailbox import failed")
         try:
             await worker.tick()                      # hiring flows: AI interview setup, scoring, deadlines, reminders
         except Exception:

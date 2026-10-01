@@ -14,7 +14,7 @@ interface Rep {
   time_to_hire: { n: number; median: number | null; average: number | null }; time_to_reject: { n: number; median: number | null; average: number | null }
   by_source: Group[]; by_college: Group[]
 }
-const SOURCE: Record<string, string> = { careers: 'Careers page', campus: 'Campus drive', talent_pool: 'Talent pool', upload: 'Uploaded', bulk: 'Bulk upload', sourced: 'Sourced', imap: 'Mailbox', demo: 'Sample' }
+const SOURCE: Record<string, string> = { careers: 'Careers page', campus: 'Campus drive', talent_pool: 'Talent pool', upload: 'Uploaded', bulk: 'Bulk upload', sourced: 'Sourced', email: 'Email', demo: 'Sample' }
 
 export function Reports() {
   const [job, setJob] = useState(''), [days, setDays] = useState('90')

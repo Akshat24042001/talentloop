@@ -240,6 +240,22 @@ def delete(iid: str) -> None:
             _s3_err(f"delete {iid}", e)
 
 
+def delete_media(iid: str) -> None:
+    """Delete an interview's recordings and snapshots, keeping its record (transcript, report)."""
+    if not _valid(iid):
+        return
+    shutil.rmtree(MEDIA_DIR / iid, ignore_errors=True)
+    if S3_ENABLED:
+        try:
+            pag = s3().get_paginator("list_objects_v2")
+            for page in pag.paginate(Bucket=S3_BUCKET, Prefix=_key("media", iid) + "/"):
+                objs = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+                if objs:
+                    s3().delete_objects(Bucket=S3_BUCKET, Delete={"Objects": objs})
+        except Exception as e:
+            _s3_err(f"delete media {iid}", e)
+
+
 def list_all() -> list[dict]:
     out = []
     for p in sorted(INT_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):

@@ -361,6 +361,100 @@ def question_bank(c):
     print("QUESTION BANK (template, import with row errors, AI drafts, edit, deactivate, delete): OK")
 
 
+def reports_exports_retention(c, campus_job):
+    """Reports, the audit log, the HROne export and the recording-retention sweep."""
+    import openpyxl
+    from backend import retention
+    rep = ok(c.get("/api/reports?days=0"))
+    assert rep["total"] >= 5 and rep["funnel"][0]["n"] == rep["total"] and any(r["type"] == "test" and r["entered"] for r in rep["rounds"]), rep["funnel"]
+    assert any(g["name"] == "campus" for g in rep["by_source"]) and any(g["name"] == "COEP Pune" for g in rep["by_college"]), rep["by_college"]
+    jrep = ok(c.get(f"/api/reports?job={campus_job['id']}"))
+    assert jrep["job"]["id"] == campus_job["id"] and jrep["rounds"][0]["type"] == "application"
+    audit = ok(c.get("/api/audit"))
+    assert audit["total"] > 20 and "flow_changed" in audit["actions"]
+    assert ok(c.get("/api/audit?action=flow_changed"))["items"][0]["action"] == "flow_changed"
+    # HROne: the company's own headers, in order; an unmapped header stays as an empty column
+    fields = ok(c.get("/api/hrone/fields"))
+    assert any(f["id"] == "full_name" for f in fields["fields"])
+    ok(c.patch("/api/org", json={"settings": {"hrone_columns": [{"header": "Employee Name", "field": "full_name"}, {"header": "Official Email", "field": "email"},
+                                                                  {"header": "Grade", "field": ""}, {"header": "Designation", "field": "job_title"}]}}))
+    kiran = next(x for x in ok(c.get(f"/api/jobs/{campus_job['ref']}/pipeline"))["items"] if x["candidate"]["name"] == "Kiran Patil")
+    r = c.get(f"/api/exports/hrone.xlsx?ids={kiran['id']}")
+    assert r.status_code == 200, r.text
+    ws = openpyxl.load_workbook(io.BytesIO(r.content)).active
+    assert [x.value for x in ws[1]] == ["Employee Name", "Official Email", "Grade", "Designation"]
+    assert [x.value for x in ws[2]] == ["Kiran Patil", "kiran@coep.test", None, campus_job["title"]], [x.value for x in ws[2]]
+    # retention: recordings and photos of a closed application go; scores and decisions stay
+    det = ok(c.get(f"/api/applications/{kiran['id']}"))
+    vid = next(x for x in det["rounds"] if x["round"]["type"] == "video_intro")
+    assert c.get(f"/api/round-results/{vid['result']['id']}/file").status_code == 200
+    ok(c.patch("/api/org", json={"settings": {"recording_retention_days": 1}}))
+    assert retention.sweep()["rounds"] == 0, "nothing is deleted before the retention period"
+    with db.session() as s:
+        s.get(db.Application, kiran["id"]).decided_at = time.time() - 2 * 86400
+    out = retention.sweep()
+    assert out["rounds"] >= 2 and out["files"] >= 2 and out["photos"] == 1, out
+    det = ok(c.get(f"/api/applications/{kiran['id']}"))
+    vid = next(x for x in det["rounds"] if x["round"]["type"] == "video_intro")
+    assert c.get(f"/api/round-results/{vid['result']['id']}/file").status_code == 404 and vid["data"]["media_deleted_at"]
+    assert vid["result"]["score"] == 70.0 and vid["data"]["assessment"]["dimensions"], "scores and AI notes are kept"
+    test = next(x for x in det["rounds"] if x["round"]["type"] == "test")
+    assert not test["result"]["integrity"].get("snapshots") and not test["result"]["integrity"].get("start_photo")
+    assert not det["candidate"]["has_photo"]
+    assert retention.sweep()["rounds"] == 0, "a second pass has nothing left to do"
+    assert ok(c.get("/api/audit?action=retention_sweep"))["total"] == 1
+    print("REPORTS, AUDIT LOG, HRONE EXPORT, RECORDING RETENTION: OK")
+
+
+def mailbox_import(c, slug, job):
+    """Resumes emailed to the careers mailbox become candidates; a job named in the subject gets an application."""
+    from email.message import EmailMessage
+    from backend import mailbox
+    msgs = {}
+
+    def mail(subject, sender, attach=True, n=0):
+        m = EmailMessage()
+        m["From"], m["Subject"] = sender, subject
+        m.set_content("Please find my resume attached.")
+        if attach:
+            m.add_attachment(f"Neha Kulkarni\nneha.k{n}@mail.test\n+91 98200 00{n:03d}\nJava Spring Boot developer, 5 years.".encode(), maintype="text",
+                             subtype="plain", filename="Neha-resume.txt")
+        msgs[str(len(msgs) + 1).encode()] = m.as_bytes()
+
+    mail(f"Application for {job['title']}", "Neha K <neha.personal@mail.test>")
+    mail("Hello", "Spam <spam@x.test>", attach=False)
+    mail("Resume", "Job Board <noreply@board.test>", n=1)
+    seen = []
+
+    class FakeIMAP:
+        def __init__(self, host, port, timeout=None): assert host == "imap.test" and port == 993
+        def login(self, u, p): assert (u, p) == ("careers@rac.test", "app-password")
+        def select(self, folder): assert folder == "INBOX"
+        def search(self, *a): return "OK", [b" ".join(k for k in msgs if k not in seen)]
+        def fetch(self, num, what): assert "PEEK" in what; return "OK", [(b"1 (BODY[] {n})", msgs[num])]
+        def store(self, num, *a): seen.append(num)
+        def logout(self): pass
+
+    env = {"IMAP_HOST": "imap.test", "IMAP_USER": "careers@rac.test", "IMAP_PASSWORD": "app-password", "IMAP_ORG_SLUG": slug}
+    old_env, old_imap = {k: os.environ.get(k) for k in env}, mailbox.imaplib.IMAP4_SSL
+    os.environ.update(env)
+    mailbox.imaplib.IMAP4_SSL = FakeIMAP
+    try:
+        out = mailbox.import_once()
+        assert out == {"emails": 3, "candidates": 2, "applications": 1, "skipped": 1}, out
+        assert mailbox.import_once()["emails"] == 0, "read emails are not imported twice"
+    finally:
+        mailbox.imaplib.IMAP4_SSL = old_imap
+        for k, v in old_env.items():
+            os.environ.pop(k) if v is None else os.environ.update({k: v})
+    neha = ok(c.get("/api/candidates?q=neha.k0"))["items"][0]
+    assert neha["source"] == "email" and neha["email"] == "neha.k0@mail.test" and neha["has_resume"], neha
+    app_ = next(x for x in ok(c.get(f"/api/jobs/{job['ref']}/pipeline"))["items"] if x["candidate"]["email"] == "neha.k0@mail.test")
+    assert app_["source"] == "email" and app_["round_id"], "the emailed application enters the job's flow"
+    assert ok(c.get("/api/audit?action=mailbox_import"))["total"] == 2
+    print("MAILBOX IMPORT (IMAP): OK")
+
+
 def main():
     with TestClient(app) as c:
         me = setup_company(c)
@@ -371,6 +465,8 @@ def main():
         transparency_and_requests(c, slug)
         live_edit_and_bulk(c, slug)
         question_bank(c)
+        reports_exports_retention(c, job)
+        mailbox_import(c, slug, job)
         msgs = ok(c.get("/api/messages"))
         assert msgs["total"] > 10 and all(m["status"] == "not_configured" for m in msgs["items"]), "without SMTP/WhatsApp, messages wait in the outbox"
         m = ok(c.post(f"/api/messages/{msgs['items'][0]['id']}/retry"))

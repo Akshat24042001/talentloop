@@ -146,7 +146,7 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
   }
   if (type === 'video_intro' || type === 'role_task') {
     const a = data.assessment || {}
-    if (!data.file) return <p className="text-slate-500">No recording yet.</p>
+    if (!data.file) return <p className="text-slate-500">{data.media_deleted_at ? `Recording deleted under your retention policy ${ago(data.media_deleted_at)}.` : 'No recording yet.'}</p>
     return <>
       <Player src={`/api/round-results/${res.id}/file`} />
       {data.scoring && data.scoring !== 'done' && <p className="flex items-center gap-1.5 text-slate-500"><Spinner className="size-3.5" />Scoring the recording…</p>}
@@ -162,7 +162,7 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
   }
   if (type === 'practical_task') {
     const a = data.assessment || {}
-    if (!data.file) return <p className="text-slate-500">Nothing uploaded yet.</p>
+    if (!data.file) return <p className="text-slate-500">{data.media_deleted_at ? `File deleted under your retention policy ${ago(data.media_deleted_at)}.` : 'Nothing uploaded yet.'}</p>
     return <>
       <div className="flex flex-wrap items-center gap-2"><Button size="sm" icon={<Download />} href={`/api/round-results/${res.id}/file`} target="_blank">{data.file_name}</Button>
         {data.uploaded_at && <span className="text-xs text-slate-500">uploaded {ago(data.uploaded_at)}</span>}</div>

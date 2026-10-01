@@ -22,7 +22,7 @@ export const STAGE_TONE: Record<string, Tone> = {
 export const VERDICT: Record<string, { label: string; tone: Tone }> = {
   strong: { label: 'Strong fit', tone: 'success' }, good: { label: 'Good fit', tone: 'brand' }, possible: { label: 'Possible', tone: 'warning' }, weak: { label: 'Weak fit', tone: 'neutral' },
 }
-export const SOURCE_LABEL: Record<string, string> = { bulk: 'Resume upload', careers: 'Careers page', talent_pool: 'Talent pool', manual: 'Added by HR', demo: 'Sample data', sourced: 'Sourced' }
+export const SOURCE_LABEL: Record<string, string> = { bulk: 'Resume upload', careers: 'Careers page', talent_pool: 'Talent pool', manual: 'Added by HR', demo: 'Sample data', sourced: 'Sourced', email: 'Email', campus: 'Campus drive' }
 
 /** Who did it: a team member, the candidate (applications), or the system. */
 export function actor(a: { action: string; user?: string | null }): string {
