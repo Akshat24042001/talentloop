@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'node:path'
 
-// Multi-page build: the URLs stay exactly as before (/interview.html?id=..., /report.html?id=...),
-// so links already sent to candidates keep working. FastAPI serves dist/.
+// Two pages: the web app (index.html: landing, sign-in, workspace, careers; FastAPI serves it for every app route)
+// and the candidate's interview call (interview.html?id=..., so links already sent keep working).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
@@ -12,10 +12,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
+        index: resolve(__dirname, 'index.html'),
         interview: resolve(__dirname, 'interview.html'),
-        dashboard: resolve(__dirname, 'dashboard.html'),
-        hr: resolve(__dirname, 'hr.html'),
-        report: resolve(__dirname, 'report.html'),
       },
     },
   },

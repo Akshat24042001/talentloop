@@ -15,15 +15,17 @@ services:
     envVars:
       - key: DATA_DIR
         value: /data
-      - key: ADMIN_KEY
-        generateValue: true  # read it in Render -> Environment; the HR page asks for it
+      - key: DATABASE_URL     # Supabase Session pooler URI (DEPLOY.md step 3). Without it, accounts and jobs are wiped on restart
+        sync: false
+      - key: PLATFORM_ADMIN_EMAILS   # your email: sign up with it to get the Platform admin console
+        sync: false
       - key: VAPI_PUBLIC_KEY
         sync: false
       - key: LLM_API_KEY      # OpenRouter key (sk-or-...) uses free models automatically; an OpenAI key uses GPT-4.1
         sync: false
       - key: LLM_MOCK
         value: "0"
-      # Persistent storage for interviews and recordings (Backblaze B2 free, see DEPLOY.md).
+      # Resumes and recordings: Supabase Storage's S3 endpoint (or Backblaze B2), see DEPLOY.md.
       - key: S3_BUCKET
         sync: false
       - key: S3_ACCESS_KEY_ID
@@ -31,6 +33,8 @@ services:
       - key: S3_SECRET_ACCESS_KEY
         sync: false
       - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_REGION        # Supabase: your project region, e.g. ap-south-1
         sync: false
       - key: RECONNECT_WINDOW_SEC
         value: "30"

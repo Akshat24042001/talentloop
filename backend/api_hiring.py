@@ -934,3 +934,51 @@ async def public_parse_resume(req: Request, resume: UploadFile = File(...)):
     p = resumes.parse(text)
     return {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"],
             "total_experience_years": p["years"], "notice_days": p["notice_days"], "links": p["links"]}
+
+
+# ---------------------------------------------------------------------------
+# JD import and sample data
+# ---------------------------------------------------------------------------
+@router.post("/api/jobs/parse-jd")
+async def parse_jd(req: Request, file: UploadFile = File(...)):
+    """Prefill the JD form from an existing JD file (free: no AI)."""
+    import re
+    with db.session() as s:
+        auth.require(ctx_of(req, s), auth.MANAGE_JOBS, "create jobs")
+    raw = await file.read()
+    check_resume(raw, file.filename or "")
+    text = await asyncio.to_thread(resumes.extract_text, raw, file.filename or "")
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        raise HTTPException(400, "No readable text in that file.")
+    title = next((ln for ln in lines[:5] if 3 <= len(ln) <= 80 and not ln.endswith((".", ":"))), "")
+    bullets = [re.sub(r"^[-•*▪●◦\d.)\s]+", "", ln).strip() for ln in lines if re.match(r"^([-•*▪●◦]|\d+[.)])\s+", ln)]
+    paras = [ln for ln in lines if len(ln) > 120]
+    yrs = re.search(r"(\d{1,2})\s*\+?\s*(?:-|to)?\s*(\d{1,2})?\s*\+?\s*years?", text, re.I)
+    found = sorted(skills.extract(text))
+    fields = jd_schema.clean({"title": title, "summary": (paras[0] if paras else "")[:900], "responsibilities": bullets[:8],
+                              "must_have_skills": found[:6], "nice_to_have_skills": found[6:12], "tools": found[:12],
+                              **({"experience_min": int(yrs.group(1))} if yrs else {}), **({"experience_max": int(yrs.group(2))} if yrs and yrs.group(2) else {})})
+    return {"fields": fields, "chars": len(text)}
+
+
+@router.post("/api/demo/seed")
+def demo_seed(req: Request):
+    from . import demo
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "load sample data")
+        if s.query(db.Candidate).filter_by(org_id=ctx.org_id, source="demo").count():
+            raise HTTPException(409, "Sample data is already loaded. Remove it first from Settings > Data.")
+        out = demo.seed(s, s.get(db.Org, ctx.org_id), ctx.user_id)
+        log_activity(s, ctx, "demo_seeded", f"{out['jobs']} sample jobs, {out['candidates']} sample candidates")
+        return out
+
+
+@router.post("/api/demo/clear")
+def demo_clear(req: Request):
+    from . import demo
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "remove sample data")
+        return demo.clear(s, ctx.org_id)

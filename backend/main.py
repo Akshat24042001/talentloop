@@ -74,7 +74,7 @@ async def _no_stale_pages(req: Request, call_next):
         return resp
     if p.startswith("/assets/") and resp.status_code == 200:
         resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"   # content-hashed file names
-    elif p == "/" or p.endswith((".html", ".js", ".mjs", ".css", ".json")):
+    elif p == "/" or p.endswith((".html", ".js", ".mjs", ".css", ".json")) or "." not in p.rsplit("/", 1)[-1]:   # app routes serve index.html
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -151,11 +151,6 @@ def reconnect_window(rec: dict) -> int:
 # ---------------------------------------------------------------------------
 # HR side
 # ---------------------------------------------------------------------------
-@app.get("/")
-def root():
-    return RedirectResponse("/dashboard.html")
-
-
 @app.get("/api/health")
 def health():
     return {"ok": True, "mock": llm.MOCK, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
@@ -1084,7 +1079,35 @@ async def _download_and_attach(iid: str, url: str, kind: str):
 # /api/candidates/history win over /api/candidates/{id}.
 app.include_router(api_hiring.router)
 
-if (WEB_DIR / "dashboard.html").exists():
+# The web app is one page (index.html) with its own routes; the server returns it for each of them.
+SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}"]
+
+
+def _spa(rest: str = ""):
+    return FileResponse(WEB_DIR / "index.html", media_type="text/html")
+
+
+for _r in SPA_ROUTES:
+    app.add_api_route(_r, _spa, methods=["GET"], include_in_schema=False)
+
+
+# Pages from the earlier version: old bookmarks and links in emails keep working.
+@app.get("/dashboard.html", include_in_schema=False)
+def _old_dashboard():
+    return RedirectResponse("/app/interviews", status_code=301)
+
+
+@app.get("/hr.html", include_in_schema=False)
+def _old_hr():
+    return RedirectResponse("/app/interviews/new", status_code=301)
+
+
+@app.get("/report.html", include_in_schema=False)
+def _old_report(id: str = ""):
+    return RedirectResponse(f"/app/interviews/{id}" if id else "/app/interviews", status_code=301)
+
+
+if (WEB_DIR / "index.html").exists():
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 else:
     log.error("Frontend not built: %s is missing. Run: cd frontend && npm ci && npm run build", WEB_DIR)

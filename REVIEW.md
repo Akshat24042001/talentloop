@@ -111,3 +111,18 @@ Limits to know: `screen.isExtended` exists in Chrome and Edge only (other browse
 LLM_MOCK=1 python -m tests.test_flow     # prints ALL CHECKS PASSED
 python -m tools.rehearse                 # real LLM, typed answers, no Vapi cost
 ```
+
+## Round 6: hiring platform (accounts, jobs, candidates, matching)
+
+Done and tested (`tests/test_platform.py`, `tests/e2e_platform.py`):
+- Passwords hashed with scrypt; sessions are random tokens in an httpOnly, SameSite=Lax cookie (Secure on https), stored hashed. Sign-in, sign-up, invite and apply endpoints are rate limited per IP (and per email for sign-in).
+- Every company's data is isolated: every query filters by the signed-in company, and cross-company ids return 404. Interviews carry their company id; old interviews without one are visible to platform admins only.
+- Hiring managers see only jobs they are assigned to (and those jobs' candidates); editors can't publish, pause, close or delete; reviewers can only rate and comment. The last owner can't be removed or demoted. Disabling a user deletes their sessions.
+- Public endpoints (careers, apply, talent pool, resume prefill) never expose screening answers' expected values, internal-only jobs or other candidates. Resume uploads are type- and size-checked (10 MB, PDF magic bytes).
+- Matching: AI reports only for each job's shortlist, cached by content hash, capped per run (company setting); paid reports are never deleted when rankings change.
+
+Still open:
+- No email sending: invite links are copied and sent by hand, and password reset means a re-invite.
+- Rate limits are in memory (one instance only, reset on restart).
+- Resume parsing is rule-based: scanned (image-only) PDFs are rejected with a clear message, and unusual layouts can miss experience years (the candidate can still be ranked on skills and keywords).
+- Supabase free Storage holds 1 GB and 50 MB per file: enough for thousands of resumes but only 15 to 30 recorded interviews.

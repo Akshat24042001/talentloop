@@ -285,11 +285,15 @@ def main():
     assert c.post(f"/api/interviews/{iid7}/assistant").status_code == 409
     # after a deploy, a browser must never pair a new page with an old cached script
     import re as _re
-    for pg in ("/hr.html", "/dashboard.html", "/report.html", "/interview.html"):
+    for pg in ("/", "/app", "/app/jobs/abc", "/careers/acme/jobs/x", "/login", "/interview.html"):
         r = c.get(pg)
+        assert r.status_code == 200 and '<div id="root">' in r.text, pg
         assert r.headers.get("cache-control") == "no-cache", (pg, r.headers.get("cache-control"))
         assert not _re.search(r'(src|href)="/(common|charts)\.js"|href="/style\.css"', r.text), f"{pg} loads an unversioned asset"
     assert c.get("/common.js").headers.get("cache-control") == "no-cache"
+    # links from the earlier version redirect into the app
+    assert c.get("/report.html?id=abc", follow_redirects=False).headers["location"] == "/app/interviews/abc"
+    assert c.get("/dashboard.html", follow_redirects=False).headers["location"] == "/app/interviews"
     idx = c.get("/samples/index.json").json()
     assert len(idx) >= 7 and all(c.get("/samples/" + s[k]).status_code == 200 for s in idx for k in ("jd", "resume", "questions"))
     print("HR FEATURES: OK")

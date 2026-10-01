@@ -161,7 +161,7 @@ def main():
     data = tempfile.mkdtemp()
     env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test",
                ADMIN_KEY=KEY, DATA_DIR=data, RECONNECT_WINDOW_SEC="12", SWEEP_EVERY_SEC="3", LOG_LEVEL="WARNING",
-               PYTHONUNBUFFERED="1")
+               PYTHONUNBUFFERED="1", PLATFORM_ADMIN_EMAILS="admin@e2e.test", DATABASE_URL="")
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
                            stdout=open(Path(data) / "server.log", "w"), stderr=subprocess.STDOUT)
     assert free_port_wait(PORT), "server did not start"
@@ -271,11 +271,14 @@ def main():
             assert rec["settings"]["candidate_email"] == "rohan@example.com"
 
             # HR report page: video plays with a real duration, jump-to-moment works, downloads work
-            hr = browser.new_context().new_page()
+            hr_ctx = browser.new_context()
+            hr = hr_ctx.new_page()
             hr_errs = []
             hr.on("pageerror", lambda e: hr_errs.append(str(e)))
-            hr.add_init_script(f"sessionStorage.setItem('tl_admin_key', '{KEY}')")
-            hr.goto(f"{BASE}/report.html?id={iid}")
+            # interviews made with the API key belong to no company, so a platform admin sees them
+            assert hr_ctx.request.post(f"{BASE}/api/auth/signup", data={"email": "admin@e2e.test", "password": "e2e-password-1",
+                                                                        "name": "E2E Admin", "company": "E2E Co"}).ok
+            hr.goto(f"{BASE}/report.html?id={iid}")      # old link: redirects to /app/interviews/<id>
             hr.wait_for_selector("video[data-file]", timeout=20000)
             dur = hr.evaluate("""() => new Promise(res => { const v = document.querySelector('video[data-file]');
                 if (v.readyState >= 1) return res(v.duration); v.onloadedmetadata = () => res(v.duration); setTimeout(() => res(v.duration), 8000); })""")
@@ -303,7 +306,7 @@ def main():
             assert any("/snapshots/" in n for n in names)
             if hr_errs:
                 failures.append(f"report page JS errors: {hr_errs}")
-            hr.goto(f"{BASE}/dashboard.html")
+            hr.goto(f"{BASE}/app/interviews")
             hr.wait_for_selector("tbody >> text=Rohan Mehta", timeout=15000)
             hr.fill("#q", "nobody-matches")
             assert hr.locator("text=No interviews match").count()
@@ -398,7 +401,7 @@ def main():
             assert httpx.post(f"{BASE}/api/interviews/{iid5}/assistant").status_code == 409, "a disqualified candidate rejoined"
             if errs5:
                 failures.append(f"disqualification page JS errors: {errs5}")
-            hr.goto(f"{BASE}/report.html?id={iid5}")
+            hr.goto(f"{BASE}/app/interviews/{iid5}")
             hr.wait_for_selector(".dq", timeout=15000)
             assert hr.locator(".moment").count() >= 2
             print("second screen + window switch: warned, then stopped; screen captured:", shots)

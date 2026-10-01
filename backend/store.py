@@ -75,12 +75,15 @@ def s3():
             host = endpoint.split("://")[-1].split("/")[0]
             parts = host.split(".")
             region = parts[1] if len(parts) > 2 and parts[0] == "s3" else "auto"
+        # Supabase Storage (https://<project>.supabase.co/storage/v1/s3) and MinIO need path-style URLs.
+        path_style = os.getenv("S3_PATH_STYLE", "") == "1" or (endpoint and ".supabase." in endpoint)
         _s3 = boto3.client(
             "s3", endpoint_url=endpoint,
             region_name=region or "us-east-1",
             aws_access_key_id=os.getenv("S3_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("S3_SECRET_ACCESS_KEY"),
-            config=Config(retries={"max_attempts": 4, "mode": "standard"}, signature_version="s3v4"))
+            config=Config(retries={"max_attempts": 4, "mode": "standard"}, signature_version="s3v4",
+                          s3={"addressing_style": "path"} if path_style else None))
     return _s3
 
 

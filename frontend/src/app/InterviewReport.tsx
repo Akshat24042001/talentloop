@@ -6,9 +6,8 @@ import { HBarChart, TimelineChart, type BarRow } from '../components/charts'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Select, Spinner, Textarea, cn, copyText, toast } from '../components/ui'
 import { api, mediaUrl, withKey } from '../lib/api'
 import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, TYPE_LABEL, initials, mb, mmss, norm, short, when } from '../lib/format'
-import { AppShell } from './shell'
 
-const iid = new URLSearchParams(location.search).get('id') || ''
+let iid = ''
 const REASON_LABEL: Record<string, string> = { reference: 'Start of interview', periodic: 'Routine', tab_hidden: 'Left the interview tab', window_blur: 'Switched to another window',
   tab_hidden_away: 'Still away from the interview', window_blur_away: 'Still in another window', tab_return: 'Came back', multi_monitor: 'Second screen connected',
   no_face: 'No face on camera', multiple_faces: 'More than one face', share_stopped: 'Screen sharing stopped', voice_while_muted: 'Voice while muted' }
@@ -38,7 +37,8 @@ function Section({ id, title, description, action, children, className }: { id?:
   return <Card id={id} className={cn('scroll-mt-24', className)}><CardHeader title={title} description={description} action={action} /><CardBody>{children}</CardBody></Card>
 }
 
-export default function Report() {
+export default function Report({ id }: { id: string }) {
+  iid = id
   const [rec, setRec] = useState<Rec | null>(null)
   const [err, setErr] = useState('')
   const timer = useRef<number>(undefined)
@@ -54,10 +54,10 @@ export default function Report() {
   useEffect(() => { load(); return () => clearTimeout(timer.current) }, [load])
 
   return (
-    <AppShell active="dashboard">
-      <a href="/dashboard.html" className="no-print mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"><ArrowLeft className="size-4" />All interviews</a>
+    <>
+      <a href="/app/interviews" className="no-print mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"><ArrowLeft className="size-4" />All interviews</a>
       {err ? <Alert tone="danger" icon={<TriangleAlert />}>{err}</Alert> : !rec ? <div className="grid place-items-center py-24"><Spinner className="size-7 text-brand-500" /></div> : <ReportBody rec={rec} reload={load} />}
-    </AppShell>
+    </>
   )
 }
 
@@ -82,7 +82,7 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
       if (kind === 'close') { if (!confirm('Close this interview? The candidate will not be able to continue.')) return; await api(`/api/interviews/${iid}/close`, { method: 'POST' }); reload() }
       if (kind === 'delete') {
         if (!confirm('Permanently delete this interview, its transcript, report, snapshots and recordings from this server and its storage? Vapi and the AI provider keep their own copies under their retention policies.')) return
-        await api(`/api/interviews/${iid}`, { method: 'DELETE' }); location.href = '/dashboard.html'
+        await api(`/api/interviews/${iid}`, { method: 'DELETE' }); location.href = '/app/interviews'
       }
       if (kind === 'save') {
         setBusy('save')

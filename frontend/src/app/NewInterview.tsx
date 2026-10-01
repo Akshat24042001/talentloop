@@ -3,7 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, cn, copyText, toast } from '../components/ui'
 import { api } from '../lib/api'
 import { TYPE_LABEL } from '../lib/format'
-import { AppShell, PageHeader, useHealth } from './shell'
+import { PageHeader } from '../components/kit'
+import { useHealth } from '../lib/health'
+import { useLocation } from '../lib/router'
 
 interface Sample { id: string; role: string; company: string; candidate: string; duration: number; jd: string; resume: string; questions: string }
 interface Question { id: string; type: string; ask: string; competency_id?: string; scored: boolean; good_answer_covers?: string[]; max_followups: number; time_budget_sec: number }
@@ -67,6 +69,20 @@ export default function NewInterview() {
   const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
   const planRef = useRef<HTMLDivElement>(null), linkRef = useRef<HTMLDivElement>(null)
   const base = (health?.public_url || location.origin).replace(/\/$/, '')
+  const { query } = useLocation()
+  const link_ = { job_id: query.get('job') || '', candidate_id: query.get('candidate') || '', application_id: query.get('application') || '' }
+  const [fromJob, setFromJob] = useState('')
+
+  useEffect(() => {   // opened from a job's matches or pipeline: fill in the JD, resume and the job's interview questions
+    if (!link_.job_id) return
+    Promise.all([api(`/api/jobs/${link_.job_id}`), api(`/api/jobs/${link_.job_id}/jd`), link_.candidate_id ? api(`/api/candidates/${link_.candidate_id}`) : null]).then(([job, jd, cand]) => {
+      const jdText = [jd.title, jd.facts.join(' | '), ...jd.sections.map((s: any) => `${s.title}\n${s.body || ''}\n${(s.items || []).map((x: string) => '- ' + x).join('\n')}`)].join('\n\n')
+      const qs: string[] = job.fields.ai_interview_questions || []
+      setF(v => ({ ...v, company: jd.company, role: job.title, jd: jdText, cand: cand?.name || v.cand, email: cand?.email || v.email, cv: cand?.resume_text || v.cv, qs: qs.join('\n') || v.qs }))
+      setFromJob(job.title)
+      if (cand?.email) checkHistory(cand.email)
+    }).catch((e: any) => toast(e.message))
+  }, [link_.job_id, link_.candidate_id])                   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {   // public static file: load it first, independent of the admin key and health check
     fetch('/samples/index.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : []).then((s: Sample[]) => { setSamples(s); setSampleId(s[0]?.id || '') }).catch(() => setSamples([]))
@@ -102,7 +118,7 @@ export default function NewInterview() {
       const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 30,
         available_from: st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap,
         enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
-      const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings } })
+      const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })
       setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [] })
       setTimeout(() => linkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
     } catch (e: any) { setErr2(e.message) }
@@ -114,8 +130,8 @@ export default function NewInterview() {
   const budget = plan ? plan.questions.reduce((a, q) => a + q.time_budget_sec, 0) : 0
 
   return (
-    <AppShell active="new">
-      <PageHeader title="New interview" description="Job description + resume + your questions → a plan you approve → a link for the candidate." />
+    <>
+      <PageHeader title="New AI interview" description={fromJob ? <>For <b>{f.cand || 'the candidate'}</b> · {fromJob}. The JD, resume and the job's interview questions are filled in. Review, then generate the plan.</> : 'Job description + resume + your questions → a plan you approve → a link for the candidate.'} />
       <Steps step={step} />
       {health && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -128,6 +144,7 @@ export default function NewInterview() {
       <Card>
         <CardHeader title="Candidate & role" description="The length is used to plan the questions. The candidate is never told the length or the number of questions." />
         <CardBody className="space-y-5">
+          {!fromJob && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl bg-gradient-to-r from-brand-50 to-violet-50 p-3 ring-1 ring-brand-100 dark:from-brand-500/10 dark:to-violet-500/10 dark:ring-brand-500/20">
             <span className="flex items-center gap-2 text-sm font-semibold text-brand-800 dark:text-brand-200"><Sparkles className="size-4" />Try a sample role</span>
             <Select id="sampleSel" aria-label="Sample role" className="min-w-0 flex-1 basis-60" value={sampleId} onChange={e => setSampleId(e.target.value)}>
@@ -135,6 +152,7 @@ export default function NewInterview() {
             </Select>
             <Button id="sampleBtn" variant="primary" size="sm" disabled={!samples?.length} onClick={loadSample}>Load sample</Button>
           </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Field label="Company" htmlFor="company"><Input id="company" placeholder="RAC IT Solutions" value={f.company} onChange={set('company')} /></Field>
             <Field label="Role" htmlFor="role"><Input id="role" placeholder="Java Backend Developer" value={f.role} onChange={set('role')} /></Field>
@@ -229,13 +247,13 @@ export default function NewInterview() {
               <div className="flex flex-wrap gap-2">
                 <Button href={link.report} icon={<FileText />}>Open report page</Button>
                 <Button href={link.path} target="_blank" icon={<ExternalLink />}>Preview candidate page</Button>
-                <Button variant="ghost" href="/dashboard.html" icon={<ArrowLeft />}>Back to all interviews</Button>
+                <Button variant="ghost" href="/app/interviews" icon={<ArrowLeft />}>Back to all interviews</Button>
               </div>
             </CardBody>
           </Card>
         </div>
       )}
-    </AppShell>
+    </>
   )
 }
 

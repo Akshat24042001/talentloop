@@ -230,7 +230,8 @@ def compose(job_fields: dict, org_name: str, org_settings: dict, public: bool = 
     req = []
     if experience_text(f):
         req.append(f"{experience_text(f)} of relevant experience")
-    req += [f"Strong {s}" for s in (f.get("must_have_skills") or [])]
+    if f.get("must_have_skills"):
+        req.append("Hands-on skills in " + ", ".join(f["must_have_skills"]))
     if f.get("education") and f["education"] != "No requirement":
         req.append(f"{f['education']}" + (f" in {f['field_of_study']}" if f.get("field_of_study") else ""))
     if f.get("industry_experience"):

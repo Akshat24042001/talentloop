@@ -93,7 +93,7 @@ def main():
     rep = rec["report"]
     print(json.dumps({k: rep.get(k) for k in ("recommendation", "confidence", "summary", "computed",
                                                 "human_review_reasons")}, indent=2))
-    print(f"\nFull report: {a.base}/report.html?id={iid}")
+    print(f"\nFull report: {a.base}/app/interviews/{iid}")
 
 
 if __name__ == "__main__":

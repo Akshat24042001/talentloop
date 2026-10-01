@@ -299,6 +299,45 @@ def hiring(cs):
     return jid
 
 
+def demo_and_import():
+    c = client()
+    signup(c, "demo@demo.test", "Demo Co")
+    out = ok(c.post("/api/demo/seed"))
+    assert out == {"jobs": 6, "candidates": 40}, out
+    assert c.post("/api/demo/seed").status_code == 409
+    jobs = ok(c.get("/api/jobs"))
+    assert len(jobs) == 6 and all(j["status"] == "open" for j in jobs)
+    ov = ok(c.get("/api/match/overview"))
+    for j in ov["jobs"]:
+        assert len(j["shortlist"]) == 5, (j["title"], j["shortlist"])
+    # each sample job's shortlist is led by people from the matching profession
+    be = next(j for j in ov["jobs"] if j["title"] == "Senior Backend Engineer")
+    top = ok(c.get(f"/api/jobs/{be['id']}/matches"))["items"][0]["candidate"]
+    assert {"Java", "Spring Boot"} <= set(top["skills"]), top
+    sales = next(j for j in ov["jobs"] if j["title"] == "Enterprise Account Executive")
+    top = ok(c.get(f"/api/jobs/{sales['id']}/matches"))["items"][0]["candidate"]
+    assert "Salesforce" in top["skills"] or "B2B Sales" in top["skills"], top
+    cand = ok(c.get("/api/candidates?limit=1"))["items"][0]
+    r = c.get(f"/api/candidates/{cand['id']}/resume")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF")
+    d = ok(c.get("/api/dashboard"))
+    assert d["applications"] == 24 and d["candidates"] == 40
+    # JD import from a file
+    jd = b"""Senior Data Engineer
+We are looking for a data engineer to build our pipelines and own the warehouse used across the company for reporting and machine learning work.
+Responsibilities:
+- Build batch and streaming pipelines
+- Own data quality checks
+Requirements: 3-6 years with Python, SQL, Spark, Airflow and AWS."""
+    f = ok(c.post("/api/jobs/parse-jd", files={"file": ("jd.txt", jd, "text/plain")}))["fields"]
+    assert f["title"] == "Senior Data Engineer" and f["experience_min"] == 3 and f["experience_max"] == 6, f
+    assert "Python" in f["must_have_skills"] + f["nice_to_have_skills"] and f["responsibilities"][0] == "Build batch and streaming pipelines", f
+    cleared = ok(c.post("/api/demo/clear"))
+    assert cleared == {"jobs": 6, "candidates": 40}
+    assert ok(c.get("/api/jobs")) == [] and ok(c.get("/api/candidates"))["total"] == 0
+    print("SAMPLE DATA + JD IMPORT: OK")
+
+
 def api_key_org():
     """The ADMIN_KEY API needs an X-Org header for company endpoints."""
     import backend.auth as a
@@ -352,6 +391,7 @@ def main():
     cs = accounts()
     interviews_scoped(cs)
     hiring(cs)
+    demo_and_import()
     api_key_org()
     scale()
     print("\nPLATFORM CHECKS PASSED")

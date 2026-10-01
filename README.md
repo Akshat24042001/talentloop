@@ -1,4 +1,39 @@
-# TalentLoop AI Interview PoC
+# TalentLoop
+
+A hiring platform for small teams: detailed job descriptions, a careers page, a candidate pool, instant matching of
+every resume against every job, AI match reports for each job's shortlist, and an AI voice interviewer for the first round.
+
+## The hiring platform
+
+- **Companies, sign-in and roles.** Anyone can sign up; that creates a company workspace with them as owner. Others join
+  by invite link with a role: **Owner**, **Admin** (team and settings), **Recruiter** (HR: creates and publishes jobs,
+  manages candidates), **Hiring manager** (sees only the jobs HR assigns), **Viewer** (read-only). Several people can
+  share a role. People can belong to several companies and switch between them.
+- **Per-job access.** HR creates a job and gives, say, the sales manager **editor** rights (writes and updates the JD,
+  moves candidates; can't publish or delete) or **reviewer** rights (rates and comments). Every edit is in the job's activity log.
+- **Job descriptions.** About 60 fields in 8 sections (basics, location and work model, pay and benefits, the role,
+  requirements, hiring process and screening questions, posting, matching). Only 7 are required to publish. "Write with
+  AI" drafts the summary and responsibilities; "Import JD file" prefills from an existing PDF or DOCX for free. One click
+  gives a clean JD PDF and a public job post.
+- **Candidates.** Bulk resume upload (PDF, DOCX, TXT, up to 500 at a time) with free parsing of name, email, phone,
+  city, skills (about 300 skills with synonyms), years of experience and notice period, de-duplicated by email.
+  Careers page applications with screening questions (a wrong answer to a must-answer question screens the person out,
+  but keeps them on file), a talent pool, and a resume builder for candidates without one (turned into a PDF).
+- **Matching built for low AI cost.** Stage 1 is free and instant: every candidate is scored against every open job on
+  skills (must-haves and nice-to-haves), experience band, BM25 keyword relevance, location (with city aliases) and
+  notice period and salary, with company-set weights and per-job screen-out rules. 2,000 resumes x 120 jobs rank in about
+  5 seconds. Stage 2 writes an AI match report (verdict, strengths, gaps, risks, interview questions) **only for each job's
+  top N** (3 to 50, default 5), cached by a hash of the job and the resume, and capped per run. The reverse view shows the
+  best jobs for any candidate.
+- **AI interviews** can be sent straight from a match; the JD, resume and the job's must-ask questions are filled in.
+- **Platform admin** (emails in `PLATFORM_ADMIN_EMAILS`): every company with its users, jobs, resumes, applications,
+  interviews, AI calls and last activity, every user with sign-in counts, and disable switches.
+- **Sample data**: one click loads 6 jobs and 40 synthetic resumes; one click removes them.
+
+Data lives in Postgres (Supabase) via `DATABASE_URL`, or SQLite on a laptop. Files (resumes, recordings) go to any
+S3-compatible bucket (Supabase Storage, Backblaze B2). See `DEPLOY.md`.
+
+## The AI interviewer
 
 An AI voice interviewer for first-round screening. HR gives it a JD, a resume and their questions. It builds an interview plan for HR to approve. It interviews the candidate in the browser with voice and camera, asks smart follow-ups, keeps time, and produces a scorecard where every score is backed by a quote from the candidate.
 
@@ -32,7 +67,7 @@ Candidate browser (interview.html) ── Vapi web SDK ── Vapi cloud (STT, T
                                     code composes reply (plan questions asked as written)
                                                          │
 Call ends ──> /complete ──> score_interview (SMART_MODEL) ──> quotes verified against
-                                                              transcript ──> report.html
+                                                              transcript ──> HR report
 ```
 
 The interviewer's possible actions each turn are: follow up, next question, repeat or rephrase, invite them to continue (answer looked cut off), answer the candidate's question (only from JD facts; salary goes to HR), redirect (off-topic or manipulation), and end.
@@ -42,12 +77,14 @@ The interviewer's possible actions each turn are: follow up, next question, repe
 1. `cd talentloop-ai-interview && python -m venv .venv && source .venv/bin/activate` (Windows: `.venv\Scripts\activate`)
 2. `pip install -r backend/requirements.txt`, then build the web interface once (needs Node 20+): `cd frontend && npm ci && npm run build && cd ..`. Rebuild after pulling changes to `frontend/`. (Docker and Render do this automatically.)
 3. Start a tunnel: `cloudflared tunnel --url http://localhost:8000`, then copy the `https://....trycloudflare.com` URL.
-4. `cp .env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `ADMIN_KEY`.
+4. `cp .env.example .env` and fill in `PUBLIC_URL`, `VAPI_PUBLIC_KEY`, `LLM_API_KEY` and `PLATFORM_ADMIN_EMAILS` (your email). Leave `DATABASE_URL` empty to use a local SQLite file.
 5. `uvicorn backend.main:app --host 0.0.0.0 --port 8000` (one worker only: interview locks live in process memory)
-6. Open `http://localhost:8000` (the Interviews dashboard; **New interview** creates one). No red warnings should show at the top.
+6. Open `http://localhost:8000`, click **Start free** and sign up. Load the sample data from the dashboard. No yellow warnings should show at the top (on a laptop, temporary storage warnings are expected).
 
 Quick checks before spending money:
-- `LLM_MOCK=1 python -m tests.test_flow` tests the whole flow with a fake AI. It should print `ALL CHECKS PASSED`.
+- `LLM_MOCK=1 python -m tests.test_flow` tests the whole interview flow with a fake AI. It should print `ALL CHECKS PASSED`.
+- `python -m tests.test_platform` tests accounts, roles, jobs, candidates, applying, matching and a 2,000 x 120 scale run.
+- `python -m tests.e2e_platform` and `python -m tests.e2e_browser` drive the real app in Chromium.
 - `python -m tools.rehearse` runs a real-LLM interview where you **type** answers. It costs no Vapi minutes. Use it to tune `backend/prompts.py`.
 
 Note: cloudflared quick-tunnel URLs change every restart. Update `PUBLIC_URL` and restart the server each time, or set up a named tunnel.
@@ -137,7 +174,8 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 - **Cheating is detectable, not preventable.** A second phone out of camera view or a helper speaking quietly can't be fully caught by any browser. Voice-while-muted, face checks and resume-probe follow-ups are the practical defence. HR must watch flagged moments before concluding anything.
 - **Browser limits.** Screen-share and multi-monitor checks need desktop Chrome or Edge. Safari/Firefox can take the interview, but some signals are missing.
 - **English only.** Hindi and Gujarati interviews need different STT choices and testing (the PDF already renders Hindi/Gujarati names).
-- **One server process.** Locks live in memory, so run one instance. Storage is JSON files mirrored to S3; fine for a pilot, not for thousands of interviews.
+- **One server process.** Interview locks and rate limits live in memory, so run one instance. Interviews are JSON files mirrored to S3 (fine for a pilot); the hiring data is in the database.
+- **Password reset is manual.** There's no email sending yet: an owner re-invites a person who forgot their password.
 - **The Vapi config passes through the candidate's browser.** See `REVIEW.md` for the private-key hardening.
 
 ## Review status
@@ -149,10 +187,12 @@ Read `REVIEW.md` before running real candidates. Hosting: see `DEPLOY.md`. It li
 - `backend/brain.py`: the interview state machine, scoring and quote verification. The core.
 - `backend/prompts.py`: all prompts. Tune here first.
 - `backend/vapi_config.py`: voice, STT, turn-taking and end-call settings.
-- `backend/main.py`: API, custom LLM endpoint and webhook.
-- `frontend/`: the web interface (React + TypeScript + Tailwind, built with Vite into `frontend/dist`, which the server serves). Pages keep their URLs: `/dashboard.html` (all interviews), `/hr.html` (new interview), `/interview.html?id=` (candidate call), `/report.html?id=` (report).
+- `backend/main.py`: interview API, custom LLM endpoint, webhook, and serving the web app.
+- `backend/db.py` (tables), `auth.py` (passwords, sessions, roles, per-job access), `api_accounts.py` (sign-up, team, settings, platform admin), `api_hiring.py` (jobs, candidates, applications, matching, dashboard, careers), `jd_schema.py` (every JD field), `matching.py` (two-stage matching), `resumes.py` and `skills.py` (free parsing), `docs_pdf.py` (JD and resume PDFs), `demo.py` (sample data).
+- `frontend/`: the web interface (React + TypeScript + Tailwind, built with Vite into `frontend/dist`, which the server serves). Two pages: `index.html` is the whole app with its own routes (`/` landing, `/login`, `/signup`, `/invite/…`, `/app/…` workspace, `/admin`, `/careers/<company>`), and `/interview.html?id=` is the candidate call. Old `/dashboard.html`, `/hr.html` and `/report.html?id=` links redirect.
+  - `frontend/src/app/`: workspace pages. `frontend/src/site/`: landing, sign-in, careers. `frontend/src/admin/`: platform admin.
   - `frontend/src/interview/engine.ts`: the candidate-side engine (devices, Vapi call, recording and upload, face checks, warnings, rejoin). `InterviewApp.tsx` is its UI.
-  - `frontend/src/hr/`: dashboard, new interview wizard, report. `frontend/src/components/`: UI kit and charts.
+  - `frontend/src/components/`: UI kit and charts. `frontend/src/lib/`: API client, router, session.
   - Local UI development: run the server on port 8000, then `cd frontend && npm run dev` (Vite proxies `/api` to it).
 - `frontend/public/samples/`: sample JD, resume and HR questions for 7 roles (`index.json` lists them). `frontend/public/vendor/`: self-hosted Vapi SDK and face-detection model.
 - `tools/rehearse.py`: typed rehearsal. `tests/test_flow.py`: end-to-end API test. `tests/e2e_browser.py`: real-Chromium test (warnings, disqualification, second screen, recordings).

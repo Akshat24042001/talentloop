@@ -4,7 +4,8 @@ import { SplitBar } from '../components/charts'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Input, Select, Spinner, Stat, Tip, copyText, useInterval } from '../components/ui'
 import { api, withKey } from '../lib/api'
 import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, ago, initials, when } from '../lib/format'
-import { AppShell, PageHeader, healthProblems, useHealth } from './shell'
+import { PageHeader } from '../components/kit'
+import { useHealth } from '../lib/health'
 
 interface Row {
   id: string; created_at: number; status: string; candidate?: string; role?: string; company?: string; email?: string
@@ -13,7 +14,7 @@ interface Row {
 }
 interface Calib { pairs: number; within_1?: number; exact?: number; ai_minus_hr_avg?: number }
 
-export default function Dashboard() {
+export default function Interviews() {
   const health = useHealth()
   const [rows, setRows] = useState<Row[] | null>(null)
   const [cal, setCal] = useState<Calib | null>(null)
@@ -46,17 +47,15 @@ export default function Dashboard() {
   const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '-'
   const rc = (k: string) => all.filter(r => r.recommendation === k).length
   const rk = (k: string) => all.filter(r => r.risk === k).length
-  const problems = health ? healthProblems(health) : []
 
   return (
-    <AppShell active="dashboard">
-      <PageHeader title="Interviews" description="Every AI interview you've sent, with results and integrity at a glance."
+    <>
+      <PageHeader title="AI interviews" description="Every AI first-round interview your team has sent, with results and integrity at a glance."
         actions={<><Button href={withKey('/api/interviews.csv')} icon={<Download />}>Export CSV</Button>
-          <Button variant="primary" href="/hr.html" icon={<Plus />}>New interview</Button></>} />
-      {(health?.mock || problems.length > 0) && (
+          <Button variant="primary" href="/app/interviews/new" icon={<Plus />}>New interview</Button></>} />
+      {health?.mock && (
         <div className="mb-6 space-y-2">
           {health?.mock && <Alert tone="info" icon={<Sparkles />} title="Demo mode">The AI is simulated (LLM_MOCK=1). Good for trying the flow; turn it off for real candidates.</Alert>}
-          {problems.map(p => <Alert key={p} tone="danger" icon={<TriangleAlert />}>{p}</Alert>)}
         </div>
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -99,7 +98,7 @@ export default function Dashboard() {
             <ul className="divide-y divide-slate-100 dark:divide-ink-800 md:hidden">
               {filtered.map(r => (
                 <li key={r.id}>
-                  <a href={`/report.html?id=${encodeURIComponent(r.id)}`} className="flex gap-3 px-4 py-3.5 active:bg-slate-50 dark:active:bg-ink-850">
+                  <a href={`/app/interviews/${encodeURIComponent(r.id)}`} className="flex gap-3 px-4 py-3.5 active:bg-slate-50 dark:active:bg-ink-850">
                     <span className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-xs font-bold text-brand-700 dark:from-brand-500/25 dark:to-violet-500/25 dark:text-brand-200">{initials(r.candidate)}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2"><span className="truncate font-semibold text-slate-900 dark:text-white">{r.candidate || 'Candidate'}</span><span className="shrink-0 text-xs text-slate-400">{ago(r.created_at)}</span></div>
@@ -122,7 +121,7 @@ export default function Dashboard() {
                 </tr></thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-ink-800">
                   {filtered.map(r => (
-                    <tr key={r.id} className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850" onClick={e => { if (!(e.target as HTMLElement).closest('a,button')) location.href = `/report.html?id=${encodeURIComponent(r.id)}` }}>
+                    <tr key={r.id} className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850" onClick={e => { if (!(e.target as HTMLElement).closest('a,button')) location.href = `/app/interviews/${encodeURIComponent(r.id)}` }}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-xs font-bold text-brand-700 dark:from-brand-500/25 dark:to-violet-500/25 dark:text-brand-200">{initials(r.candidate)}</span>
@@ -143,7 +142,7 @@ export default function Dashboard() {
                       <td className="hidden px-4 py-3 capitalize text-slate-700 dark:text-slate-200 lg:table-cell">{(r.decision || '').replace('_', ' ') || <span className="text-slate-400">-</span>}</td>
                       <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-slate-500 dark:text-slate-400 lg:table-cell" title={when(r.created_at)}>{ago(r.created_at)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
-                        <Button size="sm" href={`/report.html?id=${encodeURIComponent(r.id)}`}>Report</Button>
+                        <Button size="sm" href={`/app/interviews/${encodeURIComponent(r.id)}`}>Report</Button>
                         <Tip label="Copy candidate link"><button className="ml-1 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white" aria-label="Copy candidate link"
                           onClick={() => copyText(`${base}/interview.html?id=${r.id}`, 'Candidate link copied')}><Link2 className="size-4" /></button></Tip>
                       </td>
@@ -154,7 +153,7 @@ export default function Dashboard() {
             </div>
           </>)}
       </Card>
-    </AppShell>
+    </>
   )
 }
 
@@ -163,8 +162,8 @@ function Empty() {
     <div className="px-6 py-16 text-center">
       <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300"><Sparkles className="size-6" /></div>
       <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No interviews yet</h3>
-      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Create your first AI interview. Seven sample roles are ready to try.</p>
-      <Button variant="primary" href="/hr.html" icon={<Plus />} className="mt-5">New interview</Button>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Send one from a job's Best matches, or create one here. Seven sample roles are ready to try.</p>
+      <Button variant="primary" href="/app/interviews/new" icon={<Plus />} className="mt-5">New interview</Button>
     </div>
   )
 }

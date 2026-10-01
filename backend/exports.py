@@ -117,7 +117,7 @@ def interviews_csv(recs: list[dict]) -> str:
                     c.get("questions_planned", ""), pr["risk"], " | ".join(pr["reasons"]),
                     (r.get("hr") or {}).get("decision", ""), (r.get("hr") or {}).get("notes", ""),
                     ((r.get("state") or {}).get("reconnects", 0)), (r.get("feedback") or {}).get("rating", ""),
-                    f"/report.html?id={r['id']}"])
+                    f"/app/interviews/{r['id']}"])
     return buf.getvalue()
 
 
