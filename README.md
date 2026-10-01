@@ -30,6 +30,40 @@ every resume against every job, AI match reports for each job's shortlist, and a
   interviews, AI calls and last activity, every user with sign-in counts, and disable switches.
 - **Sample data**: one click loads 6 jobs and 40 synthetic resumes; one click removes them.
 
+## Hiring flows
+
+Each job has a **hiring flow**: the rounds a candidate goes through, built on the job's **Hiring flow** tab by
+dragging blocks from a palette (or starting from a template: experienced hire, campus/fresher, sales fresher, admin
+executive, senior hire, or your own saved templates). Rounds can be added, removed or reordered while a job is live.
+
+| Round | What the candidate does | How it's judged |
+|---|---|---|
+| Application form | Mandatory details (Settings > Hiring) and knockout questions | Knockouts screen out, kept on file |
+| AI CV screening | Nothing | Instant score with written reasons, knockouts and a job-stability check; optional AI report |
+| Aptitude and domain test | A proctored test: a different random paper from the question bank, timed sections, full screen, camera snapshots | Marked automatically; section and overall cut-offs, optional negative marking |
+| Video introduction / role task | Records an answer (e.g. a sales pitch after reading a brief) in the browser | AI scores fluency, clarity, structure and content from the transcript, never appearance or accent |
+| Practical task | Downloads a file (e.g. an Excel brief), uploads their work | AI reviews it against your rubric |
+| AI interview | The AI voice interview below, in the language you choose, in the browser or by phone ("call me") | Scorecard and Strong / Maybe / No |
+| Human interview | Books one of your slots, gets a calendar invite and reminders | The interviewer's one-click feedback page with an AI prep kit |
+| Manager approval | Nothing | The manager decides from a no-login one-page summary: Select, Reject or Hold |
+
+- **Pass rules** per round: minimum score, top N, HR reviews each, or everyone passes; then move on automatically or
+  wait for HR, with a deadline and a custom message. **Integrity flags never reject anyone on their own.**
+- **Pipeline board** (job > Applicants): a column per round or a list, filters (score, location, notice period,
+  college, status, flags), bulk pass/hold/move/select/message/reject, drag to move, "Pass top N". The application
+  drawer shows every round's result, test sections, videos (up to 2x speed), practical reviews, integrity events and
+  snapshots next to the registration photo, and resend / reset attempt / change score.
+- **Candidates** get a status page (`/status/<link>`) with every step, how each one is assessed, accommodation
+  requests (for example extra time), "I'd prefer a human interviewer", withdraw, and "delete my data".
+- **Campus drives**: a registration link and QR code per college, registration with a live photo, a test window,
+  and a results page for the placement officer.
+- **Question bank** with about 60 starter questions, Excel import (template included) and AI drafts you review first.
+- **Messages**: email (SMTP) and WhatsApp (Cloud API) invitations, reminders, booking confirmations and respectful
+  closures; everything is listed in the **Outbox**, and waits there if a channel isn't set up.
+- **Reports** (funnel, time to decision, drop-off by round, sources and colleges), an **audit log**, an **HROne
+  export** (.xlsx with your own HROne template's columns), **retention** of recordings and photos, and resumes
+  imported from a careers **mailbox** (IMAP).
+
 Data lives in Postgres (Supabase) via `DATABASE_URL`, or SQLite on a laptop. Files (resumes, recordings) go to any
 S3-compatible bucket (Supabase Storage, Backblaze B2). See `DEPLOY.md`.
 
@@ -70,7 +104,9 @@ Call ends ──> /complete ──> score_interview (SMART_MODEL) ──> quotes
                                                               transcript ──> HR report
 ```
 
-The interviewer's possible actions each turn are: follow up, next question, repeat or rephrase, invite them to continue (answer looked cut off), answer the candidate's question (only from JD facts; salary goes to HR), redirect (off-topic or manipulation), and end.
+The interview opens by saying the interviewer is an AI, that the call is recorded and transcribed, and that a person decides; a candidate who says they don't want to be recorded is thanked, the call ends, and HR gets a human-interview request. An unscored practice question comes first. Interviews run in English, Hindi, Hinglish (Hindi-English mix) or another Indian language set per round.
+
+The interviewer's possible actions each turn are: follow up, next question, repeat or rephrase, invite them to continue (answer looked cut off), answer the candidate's question (only from the company's HR-approved FAQ and the JD; salary goes to HR), redirect (off-topic or manipulation), and end.
 
 ## Setup (about 20 minutes)
 
@@ -83,8 +119,9 @@ The interviewer's possible actions each turn are: follow up, next question, repe
 
 Quick checks before spending money:
 - `LLM_MOCK=1 python -m tests.test_flow` tests the whole interview flow with a fake AI. It should print `ALL CHECKS PASSED`.
+- `python -m tests.test_flows` tests hiring flows end to end: every round type, campus drives, scheduling, messages, reports, the HROne export, retention and the mailbox import. `TEST_DATABASE_URL=postgresql+psycopg://...` runs any of these on Postgres.
 - `python -m tests.test_platform` tests accounts, roles, jobs, candidates, applying, matching and a 2,000 x 120 scale run.
-- `python -m tests.e2e_platform` and `python -m tests.e2e_browser` drive the real app in Chromium.
+- `python -m tests.e2e_platform`, `python -m tests.e2e_flows` and `python -m tests.e2e_browser` drive the real app in Chromium (the flows test uses a fake camera for registration, the test and a recording).
 - `python -m tools.rehearse` runs a real-LLM interview where you **type** answers. It costs no Vapi minutes. Use it to tune `backend/prompts.py`.
 
 Note: cloudflared quick-tunnel URLs change every restart. Update `PUBLIC_URL` and restart the server each time, or set up a named tunnel.
@@ -128,7 +165,8 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 - `FAST_MODEL`: the live turn model. Speed matters more than brilliance. `gpt-4.1-mini` is the default.
 - `SMART_MODEL`: plan and scoring. Quality matters. `gpt-4.1` is the default.
 - `ENDPOINTING_MODE` / `PATIENT_TIMEOUT_SEC`: how long the AI waits before speaking.
-- `STT_LANGUAGE`: `en-IN` default. Try `multi` if candidates code-switch into Hindi.
+- `STT_LANGUAGE`: `en-IN` default for English interviews. Pick Hindi or Hinglish per AI interview round instead of changing it; `STT_<LANG>` and `VOICE_<LANG>` override a language's speech-to-text and voice.
+- `PLAN_MODEL`, `PLAN_HEDGE_SEC`, `PLAN_DEADLINE_SEC`: interview plans in under 30 seconds (a backup model, then a template plan).
 - `SCORING_PASSES=2`: scores twice and flags unstable scores. Costs twice as much.
 
 ## What HR gets
@@ -149,6 +187,11 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 - Microphone muted (count and duration), voice detected while muted, camera or mic switched off, lost connection.
 - Required entire-screen sharing (optional per interview): refuses windows and tabs, and records and blocks with an overlay when sharing stops.
 - Every session's IP address and browser; a rejoin from a different device or network is flagged.
+- **Liveness**: a head-turn check before joining (noted, never blocking, if it isn't completed in 30 seconds).
+- **Virtual cameras** (OBS, ManyCam, phone-as-webcam apps) detected by device name.
+- **Face match** in the browser (face-api, self-hosted models): against the campus registration photo, or against the face at the start of the call.
+- **Answer timing** per answer, and a flag for repeated long silences followed by long, fast answers (possible reading).
+- **Possible second voice**: a sustained stretch of speech far from the candidate's usual pitch. A heuristic: watch the moment before concluding anything.
 
 **Interview flow**
 - Rejoin window after a drop (default 30 s, set per interview). After it, the server refuses to reopen the interview, closes it and scores what was done. A deliberate "End interview" can't be undone.
@@ -173,9 +216,9 @@ If candidates keep getting cut off, set `ENDPOINTING_MODE=patient` in `.env` and
 - **Data leaves India.** Audio goes through Vapi, Deepgram, the TTS provider and the LLM provider. The consent screen says so.
 - **Cheating is detectable, not preventable.** A second phone out of camera view or a helper speaking quietly can't be fully caught by any browser. Voice-while-muted, face checks and resume-probe follow-ups are the practical defence. HR must watch flagged moments before concluding anything.
 - **Browser limits.** Screen-share and multi-monitor checks need desktop Chrome or Edge. Safari/Firefox can take the interview, but some signals are missing.
-- **English only.** Hindi and Gujarati interviews need different STT choices and testing (the PDF already renders Hindi/Gujarati names).
+- **Languages need a live check.** English, Hindi and Hinglish have written interviewer lines; other Indian languages are translated by the AI when the interview is created and use Azure voices through Vapi. Test each language on a real call before using it with candidates. Vapi's idle check-in lines stay in English.
 - **One server process.** Interview locks and rate limits live in memory, so run one instance. Interviews are JSON files mirrored to S3 (fine for a pilot); the hiring data is in the database.
-- **Password reset is manual.** There's no email sending yet: an owner re-invites a person who forgot their password.
+- **Password reset is manual.** An owner re-invites a person who forgot their password.
 - **The Vapi config passes through the candidate's browser.** See `REVIEW.md` for the private-key hardening.
 
 ## Review status
@@ -188,11 +231,13 @@ Read `REVIEW.md` before running real candidates. Hosting: see `DEPLOY.md`. It li
 - `backend/prompts.py`: all prompts. Tune here first.
 - `backend/vapi_config.py`: voice, STT, turn-taking and end-call settings.
 - `backend/main.py`: interview API, custom LLM endpoint, webhook, and serving the web app.
+- Hiring flows: `flows.py` (the round engine), `api_flows.py` (HR API), `api_portal.py` (candidate, manager and interviewer pages), `screening.py`, `assessments.py` (tests, recordings, practical tasks), `scheduling.py`, `messages.py` (email and WhatsApp outbox), `worker.py` (background rounds and deadlines), `phone.py` ("call me"), `question_bank.py`, `reports.py`, `hrone.py`, `retention.py`, `mailbox.py`.
 - `backend/db.py` (tables), `auth.py` (passwords, sessions, roles, per-job access), `api_accounts.py` (sign-up, team, settings, platform admin), `api_hiring.py` (jobs, candidates, applications, matching, dashboard, careers), `jd_schema.py` (every JD field), `matching.py` (two-stage matching), `resumes.py` and `skills.py` (free parsing), `docs_pdf.py` (JD and resume PDFs), `demo.py` (sample data).
 - `frontend/`: the web interface (React + TypeScript + Tailwind, built with Vite into `frontend/dist`, which the server serves). Two pages: `index.html` is the whole app with its own routes (`/` landing, `/login`, `/signup`, `/invite/…`, `/app/…` workspace, `/admin`, `/careers/<company>`), and `/interview.html?id=` is the candidate call. Old `/dashboard.html`, `/hr.html` and `/report.html?id=` links redirect.
+  - `frontend/src/app/flow/`: flow builder, pipeline board and application drawer. `frontend/src/portal/`: the no-login pages (`/r/`, `/status/`, `/decide/`, `/feedback/`, `/drive/`, `/results/`).
   - `frontend/src/app/`: workspace pages. `frontend/src/site/`: landing, sign-in, careers. `frontend/src/admin/`: platform admin.
   - `frontend/src/interview/engine.ts`: the candidate-side engine (devices, Vapi call, recording and upload, face checks, warnings, rejoin). `InterviewApp.tsx` is its UI.
   - `frontend/src/components/`: UI kit and charts. `frontend/src/lib/`: API client, router, session.
   - Local UI development: run the server on port 8000, then `cd frontend && npm run dev` (Vite proxies `/api` to it).
-- `frontend/public/samples/`: sample JD, resume and HR questions for 7 roles (`index.json` lists them). `frontend/public/vendor/`: self-hosted Vapi SDK and face-detection model.
+- `frontend/public/samples/`: sample JD, resume and HR questions for 7 roles (`index.json` lists them). `frontend/public/vendor/`: self-hosted Vapi SDK and face-detection model. The face-match models are copied from `node_modules/@vladmandic/face-api` into `public/vendor/face-api/` by every build (not committed).
 - `tools/rehearse.py`: typed rehearsal. `tests/test_flow.py`: end-to-end API test. `tests/e2e_browser.py`: real-Chromium test (warnings, disqualification, second screen, recordings).

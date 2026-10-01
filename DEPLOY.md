@@ -33,6 +33,10 @@ Dashboard > **API Keys** > copy the **Public** key: `VAPI_PUBLIC_KEY`. Optionall
 
 **Supabase (database and file storage)**
 1. https://supabase.com > **New project**. Region: closest to your users (e.g. Mumbai). Save the database password.
+   **Put the Render service in the same region, or the nearest one Render offers.** Every page load makes several
+   database calls, and each crosses the distance between the two: a mismatch such as Render Oregon with Supabase
+   Mumbai adds roughly a quarter of a second per call and makes lists feel slow. Check Render's region list when you
+   create the service; if it has no Mumbai region, Singapore is the nearest for Supabase Mumbai.
 2. Database: top bar **Connect** > **Session pooler** > copy the URI and put your password in it:
    `postgresql://postgres.<project-ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres` = `DATABASE_URL`.
    Use the Session pooler: Render can't reach the direct connection (IPv6 only). Tables are created automatically.
@@ -46,12 +50,28 @@ Supabase free limits: 500 MB database (about 100,000 candidates), 1 GB of files,
 For more, upgrade Supabase or point the `S3_*` settings at Backblaze B2 (10 GB free): endpoint
 `https://s3.<region>.backblazeb2.com`, keyID and applicationKey as the access keys.
 
+**Optional services (add any time; each feature switches on when its settings are present)**
+
+| Feature | Where to get it | Settings |
+|---|---|---|
+| Emails to candidates, managers and interviewers (invites, reminders, calendar invites, closures) | Any SMTP provider: Google Workspace or Gmail with an app password (smtp.gmail.com, 587), Zoho, Amazon SES, Brevo | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` |
+| WhatsApp messages | Meta WhatsApp Cloud API: a phone number ID, a permanent token, and an **approved template** whose body is one variable, `{{1}}` | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE`, `WHATSAPP_TEMPLATE_LANG`, `WHATSAPP_API_VERSION` |
+| Server transcription of video introductions, role tasks and interviewer recordings | https://deepgram.com > API key | `DEEPGRAM_API_KEY` |
+| "Call me": the AI interviewer phones the candidate | Vapi > Phone Numbers > import or buy a number, copy its ID | `VAPI_PRIVATE_KEY`, `VAPI_PHONE_NUMBER_ID` |
+| Resumes emailed to a careers mailbox become candidates | Any IMAP mailbox (Gmail needs IMAP on and an app password); use one dedicated to applications | `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD`, `IMAP_ORG_SLUG`, optional `IMAP_PORT`, `IMAP_FOLDER`, `IMAP_EVERY_SEC` |
+
+Without SMTP or WhatsApp nothing is lost: messages wait in **Outbox** (and HR can copy every candidate link from
+the pipeline), and can be retried once a channel is set up. Other interview languages need no account: pick the
+language on the AI interview round; `STT_<LANG>` / `VOICE_<LANG>` override the defaults (see the env file).
+
 ---
 
 ## Option A: everything on one Render service (recommended)
 
 1. https://dashboard.render.com > **New +** > **Web Service** > connect GitHub > pick `Akshat24042001/talentloop`.
-2. Settings: Branch `main`, Language/Runtime **Docker**, Instance type **Free** (or Starter for no sleeping).
+2. Settings: Branch `main`, Language/Runtime **Docker**, **Region: the same as your Supabase project** (see Step 1),
+   Instance type **Free** (or Starter for no sleeping). An existing service can't change region: create a new one in
+   the right region, copy the environment, then delete the old one.
 3. **Environment** > add these (values from Step 1):
 
    | Key | Value |
@@ -68,6 +88,7 @@ For more, upgrade Supabase or point the `S3_*` settings at Backblaze B2 (10 GB f
    | `VAPI_PUBLIC_KEY` | Vapi public key |
    | `VAPI_PRIVATE_KEY` | optional |
    | `FAST_MODEL`, `SMART_MODEL` | optional: paid models for real candidates |
+   | `SMTP_*`, `WHATSAPP_*`, `DEEPGRAM_API_KEY`, `VAPI_PHONE_NUMBER_ID`, `IMAP_*` | optional: see "Optional services" above |
 
    Don't set `PUBLIC_URL`, `APP_URL`, `DATA_DIR`, `PORT` or `COOKIE_SECURE`: they're automatic. `ADMIN_KEY` is no longer
    needed (people sign in); delete it unless a script uses the API.
@@ -135,4 +156,11 @@ laptop need a public tunnel (`cloudflared tunnel --url http://localhost:8000`) s
 - **Reliability:** free models get rate-limited. Each live turn tries 3 models, then a safe fallback line.
 
 ## Keep to one instance
-Interview locks and sign-in rate limits live in process memory. Don't scale the backend beyond one instance.
+Interview locks, sign-in rate limits and the background worker (messages, deadlines, retention, mailbox import) live
+in one process. Don't scale the backend beyond one instance.
+
+## Free plan and background work
+The background worker sends messages, applies deadlines and reminders, scores recordings, applies each company's
+retention settings and imports the mailbox. On Render's free plan the service sleeps after 15 minutes without
+visitors, and the worker sleeps with it: queued messages and reminders go out when the next visitor wakes it. Use the
+Starter plan (or an uptime pinger hitting `/api/health`) when candidates are moving through flows.

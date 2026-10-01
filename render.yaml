@@ -4,6 +4,9 @@ services:
   - type: web
     name: talentloop-ai-interview
     runtime: docker
+    # Keep the server next to the database: the region nearest your Supabase project (DEPLOY.md, Step 1).
+    # Fixed when the service is created.
+    region: singapore
     # Free plan: no persistent disk, so interviews are wiped when the service restarts or sleeps
     # (after 15 min idle). For real candidates switch to "starter" and uncomment the disk block.
     plan: free
