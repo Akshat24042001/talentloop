@@ -3,6 +3,10 @@ import Admin from './admin/Admin'
 import CandidateDetail from './app/CandidateDetail'
 import Candidates from './app/Candidates'
 import Dashboard from './app/Dashboard'
+import Drives from './app/Drives'
+import { MyInterviews, Outbox, Requests } from './app/Inbox'
+import QuestionBank from './app/QuestionBank'
+import { AuditLog, Reports } from './app/Reports'
 import InterviewReport from './app/InterviewReport'
 import Interviews from './app/Interviews'
 import JobDetail from './app/JobDetail'
@@ -21,6 +25,8 @@ import { SessionProvider, useSession } from './lib/session'
 import { Invite, Login, Signup } from './site/Auth'
 import { CareersPage, PublicJobPage } from './site/Careers'
 import Landing from './site/Landing'
+import RoundPage from './portal/RoundPage'
+import { DecidePage, DrivePage, FeedbackPage, ResultsPage, StatusPage } from './portal/Pages'
 
 type Route = [string, (p: Record<string, string>) => ReactNode, string?]
 const APP: Route[] = [
@@ -35,6 +41,13 @@ const APP: Route[] = [
   ['/app/interviews', () => <Interviews />, 'AI interviews'],
   ['/app/interviews/new', () => <NewInterview />, 'New interview'],
   ['/app/interviews/:id', p => <InterviewReport key={p.id} id={p.id!} />, 'Interview report'],
+  ['/app/questions', () => <QuestionBank />, 'Question bank'],
+  ['/app/drives', () => <Drives />, 'Campus drives'],
+  ['/app/requests', () => <Requests />, 'Candidate requests'],
+  ['/app/outbox', () => <Outbox />, 'Outbox'],
+  ['/app/my-interviews', () => <MyInterviews />, 'My interviews'],
+  ['/app/reports', () => <Reports />, 'Reports'],
+  ['/app/audit', () => <AuditLog />, 'Audit log'],
   ['/app/team', () => <Team />, 'Team'],
   ['/app/settings', () => <Settings />, 'Settings'],
   ['/admin', () => <Admin />, 'Platform admin'],
@@ -81,6 +94,12 @@ function Routes() {
   if ((p = match('/invite/:token', path))) return <Invite token={p.token!} />
   if ((p = match('/careers/:slug', path))) return <CareersPage slug={p.slug!} />
   if ((p = match('/careers/:slug/jobs/:id', path))) return <PublicJobPage slug={p.slug!} id={p.id!} />
+  if ((p = match('/r/:token', path))) return <RoundPage token={p.token!} />
+  if ((p = match('/status/:token', path))) return <StatusPage token={p.token!} />
+  if ((p = match('/decide/:token', path))) return <DecidePage token={p.token!} />
+  if ((p = match('/feedback/:token', path))) return <FeedbackPage token={p.token!} />
+  if ((p = match('/drive/:code', path))) return <DrivePage code={p.code!} />
+  if ((p = match('/results/:code', path))) return <ResultsPage code={p.code!} />
   if (path === '/' || path === '') return <Landing />
   return <div className="min-h-screen"><NotFound /></div>
 }

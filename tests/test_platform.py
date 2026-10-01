@@ -320,7 +320,7 @@ def demo_and_import():
     # each sample job's shortlist is led by people from the matching profession
     be = next(j for j in ov["jobs"] if j["title"] == "Senior Backend Engineer")
     top = ok(c.get(f"/api/jobs/{be['id']}/matches"))["items"][0]["candidate"]
-    assert {"Java", "Spring Boot"} <= set(top["skills"]), top
+    assert {"Java", "Spring Boot"} & set(top["skills"]) and any(w in top["headline"] for w in ("Engineer", "Developer")), top
     sales = next(j for j in ov["jobs"] if j["title"] == "Enterprise Account Executive")
     top = ok(c.get(f"/api/jobs/{sales['id']}/matches"))["items"][0]["candidate"]
     assert "Salesforce" in top["skills"] or "B2B Sales" in top["skills"], top

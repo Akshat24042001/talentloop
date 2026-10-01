@@ -209,7 +209,7 @@ def section_view(s, rr: db.RoundResult, idx: int) -> dict:
     started = (d.get("section_started") or {}).get(str(idx))
     limit = sec["minutes"] * 60 * float(d.get("time_factor") or 1)
     return {"index": idx, "count": len(d["paper"]["sections"]), "section": sec["section"], "label": sec["label"], "items": items,
-            "ends_at": (started + limit) if started else None, "seconds": int(limit)}
+            "ends_at": (started + limit) if started else None, "seconds": int(limit), "server_now": time.time()}
 
 
 def save_answer(s, rr: db.RoundResult, idx: int, qid: str, shown: list | float | None) -> bool:

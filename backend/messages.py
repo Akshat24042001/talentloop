@@ -80,9 +80,10 @@ def _wa_text(body: str) -> str:
     return re.sub(r"\s+", " ", body).strip()[:900]
 
 
-def _send_email(m: db.Message) -> None:
+def _send_email(m: db.Message, sender_name: str = "") -> None:
     msg = EmailMessage()
-    msg["From"] = SMTP["FROM"]
+    name, addr = email.utils.parseaddr(SMTP["FROM"])
+    msg["From"] = email.utils.formataddr((sender_name or name, addr)) if addr else SMTP["FROM"]
     msg["To"] = m.to
     msg["Subject"] = m.subject
     msg["Date"] = email.utils.formatdate(localtime=True)
@@ -146,7 +147,9 @@ async def dispatch_once(limit: int = 50) -> int:
                 continue
             try:
                 if channel == "email":
-                    await asyncio.to_thread(_send_email, m)
+                    org = s.get(db.Org, m.org_id) if m.org_id else None
+                    sender = ((org.settings or {}).get("sender_name") or org.name) if org else ""
+                    await asyncio.to_thread(_send_email, m, sender)
                 else:
                     await _send_whatsapp(m)
                 m.status, m.sent_at, m.error = "sent", time.time(), ""

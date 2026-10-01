@@ -1,4 +1,4 @@
-import { Briefcase, Building2, ChevronsUpDown, LayoutDashboard, LogOut, Menu, Settings, Shield, Sparkles, UserRound, Users, Video, X } from 'lucide-react'
+import { CalendarClock, ChartColumn, GraduationCap, HandHelping, Inbox, Library, ScrollText, Briefcase, Building2, ChevronsUpDown, LayoutDashboard, LogOut, Menu, Settings, Shield, Sparkles, UserRound, Users, Video, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Badge, Logo, cn, toast } from '../components/ui'
 import { Avatar } from '../components/kit'
@@ -13,6 +13,15 @@ const NAV = [
   { href: '/app/candidates', label: 'Candidates', icon: Users },
   { href: '/app/matches', label: 'Match center', icon: Sparkles },
   { href: '/app/interviews', label: 'AI interviews', icon: Video },
+  { href: '/app/my-interviews', label: 'My interviews', icon: CalendarClock },
+]
+const NAV_HIRING = [
+  { href: '/app/requests', label: 'Requests', icon: HandHelping },
+  { href: '/app/questions', label: 'Question bank', icon: Library },
+  { href: '/app/drives', label: 'Campus drives', icon: GraduationCap },
+  { href: '/app/outbox', label: 'Outbox', icon: Inbox },
+  { href: '/app/reports', label: 'Reports', icon: ChartColumn },
+  { href: '/app/audit', label: 'Audit log', icon: ScrollText },
 ]
 const NAV2 = [
   { href: '/app/team', label: 'Team', icon: UserRound },
@@ -60,10 +69,14 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
   const h = useHealth()
   const problems = h ? healthProblems(h) : []
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-y-auto">
       <a href="/app" className="px-2" onClick={onNav}><Logo /></a>
       <div className="mt-5"><OrgSwitcher /></div>
       <nav className="mt-5 space-y-0.5">{NAV.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>
+      {me?.can.manage_jobs && <>
+        <div className="mx-3 mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Hiring</div>
+        <nav className="space-y-0.5">{NAV_HIRING.filter(n => n.href !== '/app/audit' || me.can.manage_team).map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>
+      </>}
       <div className="mx-3 my-4 h-px bg-slate-100 dark:bg-ink-800" />
       <nav className="space-y-0.5">
         {NAV2.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}

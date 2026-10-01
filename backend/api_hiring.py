@@ -329,8 +329,8 @@ def remove_collaborator(job_id: str, cid: str, req: Request):
         return job_detail(s, ctx, job)
 
 
-def activity_rows(s, q, limit=50) -> list[dict]:
-    rows = q.order_by(db.Activity.at.desc()).limit(limit).all()
+def activity_rows(s, q, limit=50, offset=0) -> list[dict]:
+    rows = q.order_by(db.Activity.at.desc()).offset(offset).limit(limit).all()
     users = {u.id: u for u in s.query(db.User).filter(db.User.id.in_({r.user_id for r in rows if r.user_id} or {""}))}
     jobs = {j.id: j for j in s.query(db.Job).filter(db.Job.id.in_({r.job_id for r in rows if r.job_id} or {""}))}
     return [{"id": r.id, "action": r.action, "detail": r.detail, "at": r.at, "job_id": r.job_id, "job": jobs[r.job_id].title if r.job_id in jobs else None,

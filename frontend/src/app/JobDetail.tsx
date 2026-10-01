@@ -1,12 +1,15 @@
-import { Copy, Download, ExternalLink, FileText, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, Users, Video, X } from 'lucide-react'
+import { Copy, Download, ExternalLink, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, Users, Video, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Modal, Select, Textarea, Tip, copyText, toast } from '../components/ui'
-import { Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, ScoreBar, ScoreRing, Tabs, useApi, Ago } from '../components/kit'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Select, Tip, copyText, toast } from '../components/ui'
+import { Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, ScoreRing, Tabs, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
-import { ago, when } from '../lib/format'
+import { when } from '../lib/format'
 import { navigate, useLocation } from '../lib/router'
 import { useMe } from '../lib/session'
 import { ACTION_LABEL, JOB_STATUS, STAGE_TONE, actor } from './labels'
+import Board from './flow/Board'
+import FlowBuilder from './flow/FlowBuilder'
+import { JobDrives } from './Drives'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 
 interface Job {
@@ -17,9 +20,8 @@ interface Job {
 interface JD { title: string; company: string; facts: string[]; sections: { title: string; body?: string; items?: string[] }[]; contact?: string }
 export interface Cand { id: string; ref: string; name: string; email: string; phone?: string; location?: string; headline?: string; years?: number | null; skills: string[]; source: string; has_resume: boolean; notice_days?: number | null; current_company?: string }
 interface MatchRow { rank: number; score: number; breakdown: Breakdown; knocked_out: boolean; ai_score?: number | null; ai_report?: AIReport | null; candidate: Cand; application?: { id: string; stage: string; stage_label: string } | null }
-interface AppRow { id: string; stage: string; stage_label: string; created_at: number; rating?: number | null; notes?: string; knockout_failed?: string[]; answers?: Record<string, any>; cover_letter?: string; interview_id?: string; interview_ref?: string; source?: string; candidate: Cand; match?: { score: number; rank: number; ai_score?: number; verdict?: string } | null }
 
-type Tab = 'overview' | 'pipeline' | 'matches' | 'team' | 'activity'
+type Tab = 'overview' | 'pipeline' | 'flow' | 'drives' | 'matches' | 'team' | 'activity'
 
 export default function JobDetail({ id }: { id: string }) {
   const { query } = useLocation()
@@ -52,11 +54,13 @@ export default function JobDetail({ id }: { id: string }) {
         </div>
       )}
       <Tabs className="mb-5" value={tab} onChange={switchTab} tabs={[
-        { id: 'matches', label: 'Best matches' }, { id: 'pipeline', label: 'Applicants', count: job.applications },
-        { id: 'overview', label: 'Job description' }, { id: 'team', label: 'Team access', count: job.collaborators.length }, { id: 'activity', label: 'Activity' }]} />
+        { id: 'matches', label: 'Best matches' }, { id: 'pipeline', label: 'Applicants', count: job.applications }, { id: 'flow', label: 'Hiring flow' },
+        { id: 'overview', label: 'Job description' }, { id: 'drives', label: 'Campus drives' }, { id: 'team', label: 'Team access', count: job.collaborators.length }, { id: 'activity', label: 'Activity' }]} />
       {tab === 'overview' && <Overview job={job} />}
       {tab === 'matches' && <Matches job={job} canManage={job.permission === 'manage'} />}
-      {tab === 'pipeline' && <Pipeline job={job} />}
+      {tab === 'pipeline' && <Board jobId={job.id} />}
+      {tab === 'flow' && <FlowBuilder jobId={job.id} canEdit={job.permission !== 'view'} />}
+      {tab === 'drives' && <JobDrives jobId={job.id} canManage={job.permission === 'manage'} />}
       {tab === 'team' && <TeamAccess job={job} reload={reload} canManage={job.permission === 'manage' && me.can.manage_jobs} />}
       {tab === 'activity' && <Activity id={id} />}
     </>
@@ -174,80 +178,6 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
         </div>
       )}
     </Card>
-  )
-}
-
-function Pipeline({ job }: { job: Job }) {
-  const { data, error, reload } = useApi<{ stages: { id: string; label: string }[]; items: AppRow[] }>(`/api/jobs/${job.id}/applications`)
-  const [stage, setStage] = useState('')
-  const [sel, setSel] = useState<AppRow | null>(null)
-  if (error) return <ErrorBox error={error} retry={reload} />
-  if (!data) return <Loading />
-  const counts = Object.fromEntries(data.stages.map(s => [s.id, data.items.filter(a => a.stage === s.id).length]))
-  const rows = data.items.filter(a => !stage || a.stage === stage).sort((a, b) => (b.match?.score ?? -1) - (a.match?.score ?? -1))
-  async function move(a: AppRow, s: string) {
-    try { await api(`/api/applications/${a.id}`, { method: 'PATCH', json: { stage: s } }); toast(`${a.candidate.name} → ${data!.stages.find(x => x.id === s)?.label}`); reload() } catch (e: any) { toast(e.message) }
-  }
-  return (
-    <>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button onClick={() => setStage('')} className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-inset ${!stage ? 'bg-slate-900 text-white ring-slate-900 dark:bg-white dark:text-ink-900' : 'bg-white ring-slate-200 dark:bg-ink-900 dark:ring-ink-700'}`}>All <span className="tabular opacity-70">{data.items.length}</span></button>
-        {data.stages.map(s => <button key={s.id} onClick={() => setStage(s.id)} className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-inset ${stage === s.id ? 'bg-slate-900 text-white ring-slate-900 dark:bg-white dark:text-ink-900' : 'bg-white ring-slate-200 dark:bg-ink-900 dark:ring-ink-700'}`}>{s.label} <span className="tabular opacity-70">{counts[s.id]}</span></button>)}
-      </div>
-      <Card className="overflow-hidden">
-        {!rows.length ? <Empty icon={<Users />} title={data.items.length ? 'Nobody in this stage' : 'No applicants yet'}>{data.items.length ? '' : 'Share the public job link, or shortlist people from Best matches.'}</Empty> : (
-          <ul className="divide-y divide-slate-100 dark:divide-ink-800">
-            {rows.map(a => (
-              <li key={a.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
-                <Avatar name={a.candidate.name} />
-                <button className="min-w-0 flex-1 text-left" onClick={() => setSel(a)}>
-                  <div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-900 dark:text-white">{a.candidate.name}</span>
-                    {a.knockout_failed?.length ? <Badge tone="danger">Screened out</Badge> : null}{a.rating ? <span className="text-xs text-amber-500">{'★'.repeat(a.rating)}</span> : null}{a.interview_id && <Badge tone="violet" icon={<Video />}>Interview</Badge>}</div>
-                  <div className="truncate text-xs text-slate-500 dark:text-slate-400">{[a.candidate.headline, a.candidate.years != null ? `${a.candidate.years} yrs` : '', a.candidate.location, `applied ${ago(a.created_at)}`].filter(Boolean).join(' · ')}</div>
-                </button>
-                <ScoreBar value={a.match?.score} />
-                {job.permission !== 'view' ? (
-                  <Select aria-label="Stage" className="w-36 py-1.5 text-[13px]" value={a.stage} onChange={e => move(a, e.target.value)}>{data.stages.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
-                ) : <Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-      {sel && <ApplicationDrawer a={sel} job={job} onClose={() => setSel(null)} onSaved={reload} />}
-    </>
-  )
-}
-
-function ApplicationDrawer({ a, job, onClose, onSaved }: { a: AppRow; job: Job; onClose: () => void; onSaved: () => void }) {
-  const [rating, setRating] = useState(a.rating || 0), [notes, setNotes] = useState(a.notes || ''), [busy, setBusy] = useState(false)
-  const qs: { id: string; question: string }[] = job.fields.screening_questions || []
-  async function save() {
-    setBusy(true)
-    try { await api(`/api/applications/${a.id}`, { method: 'PATCH', json: { rating: rating || null, notes } }); toast('Saved'); onSaved(); onClose() } catch (e: any) { toast(e.message) }
-    setBusy(false)
-  }
-  async function removeFromJob() {
-    if (!confirm(`Remove ${a.candidate.name} from ${job.title}? They stay in your talent pool.`)) return
-    try { await api(`/api/applications/${a.id}`, { method: 'DELETE' }); toast('Removed from the job'); onSaved(); onClose() } catch (e: any) { toast(e.message) }
-  }
-  return (
-    <Modal open onOpenChange={o => !o && onClose()} title={a.candidate.name} description={[a.candidate.email, a.candidate.phone].filter(Boolean).join(' · ')}>
-      <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto pr-1 text-sm">
-        {a.knockout_failed?.length ? <Alert tone="danger" title="Screened out by">{a.knockout_failed.join('; ')}</Alert> : null}
-        {qs.length > 0 && <div><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Screening answers</div>
-          <dl className="space-y-1.5">{qs.map(q => <div key={q.id}><dt className="text-slate-500">{q.question}</dt><dd className="font-medium">{String(a.answers?.[q.id] ?? '-')}</dd></div>)}</dl></div>}
-        {a.cover_letter && <div><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Cover letter</div><p className="whitespace-pre-line">{a.cover_letter}</p></div>}
-        <Field label="Your rating"><div className="flex gap-1">{[1, 2, 3, 4, 5].map(n => <button key={n} aria-label={`${n} stars`} onClick={() => setRating(n === rating ? 0 : n)} className={`text-2xl ${n <= rating ? 'text-amber-400' : 'text-slate-300 dark:text-ink-600'}`}>★</button>)}</div></Field>
-        <Field label="Notes" htmlFor="notes"><Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Visible to your team" /></Field>
-      </div>
-      <div className="mt-5 flex flex-wrap justify-between gap-2">
-        <div className="flex gap-2"><Button size="sm" href={`/app/candidates/${a.candidate.ref}`} icon={<FileText />}>Full profile</Button>
-          {a.interview_ref && <Button size="sm" href={`/app/interviews/${a.interview_ref}`} icon={<Video />}>Interview report</Button>}</div>
-        <span className="flex gap-2">{job.permission === 'manage' && <Button size="sm" variant="ghost" className="text-red-600" onClick={removeFromJob}>Remove from job</Button>}
-          <Button variant="primary" size="sm" loading={busy} onClick={save}>Save</Button></span>
-      </div>
-    </Modal>
   )
 }
 

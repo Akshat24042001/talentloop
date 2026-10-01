@@ -6,8 +6,9 @@ import { api } from '../lib/api'
 import { healthProblems, useHealth } from '../lib/health'
 import { navigate, useLocation } from '../lib/router'
 import { useMe, useSession } from '../lib/session'
+import HiringSettings from './HiringSettings'
 
-type Tab = 'company' | 'careers' | 'matching' | 'account' | 'system' | 'data'
+type Tab = 'company' | 'careers' | 'hiring' | 'matching' | 'account' | 'system' | 'data'
 const W_LABEL: Record<string, string> = { skills: 'Skills', experience: 'Experience', relevance: 'Keyword relevance', location: 'Location', logistics: 'Notice & salary' }
 
 export default function Settings() {
@@ -15,13 +16,14 @@ export default function Settings() {
   const { query } = useLocation()
   const tab = (query.get('tab') as Tab) || (me.can.manage_team ? 'company' : 'account')
   const setTab = (t: Tab) => navigate(`/app/settings?tab=${t}`, { replace: true, keepScroll: true })
-  const tabs = [...(me.can.manage_team ? [{ id: 'company' as Tab, label: 'Company' }, { id: 'careers' as Tab, label: 'Careers page' }, { id: 'matching' as Tab, label: 'Matching & AI' }, { id: 'data' as Tab, label: 'Data' }] : []),
+  const tabs = [...(me.can.manage_team ? [{ id: 'company' as Tab, label: 'Company' }, { id: 'careers' as Tab, label: 'Careers page' }, { id: 'hiring' as Tab, label: 'Hiring' }, { id: 'matching' as Tab, label: 'Matching & AI' }, { id: 'data' as Tab, label: 'Data' }] : []),
     { id: 'account' as Tab, label: 'Your account' }, { id: 'system' as Tab, label: 'System status' }]
   return (
     <>
       <PageHeader title="Settings" description={me.org?.name} />
       <Tabs className="mb-5" tabs={tabs} value={tab} onChange={setTab} />
       {['company', 'careers', 'matching'].includes(tab) && me.can.manage_team && <OrgSettings tab={tab} />}
+      {tab === 'hiring' && me.can.manage_team && <HiringSettings />}
       {tab === 'data' && me.can.manage_team && <DataTab />}
       {tab === 'account' && <Account />}
       {tab === 'system' && <System />}

@@ -233,7 +233,8 @@ async def bulk(req: Request):
                     text = str(body.get("text") or "").strip()
                     if not text:
                         raise HTTPException(400, "Write a message")
-                    flows.notify_candidate(s, a, str(body.get("subject") or "An update on your application")[:120], text, "custom")
+                    flows.notify_candidate(s, a, str(body.get("subject") or "An update on your application")[:120], text, "custom",
+                                          flows.status_link(a), "Your application")
                     log_activity(s, ctx, "message_sent", text[:120], job_id=job.id, candidate_id=a.candidate_id)
                 else:
                     _do(s, ctx, a, job, action, str(body.get("round_id") or ""), str(body.get("reason") or "")[:1000],
@@ -415,6 +416,34 @@ async def round_file(rrid: str, req: Request, which: str = "file"):
     return FileResponse(p, filename=name, content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
 
 
+@router.get("/api/round-results/{rrid}/snapshot/{which}")
+async def round_snapshot_file(rrid: str, which: str, req: Request):
+    """Integrity images for HR: a camera snapshot by number, the photo taken at the start, or the registration photo."""
+    from fastapi.responses import FileResponse
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        rr, a, job = _rr(s, ctx, rrid, "view")
+        integ = rr.integrity or {}
+        if which == "start":
+            key = integ.get("start_photo")
+        elif which == "registration":
+            c = s.get(db.Candidate, a.candidate_id)
+            key = c.photo_file if c else None
+        else:
+            snaps = integ.get("snapshots") or []
+            try:
+                key = snaps[int(which)]["file"]
+            except (ValueError, IndexError, KeyError, TypeError):
+                key = None
+    if not key:
+        raise HTTPException(404, "No image")
+    import asyncio as _a
+    p = await _a.to_thread(store.get_file, key)
+    if not p:
+        raise HTTPException(404, "Image not found in storage")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
 # ---------------------------------------------------------------------------
 # messages
 # ---------------------------------------------------------------------------
@@ -449,6 +478,79 @@ def outbox(req: Request, status: str = "", page: int = 1):
         total = q.count()
         rows = q.order_by(db.Message.created_at.desc()).offset((max(1, page) - 1) * 50).limit(50).all()
         return {"total": total, "items": [_msg_json(m) for m in rows], "channels": messages.status()}
+
+
+# ---------------------------------------------------------------------------
+# reports and the audit log
+# ---------------------------------------------------------------------------
+@router.get("/api/reports")
+def hiring_reports(req: Request, job: str = "", days: int = 0):
+    from . import reports
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "see reports")
+        j = get_job(s, ctx, job)[0] if job else None
+        return {**reports.build(s, ctx.org_id, auth.visible_job_ids(s, ctx), j, max(0, min(3650, days))),
+                "job": {"id": j.id, "title": j.title} if j else None}
+
+
+@router.get("/api/audit")
+def audit_log(req: Request, page: int = 1, action: str = "", user: str = "", q: str = ""):
+    """Everything people (and the system) did in this company, newest first. Owners and admins only."""
+    from .api_hiring import activity_rows
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_TEAM, "see the audit log")
+        qry = s.query(db.Activity).filter(db.Activity.org_id == ctx.org_id)
+        if action:
+            qry = qry.filter(db.Activity.action == action)
+        if user:
+            qry = qry.filter(db.Activity.user_id.is_(None) if user == "system" else db.Activity.user_id == user)
+        if q.strip():
+            qry = qry.filter(db.Activity.detail.ilike(f"%{q.strip()}%"))
+        total = qry.count()
+        page = max(1, page)
+        rows = activity_rows(s, qry, 100, (page - 1) * 100)
+        actions = [a for (a,) in s.query(db.Activity.action).filter(db.Activity.org_id == ctx.org_id).distinct().order_by(db.Activity.action)]
+        return {"total": total, "items": rows, "actions": actions, "users": _team(s, ctx)}
+
+
+# ---------------------------------------------------------------------------
+# HROne export
+# ---------------------------------------------------------------------------
+@router.get("/api/hrone/fields")
+def hrone_fields(req: Request):
+    from . import hrone
+    with db.session() as s:
+        ctx_of(req, s)
+    return {"fields": [{"id": k, "label": v} for k, v in hrone.FIELDS.items()], "default_columns": hrone.DEFAULT_COLUMNS}
+
+
+@router.get("/api/exports/hrone.xlsx")
+def hrone_export(req: Request, job: str = "", ids: str = ""):
+    """Selected (offer or hired) candidates as an .xlsx with the company's HROne columns. ids= limits it to some applications."""
+    from . import hrone
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "export to HROne")
+        q = s.query(db.Application, db.Candidate, db.Job).join(db.Candidate, db.Candidate.id == db.Application.candidate_id) \
+            .join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.org_id == ctx.org_id)
+        j = None
+        if job:
+            j, _ = get_job(s, ctx, job)
+            q = q.filter(db.Application.job_id == j.id)
+        if ids:
+            q = q.filter(db.Application.id.in_([x for x in ids.split(",") if x][:1000]))
+        else:
+            q = q.filter(db.Application.stage.in_(("offer", "hired")))
+        rows = q.order_by(db.Application.decided_at.desc().nullslast()).limit(5000).all()
+        if not rows:
+            raise HTTPException(404, "No selected candidates to export yet.")
+        data = hrone.workbook(org_settings(ctx.org).get("hrone_columns") or [], rows)
+        log_activity(s, ctx, "hrone_export", f"{len(rows)} candidate(s)", job_id=j.id if j else None)
+        name = hrone.filename(j)
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +707,19 @@ def drive_json(d: db.Drive, s=None) -> dict:
     if s is not None:
         out["registered"] = s.query(func.count(db.Application.id)).filter(db.Application.drive_id == d.id).scalar()
     return out
+
+
+@router.get("/api/drives")
+def all_drives(req: Request):
+    """Every campus drive in the company (or in the jobs this person can see), newest first."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        q = s.query(db.Drive, db.Job).join(db.Job, db.Job.id == db.Drive.job_id).filter(db.Drive.org_id == ctx.org_id)
+        vis = auth.visible_job_ids(s, ctx)
+        if vis is not None:
+            q = q.filter(db.Drive.job_id.in_(vis or [""]))
+        return [{**drive_json(d, s), "job": {"id": j.id, "ref": refs.job_ref(j), "title": j.title}}
+                for d, j in q.order_by(db.Drive.created_at.desc()).limit(300)]
 
 
 @router.get("/api/jobs/{job_id}/drives")

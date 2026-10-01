@@ -307,8 +307,9 @@ def invite_link(s, rr: db.RoundResult, renew: bool = False) -> str:
 
 
 def manager_link(rr: db.RoundResult) -> str:
+    """The no-login link for the people deciding: a manager's decision page, or an interviewer's feedback page."""
     tok = (rr.data or {}).get("mt")
-    return f"{base_url()}/decide/{tok}" if tok else ""
+    return f"{base_url()}/{'feedback' if rr.round_type == 'human_interview' else 'decide'}/{tok}" if tok else ""
 
 
 def status_link(app: db.Application) -> str:
@@ -468,8 +469,13 @@ def _log(s, app, job, actor, action, detail):
 def apply_flow_change(s, job: db.Job, new_rounds: list[dict]) -> dict:
     """Save an edited flow. Returns what happened to candidates in removed rounds (they continue from the same
     position on their next decision; open invitations stay valid)."""
-    old_ids = {r["id"] for r in flow_of(job)}
-    job.flow = normalize_flow(new_rounds)
+    old = {r["id"]: r for r in flow_of(job)}
+    old_ids = set(old)
+    flow = normalize_flow(new_rounds)
+    for r in flow:                     # task files are uploaded through their own endpoint; never taken from the client
+        if r["type"] == "practical_task":
+            r["config"]["attachment"] = ((old.get(r["id"]) or {}).get("config") or {}).get("attachment")
+    job.flow = flow
     new_ids = {r["id"] for r in job.flow}
     removed = old_ids - new_ids
     affected = s.query(db.Application).filter(db.Application.job_id == job.id, db.Application.round_id.in_(removed or {""}),
