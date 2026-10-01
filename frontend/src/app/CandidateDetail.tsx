@@ -1,9 +1,9 @@
-import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Phone, Trash2, UserPlus, Video } from 'lucide-react'
+import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Pencil, Phone, Trash2, UserPlus, Video } from 'lucide-react'
 import { useState } from 'react'
-import { Badge, Button, Card, CardBody, CardHeader, Select, toast } from '../components/ui'
-import { Avatar, BackLink, ErrorBox, KV, Loading, PageHeader, ScoreRing, Tabs, TagInput, useApi } from '../components/kit'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Textarea, toast } from '../components/ui'
+import { Avatar, BackLink, ErrorBox, KV, Loading, PageHeader, ScoreRing, Tabs, TagInput, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
-import { ago, when } from '../lib/format'
+import { when } from '../lib/format'
 import { navigate } from '../lib/router'
 import { useMe } from '../lib/session'
 import type { Cand } from './JobDetail'
@@ -11,16 +11,17 @@ import { ACTION_LABEL, SOURCE_LABEL, STAGE_TONE, actor } from './labels'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 
 interface Detail extends Cand {
-  tags: string[]; resume_name?: string; created_at: number; profile: Record<string, any>; parsed: Record<string, any>; resume_text: string
-  applications: { id: string; job_id: string; job: string; stage: string; stage_label: string; created_at: number; rating?: number; knockout_failed?: string[]; interview_id?: string }[]
-  best_jobs: { job_id: string; title: string; department: string; status: string; score: number; breakdown: Breakdown; knocked_out: string[]; ai_report?: AIReport | null }[]
+  tags: string[]; resume_name?: string; resume_type?: string; resume_v?: string; college?: string; created_at: number; profile: Record<string, any>; parsed: Record<string, any>; resume_text: string
+  applications: { id: string; job_id: string; job_ref: string; interview_ref?: string; job: string; stage: string; stage_label: string; created_at: number; rating?: number; knockout_failed?: string[]; interview_id?: string }[]
+  best_jobs: { job_id: string; job_ref: string; title: string; department: string; status: string; score: number; breakdown: Breakdown; knocked_out: string[]; ai_report?: AIReport | null }[]
   activity: { id: string; action: string; detail: string; at: number; user?: string; job?: string }[]
 }
 
 export default function CandidateDetail({ id }: { id: string }) {
   const me = useMe()
   const { data: c, error, reload } = useApi<Detail>(`/api/candidates/${id}`)
-  const [tab, setTab] = useState<'fit' | 'resume' | 'profile' | 'activity'>('fit')
+  const [tab, setTab] = useState<'fit' | 'resume' | 'text' | 'profile' | 'activity'>(c0Tab())
+  const [editing, setEditing] = useState(false)
   const [addTo, setAddTo] = useState('')
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!c) return <Loading />
@@ -36,11 +37,13 @@ export default function CandidateDetail({ id }: { id: string }) {
       <PageHeader back={<BackLink href="/app/candidates">All candidates</BackLink>}
         title={<span className="flex items-center gap-3"><Avatar name={c.name} size="lg" />{c.name}</span>}
         description={[c.headline, c.current_company, c.years != null ? `${c.years} years` : ''].filter(Boolean).join(' · ')}
-        actions={<>{c.has_resume && <Button href={`/api/candidates/${id}/resume`} target="_blank" icon={<FileText />}>View resume</Button>}
-          {c.has_resume && <Button href={`/api/candidates/${id}/resume?download=1`} icon={<Download />}>Download</Button>}</>} />
+        actions={<>{c.has_resume && <Button onClick={() => setTab('resume')} icon={<FileText />}>View resume</Button>}
+          {c.has_resume && <Button href={`/api/candidates/${c.id}/resume?download=1&v=${c.resume_v}`} icon={<Download />}>Download</Button>}
+          {me.can.manage_jobs && <Button variant="primary" onClick={() => setEditing(true)} icon={<Pencil />}>Edit</Button>}</>} />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
-          <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ id: 'fit', label: 'Best-fit jobs', count: c.best_jobs.length }, { id: 'resume', label: 'Resume text' }, { id: 'profile', label: 'Profile' }, { id: 'activity', label: 'Activity' }]} />
+          <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ id: 'fit', label: 'Best-fit jobs', count: c.best_jobs.length }, ...(c.has_resume ? [{ id: 'resume' as const, label: 'Resume' }] : []),
+            { id: 'text', label: 'Resume text' }, { id: 'profile', label: 'Profile' }, { id: 'activity', label: 'Activity' }]} />
           {tab === 'fit' && (
             <div className="space-y-3">
               {!c.best_jobs.length && <Card><CardBody><p className="text-sm text-slate-500">No open jobs to compare against yet.</p></CardBody></Card>}
@@ -49,18 +52,19 @@ export default function CandidateDetail({ id }: { id: string }) {
                   <div className="flex flex-wrap items-start gap-4">
                     <ScoreRing value={b.score} label="Match score" />
                     <div className="min-w-0 flex-1">
-                      <a href={`/app/jobs/${b.job_id}`} className="font-semibold hover:underline">{b.title}</a>
+                      <a href={`/app/jobs/${b.job_ref}`} className="font-semibold hover:underline">{b.title}</a>
                       <div className="text-xs text-slate-500">{b.department}{b.knocked_out.length ? ` · screened out: ${b.knocked_out.join(', ')}` : ''}</div>
                       <div className="mt-2"><SkillChips b={b.breakdown} /></div>
                     </div>
-                    {me.can.manage_jobs && <Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${b.job_id}&candidate=${c.id}`}>Interview</Button>}
+                    {me.can.manage_jobs && <Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${b.job_ref}&candidate=${c.ref}`}>Interview</Button>}
                   </div>
                   <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,300px)_1fr]"><BreakdownBars b={b.breakdown} />{b.ai_report ? <ReportView r={b.ai_report} compact /> : <p className="self-center text-xs text-slate-500">AI reports are written for each job's shortlist only.</p>}</div>
                 </Card>
               ))}
             </div>
           )}
-          {tab === 'resume' && <Card><CardBody><pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700 dark:text-slate-200">{c.resume_text || 'No resume text.'}</pre></CardBody></Card>}
+          {tab === 'resume' && c.has_resume && <ResumeViewer c={c} />}
+          {tab === 'text' && <Card><CardBody><pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700 dark:text-slate-200">{c.resume_text || 'No resume text.'}</pre></CardBody></Card>}
           {tab === 'profile' && <Card><CardBody>
             {p.summary && <p className="mb-4 text-sm leading-relaxed">{p.summary}</p>}
             {(p.experience || []).map((e: any, i: number) => <div key={i} className="mb-3"><div className="font-semibold">{e.title} · {e.company}</div><div className="text-xs text-slate-500">{e.start} – {e.end || 'Present'}</div><p className="mt-1 whitespace-pre-line text-sm">{e.description}</p></div>)}
@@ -79,11 +83,11 @@ export default function CandidateDetail({ id }: { id: string }) {
             {c.phone && <a href={`tel:${c.phone}`} className="flex items-center gap-2"><Phone className="size-4 text-slate-400" />{c.phone}</a>}
             {c.location && <div className="flex items-center gap-2"><MapPin className="size-4 text-slate-400" />{c.location}</div>}
             {p.linkedin && <a href={p.linkedin.startsWith('http') ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener" className="flex items-center gap-2 text-brand-600 hover:underline"><ExternalLink className="size-4" />LinkedIn</a>}
-            <div className="pt-2 text-xs text-slate-500">{SOURCE_LABEL[c.source] || c.source} · added {ago(c.created_at)}{c.notice_days != null ? ` · ${c.notice_days} days notice` : ''}</div>
+            <div className="pt-2 text-xs text-slate-500">{SOURCE_LABEL[c.source] || c.source} · added <Ago ts={c.created_at} />{c.notice_days != null ? ` · ${c.notice_days} days notice` : ''}</div>
           </CardBody></Card>
           <Card><CardHeader title="Applications" /><CardBody className="space-y-2 pt-3">
             {!c.applications.length && <p className="text-sm text-slate-500">Not in any job pipeline yet.</p>}
-            {c.applications.map(a => <a key={a.id} href={`/app/jobs/${a.job_id}?tab=pipeline`} className="flex items-center justify-between gap-2 rounded-lg p-2 text-sm hover:bg-slate-50 dark:hover:bg-ink-850"><span className="flex items-center gap-2"><Briefcase className="size-4 text-slate-400" />{a.job}</span><Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge></a>)}
+            {c.applications.map(a => <a key={a.id} href={`/app/jobs/${a.job_ref}?tab=pipeline`} className="flex items-center justify-between gap-2 rounded-lg p-2 text-sm hover:bg-slate-50 dark:hover:bg-ink-850"><span className="flex items-center gap-2"><Briefcase className="size-4 text-slate-400" />{a.job}</span><Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge></a>)}
             {me.can.manage_jobs && notApplied.length > 0 && <div className="flex gap-2 pt-2">
               <Select aria-label="Job" className="py-1.5 text-[13px]" value={addTo} onChange={e => setAddTo(e.target.value)}><option value="">Add to a job…</option>{notApplied.map(b => <option key={b.job_id} value={b.job_id}>{b.title}</option>)}</Select>
               <Button size="sm" disabled={!addTo} onClick={add} icon={<UserPlus />}>Add</Button></div>}
@@ -93,6 +97,70 @@ export default function CandidateDetail({ id }: { id: string }) {
           {me.can.manage_jobs && <Button variant="ghost" className="w-full text-red-600 dark:text-red-400" icon={<Trash2 />} onClick={del}>Delete candidate</Button>}
         </div>
       </div>
+      {editing && <EditCandidate c={c} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload() }} />}
     </>
+  )
+}
+
+function c0Tab(): 'fit' | 'resume' {
+  return new URLSearchParams(location.search).get('tab') === 'resume' ? 'resume' : 'fit'
+}
+
+function ResumeViewer({ c }: { c: Detail }) {
+  const src = `/api/candidates/${c.id}/resume?v=${c.resume_v}`
+  const [loaded, setLoaded] = useState(false)
+  if (c.resume_type !== 'pdf') return (
+    <Card><CardBody>
+      <Alert tone="info" title={`${(c.resume_type || 'This').toUpperCase()} files can't be shown in the browser`}>Here is the text read from it. <a className="font-semibold underline" href={`${src}&download=1`}>Download the original</a>.</Alert>
+      <pre className="mt-4 whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700 dark:text-slate-200">{c.resume_text || 'No text could be read from this file.'}</pre>
+    </CardBody></Card>)
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5 text-sm dark:border-ink-800">
+        <span className="truncate font-medium">{c.resume_name || 'Resume'}</span>
+        <span className="flex gap-2"><Button size="sm" variant="ghost" href={src} target="_blank" icon={<ExternalLink />}>Open in new tab</Button>
+          <Button size="sm" variant="ghost" href={`${src}&download=1`} icon={<Download />}>Download</Button></span>
+      </div>
+      <div className="relative h-[78vh] bg-slate-100 dark:bg-ink-850">
+        {!loaded && <div className="absolute inset-0 grid place-items-center text-sm text-slate-500">Loading resume…</div>}
+        <iframe title={`Resume of ${c.name}`} src={`${src}#view=FitH`} onLoad={() => setLoaded(true)} className="relative size-full" />
+      </div>
+    </Card>
+  )
+}
+
+function EditCandidate({ c, onClose, onSaved }: { c: Detail; onClose: () => void; onSaved: () => void }) {
+  const p = c.profile || {}
+  const [f, setF] = useState<Record<string, string>>({
+    name: c.name || '', email: c.email || '', phone: c.phone || '', location: c.location || '', headline: c.headline || '',
+    current_company: c.current_company || '', total_experience_years: c.years != null ? String(c.years) : '', notice_days: c.notice_days != null ? String(c.notice_days) : '',
+    expected_salary: p.expected_salary != null ? String(p.expected_salary) : '', current_salary: p.current_salary != null ? String(p.current_salary) : '',
+    college: c.college || p.college || '', linkedin: p.linkedin || '', portfolio: p.portfolio || '', summary: p.summary || '', work_authorization: p.work_authorization || '',
+  })
+  const [sk, setSk] = useState<string[]>(c.skills)
+  const [busy, setBusy] = useState(false), [err, setErr] = useState('')
+  const set = (k: string) => (e: { target: { value: string } }) => setF(v => ({ ...v, [k]: e.target.value }))
+  async function save() {
+    if (!f.name.trim()) { setErr('Name is required.'); return }
+    setBusy(true); setErr('')
+    try { await api(`/api/candidates/${c.id}`, { method: 'PATCH', json: { profile: { ...f, skills: sk } } }); toast('Candidate updated'); onSaved() }
+    catch (e: any) { setErr(e.message) }
+    setBusy(false)
+  }
+  const F = (k: string, label: string, type = 'text', wide = false) => (
+    <Field className={wide ? 'sm:col-span-2' : ''} label={label} htmlFor={`e-${k}`}><Input id={`e-${k}`} type={type} value={f[k]} onChange={set(k)} /></Field>)
+  return (
+    <Modal open onOpenChange={o => !o && onClose()} title={`Edit ${c.name}`}>
+      <div className="mt-4 grid max-h-[65vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+        {err && <Alert className="sm:col-span-2" tone="danger">{err}</Alert>}
+        {F('name', 'Name *')}{F('email', 'Email', 'email')}{F('phone', 'Phone', 'tel')}{F('location', 'Current city')}
+        {F('headline', 'Current title')}{F('current_company', 'Current company')}{F('total_experience_years', 'Experience (years)', 'number')}{F('notice_days', 'Notice period (days)', 'number')}
+        {F('expected_salary', 'Expected salary (per year)', 'number')}{F('current_salary', 'Current salary (per year)', 'number')}{F('college', 'College')}{F('work_authorization', 'Work authorisation')}
+        {F('linkedin', 'LinkedIn', 'text', true)}{F('portfolio', 'Portfolio / GitHub', 'text', true)}
+        <Field className="sm:col-span-2" label="Skills"><TagInput value={sk} onChange={setSk} placeholder="Type a skill and press Enter" /></Field>
+        <Field className="sm:col-span-2" label="Summary" htmlFor="e-summary"><Textarea id="e-summary" className="min-h-0" rows={3} value={f.summary} onChange={set('summary')} /></Field>
+      </div>
+      <div className="mt-5 flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>Save changes</Button></div>
+    </Modal>
   )
 }

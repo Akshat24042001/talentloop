@@ -1,14 +1,13 @@
-import { Copy, Mail, Trash2, UserPlus } from 'lucide-react'
+import { Check, Copy, Mail, Pencil, RefreshCw, Trash2, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, copyText, toast } from '../components/ui'
-import { Avatar, ErrorBox, Loading, PageHeader, useApi } from '../components/kit'
+import { Avatar, ErrorBox, Loading, PageHeader, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
-import { ago } from '../lib/format'
 import { useMe } from '../lib/session'
 
 interface TeamData {
-  members: { id: string; user_id: string; name: string; email: string; role: string; role_label: string; title: string; last_login_at?: number; you: boolean }[]
-  invites: { id: string; email: string; role_label: string; title: string; expires_at: number }[]
+  members: { id: string; user_id: string; name: string; email: string; role: string; role_label: string; title: string; last_login_at?: number; you: boolean; active: boolean }[]
+  invites: { id: string; email: string; role_label: string; title: string; expires_at: number; expired: boolean }[]
   roles: { id: string; label: string }[]
 }
 const ROLE_HELP: Record<string, string> = {
@@ -32,7 +31,13 @@ export default function Team() {
   }
   async function changeRole(mid: string, r: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { role: r } }); toast('Role updated'); reload() } catch (e: any) { toast(e.message) } }
   async function remove(mid: string, name: string) { if (!confirm(`Remove ${name} from ${me.org?.name}?`)) return; try { await api(`/api/team/members/${mid}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
-  async function revoke(id: string) { await api(`/api/team/invites/${id}`, { method: 'DELETE' }); reload() }
+  async function revoke(id: string) { if (!confirm('Revoke this invite? The link stops working.')) return; await api(`/api/team/invites/${id}`, { method: 'DELETE' }); toast('Invite revoked'); reload() }
+  async function renew(id: string) { try { const r = await api(`/api/team/invites/${id}/renew`, { method: 'POST' }); const url = location.origin + r.path; setLink(url); copyText(url, 'New invite link copied'); reload() } catch (e: any) { toast(e.message) } }
+  async function setActive(mid: string, name: string, active: boolean) {
+    if (!active && !confirm(`Pause ${name}'s access? They are signed out of ${me.org?.name} now and can't sign in until you turn it back on. Nothing is deleted.`)) return
+    try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { active } }); toast(active ? `${name} can sign in again` : `${name}'s access paused`); reload() } catch (e: any) { toast(e.message) }
+  }
+  async function saveTitle(mid: string, title: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { title } }); toast('Saved'); reload() } catch (e: any) { toast(e.message) } }
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!data) return <Loading />
   return (
@@ -44,10 +49,17 @@ export default function Team() {
             <CardHeader title={`Members (${data.members.length})`} />
             <CardBody className="pt-3">
               <ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.members.map(m => (
-                <li key={m.id} className="flex flex-wrap items-center gap-3 py-3">
+                <li key={m.id} className={`flex flex-wrap items-center gap-3 py-3 ${m.active ? '' : 'opacity-60'}`}>
                   <Avatar name={m.name || m.email} />
-                  <div className="min-w-0 flex-1"><div className="truncate font-medium">{m.name} {m.you && <span className="text-xs text-slate-400">(you)</span>}</div>
-                    <div className="truncate text-xs text-slate-500">{m.email}{m.title ? ` · ${m.title}` : ''} · {m.last_login_at ? `active ${ago(m.last_login_at)}` : 'never signed in'}</div></div>
+                  <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 truncate font-medium">{m.name} {m.you && <span className="text-xs text-slate-400">(you)</span>}{!m.active && <Badge tone="warning">Access paused</Badge>}</div>
+                    <div className="truncate text-xs text-slate-500">{m.email} · {m.last_login_at ? <Ago ts={m.last_login_at} prefix="active " /> : 'never signed in'}</div>
+                    <TitleEdit value={m.title} editable={me.can.manage_team} onSave={t => saveTitle(m.id, t)} /></div>
+                  {me.can.manage_team && !m.you && (
+                    <label className="flex items-center gap-2 text-xs text-slate-500" title={m.active ? 'Pause access' : 'Resume access'}>
+                      <button type="button" role="switch" aria-checked={m.active} aria-label={`${m.name || m.email} can sign in`} onClick={() => setActive(m.id, m.name || m.email, !m.active)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${m.active ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-ink-600'}`}>
+                        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${m.active ? 'translate-x-4.5' : 'translate-x-0.5'}`} /></button>
+                      {m.active ? 'Active' : 'Paused'}</label>)}
                   {me.can.manage_team && !m.you ? (
                     <Select aria-label="Role" className="w-40 py-1.5 text-[13px]" value={m.role} onChange={e => changeRole(m.id, e.target.value)}>{data.roles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</Select>
                   ) : <Badge tone={m.role === 'owner' ? 'violet' : 'neutral'}>{m.role_label}</Badge>}
@@ -56,7 +68,9 @@ export default function Team() {
             </CardBody>
           </Card>
           {data.invites.length > 0 && <Card><CardHeader title="Pending invites" /><CardBody className="pt-3"><ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.invites.map(i => (
-            <li key={i.id} className="flex items-center gap-3 py-2.5 text-sm"><Mail className="size-4 text-slate-400" /><span className="flex-1">{i.email} <span className="text-slate-500">· {i.role_label}{i.title ? ` · ${i.title}` : ''}</span></span>
+            <li key={i.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm"><Mail className="size-4 text-slate-400" /><span className="min-w-0 flex-1">{i.email} <span className="text-slate-500">· {i.role_label}{i.title ? ` · ${i.title}` : ''}</span>
+                {i.expired ? <Badge tone="warning" className="ml-2">Link expired</Badge> : <span className="ml-2 text-xs text-slate-400">expires {new Date(i.expires_at * 1000).toLocaleDateString()}</span>}</span>
+              <Button size="sm" icon={<RefreshCw />} onClick={() => renew(i.id)}>New link</Button>
               <Button size="sm" variant="ghost" onClick={() => revoke(i.id)}>Revoke</Button></li>))}</ul></CardBody></Card>}
         </div>
         <div className="space-y-5">
@@ -74,4 +88,17 @@ export default function Team() {
       </div>
     </>
   )
+}
+
+function TitleEdit({ value, editable, onSave }: { value: string; editable: boolean; onSave: (v: string) => void }) {
+  const [edit, setEdit] = useState(false), [v, setV] = useState(value)
+  if (!edit) return (
+    <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">{value || <span className="text-slate-400">{editable ? 'No job title' : ''}</span>}
+      {editable && <button aria-label="Edit job title" onClick={() => { setV(value); setEdit(true) }} className="rounded p-0.5 text-slate-400 hover:text-slate-700"><Pencil className="size-3" /></button>}</div>)
+  return (
+    <form className="mt-1 flex items-center gap-1" onSubmit={e => { e.preventDefault(); onSave(v.trim()); setEdit(false) }}>
+      <Input aria-label="Job title" autoFocus className="h-7 max-w-56 py-1 text-xs" value={v} onChange={e => setV(e.target.value)} placeholder="e.g. Sales Manager" />
+      <button type="submit" aria-label="Save title" className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check className="size-4" /></button>
+      <button type="button" aria-label="Cancel" onClick={() => setEdit(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X className="size-4" /></button>
+    </form>)
 }

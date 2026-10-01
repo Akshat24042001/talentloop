@@ -23,13 +23,15 @@ Hard rules:
 - Add at most 1 "behavioral" question (a real past situation: what happened, what they did, result).
 - Spoken style: one question at a time, under 30 words, no lists, no "and also". A candidate must be able to hold it in their head.
 - Never ask about age, marital status, pregnancy, religion, caste, family plans, health, or anything similar. Put these in do_not_ask.
-- good_answer_covers: 2 to 4 short, checkable points a strong answer contains. These drive follow-ups, so make them specific to THIS role and resume.
+- good_answer_covers: 2 to 3 short, checkable points (under 8 words each) a strong answer contains. These drive follow-ups, so make them specific to THIS role and resume.
 - time_budget_sec per question: warmup 60-90, others 120-240. The sum of all budgets must be <= 85% of duration_min*60. Drop the lowest-value non-mandatory questions to fit.
 - max_followups: 0 for warmup, 1 or 2 otherwise.
-- competencies: 3 to 5, each with anchors describing what a 1, a 3 and a 5 looks like FOR THIS ROLE. Weights sum to 1.0.
-- keyterms: up to 40 proper nouns and technical terms from the JD and resume that speech-to-text may mishear (tools, frameworks, company names, certifications, candidate's name). Plain strings.
-- resume_claims_to_verify: 2 to 5 concrete claims from the resume worth verifying.
-- company_facts: 3 to 6 short facts from the JD that the interviewer may share if the candidate asks about the role. Never invent facts.
+- competencies: 3 or 4, each with anchors (under 12 words each) describing what a 1, a 3 and a 5 looks like FOR THIS ROLE. Weights sum to 1.0.
+- keyterms: up to 25 proper nouns and technical terms from the JD and resume that speech-to-text may mishear (tools, frameworks, company names, certifications, candidate's name). Plain strings.
+- resume_claims_to_verify: 2 to 4 concrete claims from the resume worth verifying.
+- company_facts: 3 to 5 short facts from the JD that the interviewer may share if the candidate asks about the role. Never invent facts.
+- red_flags: at most 2 per question, or an empty list.
+- Be concise: no field longer than it needs to be. Output compact JSON.
 """
 
 PLAN_USER_TEMPLATE = """Company: {company}
@@ -154,3 +156,9 @@ Return JSON:
   "summary": str,
   "human_review_reasons": [str]
 }}"""
+
+
+# Interview languages (per job or per interview). Codes follow BCP-47 where possible; "hi-en" = Hinglish.
+LANGUAGE_NAMES = {"en": "English", "hi": "Hindi", "hi-en": "Hinglish (natural Hindi-English mix, Latin script)", "ta": "Tamil", "te": "Telugu",
+                  "kn": "Kannada", "mr": "Marathi", "bn": "Bengali", "gu": "Gujarati", "ml": "Malayalam", "es": "Spanish", "fr": "French",
+                  "de": "German", "pt": "Portuguese", "ar": "Arabic"}

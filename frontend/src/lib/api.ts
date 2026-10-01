@@ -4,11 +4,17 @@ export class ApiError extends Error { status: number; constructor(msg: string, s
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn }
 
+/** Page data seen this session, shown instantly on revisits while fresh data loads (see useApi). Any change
+ * (POST, PATCH, DELETE) clears it, so a page never shows data older than the last edit. */
+export const pageCache = new Map<string, unknown>()
+
 export async function api<T = any>(path: string, opts: { method?: string; json?: unknown; body?: BodyInit; quiet401?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = {}
   let body = opts.body
   if (opts.json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(opts.json) }
-  const r = await fetch(path, { method: opts.method || (body ? 'POST' : 'GET'), headers, body, credentials: 'same-origin' })
+  const method = opts.method || (body ? 'POST' : 'GET')
+  if (method !== 'GET') pageCache.clear()
+  const r = await fetch(path, { method, headers, body, credentials: 'same-origin' })
   const txt = await r.text()
   let data: any
   try { data = JSON.parse(txt) } catch { data = txt }

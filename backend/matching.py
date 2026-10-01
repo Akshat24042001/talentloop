@@ -20,7 +20,9 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from . import db, jd_schema, llm, skills
+from sqlalchemy import func
+
+from . import db, jd_schema, llm, refs, skills
 
 log = logging.getLogger("matching")
 
@@ -91,30 +93,74 @@ class JobF:
     applicants: set = field(default_factory=set)
 
 
-def cand_features(c: db.Candidate) -> Cand:
+FEATURES_VERSION = 2
+MAX_TERMS = 600          # distinct terms kept per resume: plenty for BM25, keeps the row small
+
+
+def _num(v):
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def content_hash(c: db.Candidate) -> str:
+    blob = (c.resume_text or "") + json.dumps(c.profile or {}, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def compute_features(c: db.Candidate) -> None:
+    """Everything matching and lists need, computed once when the resume or profile changes: canonical skills,
+    term counts for keyword relevance, experience, location, notice, salary, title words, a content hash."""
     p, parsed = c.profile or {}, c.parsed or {}
     text = c.resume_text or ""
-    sk = set(parsed.get("skills") or []) | {skills.canonical(x) for x in (p.get("skills") or [])}
+    sk = sorted(set(parsed.get("skills") or []) | {skills.canonical(x) for x in (p.get("skills") or []) if str(x).strip()})
     toks = tokenize(text)
-    years = p.get("total_experience_years")
-    try:
-        years = float(years) if years not in (None, "") else parsed.get("years")
-    except (TypeError, ValueError):
-        years = parsed.get("years")
-    notice = p.get("notice_days") if p.get("notice_days") not in (None, "") else parsed.get("notice_days")
-    try:
-        notice = int(notice) if notice is not None else None
-    except (TypeError, ValueError):
-        notice = None
-    try:
-        salary = float(p.get("expected_salary")) if p.get("expected_salary") not in (None, "") else None
-    except (TypeError, ValueError):
-        salary = None
-    titles = " ".join([c.headline or "", p.get("current_title", "")] + [e.get("title", "") for e in (p.get("experience") or [])[:3]])
+    tf = dict(Counter(toks).most_common(MAX_TERMS))
+    years = _num(p.get("total_experience_years"))
+    if years is None:
+        years = _num(parsed.get("years"))
+    notice = _num(p.get("notice_days"))
+    if notice is None:
+        notice = _num(parsed.get("notice_days"))
+    salary = _num(p.get("expected_salary"))
+    exp = [e for e in (p.get("experience") or []) if isinstance(e, dict)]
+    titles = " ".join([c.headline or "", p.get("current_title", "")] + [e.get("title", "") for e in exp[:3]])
     reloc = p.get("willing_to_relocate")
-    return Cand(id=c.id, name=c.name, skills=sk, skills_l={x.lower() for x in sk}, text_l=text.lower(), tf=Counter(toks), length=max(1, len(toks)),
-                years=years, place=norm_place(c.location or p.get("location", "")), relocate=None if reloc in (None, "") else bool(reloc),
-                notice=notice, salary=salary, salary_cur=p.get("salary_currency") or "", title_tokens=set(tokenize(titles)))
+    c.features = {"v": FEATURES_VERSION, "skills": sk, "tf": tf, "len": max(1, len(toks)), "years": years,
+                  "place": norm_place(c.location or p.get("location", "") or parsed.get("location", "")),
+                  "relocate": None if reloc in (None, "") else bool(reloc), "notice": int(notice) if notice is not None else None,
+                  "salary": salary, "salary_cur": p.get("salary_currency") or "", "title": sorted(set(tokenize(titles)))}
+    c.skills_text = "|" + "|".join(x.lower() for x in sk) + "|"
+    c.years, c.notice_days, c.expected_salary = years, notice, salary
+    c.current_company = (p.get("current_company") or (exp[0].get("company") if exp and not exp[0].get("end") else "") or "")[:200]
+    c.content_hash = content_hash(c)
+
+
+def cand_from_features(cid: str, name: str, f: dict) -> Cand:
+    sk = set(f.get("skills") or [])
+    return Cand(id=cid, name=name, skills=sk, skills_l={x.lower() for x in sk}, text_l="", tf=Counter(f.get("tf") or {}),
+                length=int(f.get("len") or 1), years=f.get("years"), place=f.get("place") or "", relocate=f.get("relocate"),
+                notice=f.get("notice"), salary=f.get("salary"), salary_cur=f.get("salary_cur") or "", title_tokens=set(f.get("title") or []))
+
+
+def cand_features(c: db.Candidate) -> Cand:
+    if not c.features or (c.features or {}).get("v") != FEATURES_VERSION:
+        compute_features(c)
+    return cand_from_features(c.id, c.name, c.features)
+
+
+def backfill_features(batch: int = 200) -> int:
+    """Compute features for candidates saved before they existed (runs at startup; cheap once done)."""
+    done = 0
+    while True:
+        with db.session() as s:
+            rows = s.query(db.Candidate).filter(db.Candidate.features.is_(None)).limit(batch).all()
+            for c in rows:
+                compute_features(c)
+            done += len(rows)
+        if len(rows) < batch:
+            return done
 
 
 def job_features(j: db.Job, default_top_n: int = 5) -> JobF:
@@ -160,15 +206,30 @@ class Index:
 
 
 def _has(c: Cand, skill: str) -> bool:
+    """A skill counts when the resume's canonical skills contain it, or (for skills outside the dictionary)
+    when every word of it appears in the resume."""
     s = skill.lower()
-    return s in c.skills_l or (len(s) > 2 and re.search(r"(?<![a-z0-9])" + re.escape(s) + r"(?![a-z0-9])", c.text_l) is not None)
+    if s in c.skills_l:
+        return True
+    words = tokenize(s)
+    return bool(words) and len(s) > 2 and all(w in c.tf for w in words)
+
+
+def _related_hit(c: Cand, skill: str) -> str | None:
+    """A related skill the candidate has (e.g. OpenShift for Kubernetes): partial credit, never full."""
+    for r in sorted(skills.related(skill)):
+        if r.lower() in c.skills_l:
+            return r
+    return None
 
 
 def score_one(j: JobF, c: Cand, rel: float, weights: dict) -> tuple[float, dict, list[str]]:
     must_hit = [s for s in j.must if _has(c, s)]
     nice_hit = [s for s in j.nice if _has(c, s)]
-    must_cov = len(must_hit) / len(j.must) if j.must else None
-    nice_cov = len(nice_hit) / len(j.nice) if j.nice else None
+    must_rel = {s: r for s in j.must if s not in must_hit and (r := _related_hit(c, s))}
+    nice_rel = {s: r for s in j.nice if s not in nice_hit and (r := _related_hit(c, s))}
+    must_cov = (len(must_hit) + 0.5 * len(must_rel)) / len(j.must) if j.must else None
+    nice_cov = (len(nice_hit) + 0.5 * len(nice_rel)) / len(j.nice) if j.nice else None
     if must_cov is None and nice_cov is None:
         sk = rel
     elif must_cov is None:
@@ -227,7 +288,8 @@ def score_one(j: JobF, c: Cand, rel: float, weights: dict) -> tuple[float, dict,
     if j.strict["strict_notice"] and j.max_notice is not None and c.notice is not None and c.notice > j.max_notice:
         ko.append("Notice period too long")
     breakdown = {
-        "skills": {"score": round(sk, 3), "must_matched": must_hit, "must_missing": [s for s in j.must if s not in must_hit], "nice_matched": nice_hit},
+        "skills": {"score": round(sk, 3), "must_matched": must_hit, "must_missing": [s for s in j.must if s not in must_hit and s not in must_rel],
+                   "must_related": must_rel, "nice_matched": nice_hit, "nice_related": nice_rel},
         "experience": {"score": round(ex, 3), "years": y, "note": ex_note},
         "relevance": {"score": round(relevance, 3), "title": round(title_sim, 2)},
         "location": {"score": round(lo, 3), "note": lo_note, "candidate": c.place},
@@ -257,9 +319,28 @@ def rank(j: JobF, idx: Index, weights: dict, keep: int = K_STORED) -> list[dict]
     return kept
 
 
+_POOL_CACHE: dict[str, tuple[tuple, list, "Index"]] = {}
+
+
 def load_pool(s, org_id: str) -> tuple[list[Cand], Index]:
-    cands = [cand_features(c) for c in s.query(db.Candidate).filter(db.Candidate.org_id == org_id)]
-    return cands, Index(cands)
+    """Every candidate's features and the BM25 index, cached per company until a candidate changes."""
+    sig = tuple(s.query(func.count(db.Candidate.id), func.max(db.Candidate.updated_at)).filter(db.Candidate.org_id == org_id).one())
+    hit = _POOL_CACHE.get(org_id)
+    if hit and hit[0] == sig:
+        return hit[1], hit[2]
+    cands, stale = [], []
+    for cid, name, f in s.query(db.Candidate.id, db.Candidate.name, db.Candidate.features).filter(db.Candidate.org_id == org_id):
+        if not f or f.get("v") != FEATURES_VERSION:
+            stale.append(cid)
+            continue
+        cands.append(cand_from_features(cid, name, f))
+    for c in s.query(db.Candidate).filter(db.Candidate.id.in_(stale)) if stale else []:
+        compute_features(c)
+        cands.append(cand_from_features(c.id, c.name, c.features))
+    idx = Index(cands)
+    if not stale:
+        _POOL_CACHE[org_id] = (sig, cands, idx)
+    return cands, idx
 
 
 def run(s, org_id: str, weights: dict, default_top_n: int, job_ids: list[str] | None = None) -> dict:
@@ -309,7 +390,8 @@ def jobs_for_candidate(s, org_id: str, cand: db.Candidate, weights: dict, defaul
         raw = idx.bm25(jf.terms)
         top = max(raw.values()) if raw else 0
         sc, bd, ko = score_one(jf, cands[me], (raw.get(me, 0) / top) if top else 0, weights)
-        out.append({"job_id": j.id, "title": j.title, "department": j.department, "status": j.status, "score": sc, "breakdown": bd, "knocked_out": ko})
+        out.append({"job_id": j.id, "job_ref": refs.job_ref(j), "title": j.title, "department": j.department, "status": j.status, "score": sc,
+                    "breakdown": bd, "knocked_out": ko})
     out.sort(key=lambda m: (bool(m["knocked_out"]), -m["score"]))
     return out[:limit]
 
@@ -325,12 +407,16 @@ JSON: {"score": int 0-100, "verdict": "strong|good|possible|weak", "summary": st
 "interview_questions": [str] (3 questions that would test the gaps)}"""
 
 
-def report_hash(job: db.Job, cand: db.Candidate) -> str:
+def job_hash(job: db.Job) -> str:
     f = job.fields or {}
     jkey = {k: f.get(k) for k in ("title", "summary", "responsibilities", "must_have_skills", "nice_to_have_skills", "experience_min",
                                   "experience_max", "workplace_type", "locations", "industry_experience")}
-    blob = json.dumps(jkey, sort_keys=True, default=str) + "|" + (cand.resume_text or "") + json.dumps(cand.profile or {}, sort_keys=True, default=str)
-    return hashlib.sha256(blob.encode()).hexdigest()
+    return hashlib.sha256(json.dumps(jkey, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def report_hash(job: db.Job, cand_hash: str, jh: str | None = None) -> str:
+    """Cache key of an AI report: changes only when the job's matching fields or the resume/profile change."""
+    return hashlib.sha256(f"{jh or job_hash(job)}|{cand_hash}".encode()).hexdigest()
 
 
 def _prompt(job: db.Job, cand: db.Candidate, bd: dict) -> str:
@@ -381,18 +467,26 @@ async def _one_report(job: db.Job, cand: db.Candidate, row: db.Match, sem: async
 _LAST_ERROR: dict = {}
 
 
-def pending_reports(s, org_id: str, job_ids: list[str]) -> list[tuple[db.Job, db.Candidate, db.Match]]:
-    """Shortlisted matches (top N per job, not screened out) without a current AI report."""
+def pending_reports(s, org_id: str, job_ids: list[str]) -> list[tuple[db.Job, str, db.Match]]:
+    """Shortlisted matches (top N per job, not screened out) without a current AI report: (job, candidate id, match)."""
     todo = []
-    for j in s.query(db.Job).filter(db.Job.org_id == org_id, db.Job.id.in_(job_ids)):
+    jobs = s.query(db.Job).filter(db.Job.org_id == org_id, db.Job.id.in_(job_ids or [""])).all()
+    for j in jobs:
         n = int((j.fields or {}).get("top_n") or j.top_n or 5)
-        rows = s.query(db.Match).filter(db.Match.job_id == j.id, db.Match.knocked_out.is_(False), db.Match.rank < 9999) \
-            .order_by(db.Match.rank).limit(n).all()
-        for m in rows:
-            c = s.get(db.Candidate, m.candidate_id)
-            if c and not (m.ai_report and m.ai_hash == report_hash(j, c)):
-                todo.append((j, c, m))
+        jh = job_hash(j)
+        rows = s.query(db.Match, db.Candidate.content_hash).join(db.Candidate, db.Candidate.id == db.Match.candidate_id) \
+            .filter(db.Match.job_id == j.id, db.Match.knocked_out.is_(False), db.Match.rank < 9999).order_by(db.Match.rank).limit(n).all()
+        for m, ch in rows:
+            if not (m.ai_report and m.ai_hash == report_hash(j, ch or "", jh)):
+                todo.append((j, m.candidate_id, m))
     return todo
+
+
+def pending_count(s, org_id: str, job_ids: list[str]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for j, _, _ in pending_reports(s, org_id, job_ids):
+        out[j.id] = out.get(j.id, 0) + 1
+    return out
 
 
 async def run_ai(org_id: str, job_ids: list[str], budget: int) -> dict:
@@ -400,12 +494,15 @@ async def run_ai(org_id: str, job_ids: list[str], budget: int) -> dict:
     with db.session() as s:
         todo = pending_reports(s, org_id, job_ids)
         work = todo[:max(0, budget)]
+        cands = {c.id: c for c in s.query(db.Candidate).filter(db.Candidate.id.in_({cid for _, cid, _ in work} or {""}))}
+        work = [(j, cands[cid], m) for j, cid, m in work if cid in cands]
         sem = asyncio.Semaphore(4)
         results = await asyncio.gather(*[_one_report(j, c, m, sem) for j, c, m in work])
         done = 0
         for (j, c, m), (rep, model, inp, outp) in zip(work, results):
             if rep:
-                m.ai_report, m.ai_score, m.ai_model, m.ai_hash, m.ai_at = rep, rep.get("score"), model, report_hash(j, c), db.now()
+                m.ai_report, m.ai_score, m.ai_model, m.ai_at = rep, rep.get("score"), model, db.now()
+                m.ai_hash = report_hash(j, c.content_hash or content_hash(c))
                 done += 1
             if model != "mock":
                 s.add(db.AIUsage(org_id=org_id, kind="match_report", model=model, input_chars=inp, output_chars=outp))

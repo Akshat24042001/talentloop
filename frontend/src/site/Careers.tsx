@@ -1,12 +1,11 @@
 import { ArrowLeft, Briefcase, Building2, CircleCheck, Clock, FileUp, MapPin, Plus, Search, Send, Trash2, Wallet } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Logo, Select, Textarea } from '../components/ui'
-import { Loading, TagInput } from '../components/kit'
+import { Loading, TagInput, Ago } from '../components/kit'
 import { ApiError } from '../lib/api'
-import { ago } from '../lib/format'
 
 interface Org { name: string; slug: string; about: string; website: string; logo_url: string; brand_color: string; headline: string; industry: string; size: string; country: string }
-interface JobItem { id: string; title: string; department: string; location: string; workplace_type: string; employment_type: string; experience: string; salary: string; published_at: number }
+interface JobItem { id: string; ref: string; title: string; department: string; location: string; workplace_type: string; employment_type: string; experience: string; salary: string; published_at: number }
 interface PublicJob { id: string; org: Org; jd: { title: string; company: string; facts: string[]; sections: { title: string; body?: string; items?: string[] }[]; contact?: string }; questions: { id: string; question: string; kind: string; required: boolean }[]; deadline?: string }
 
 async function getJSON(url: string) { const r = await fetch(url); const d = await r.json().catch(() => ({})); if (!r.ok) throw new ApiError(d.detail || r.statusText, r.status); return d }
@@ -54,12 +53,12 @@ export function CareersPage({ slug }: { slug: string }) {
         <h2 className="mb-3 mt-8 text-sm font-semibold text-slate-500">{jobs.length} open role{jobs.length === 1 ? '' : 's'}</h2>
         <div className="space-y-3">
           {jobs.map(j => (
-            <a key={j.id} href={`/careers/${slug}/jobs/${j.id}`} className="block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/80 transition hover:shadow-md hover:ring-brand-200 dark:bg-ink-900 dark:ring-ink-700">
+            <a key={j.id} href={`/careers/${slug}/jobs/${j.ref}`} className="block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/80 transition hover:shadow-md hover:ring-brand-200 dark:bg-ink-900 dark:ring-ink-700">
               <div className="flex flex-wrap items-start justify-between gap-2"><span className="text-lg font-semibold">{j.title}</span><Badge>{j.department}</Badge></div>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
                 <span className="inline-flex items-center gap-1"><MapPin className="size-4" />{j.location}</span><span className="inline-flex items-center gap-1"><Clock className="size-4" />{j.employment_type}</span>
                 {j.experience && <span className="inline-flex items-center gap-1"><Briefcase className="size-4" />{j.experience}</span>}{j.salary && <span className="inline-flex items-center gap-1"><Wallet className="size-4" />{j.salary}</span>}
-                <span>· posted {ago(j.published_at)}</span></div>
+                <span>· posted <Ago ts={j.published_at} /></span></div>
             </a>))}
           {!jobs.length && <Card className="p-8 text-center text-sm text-slate-500">No open roles match right now.</Card>}
         </div>
@@ -78,7 +77,7 @@ export function CareersPage({ slug }: { slug: string }) {
 export function PublicJobPage({ slug, id }: { slug: string; id: string }) {
   const [j, setJ] = useState<PublicJob | null>(null), [err, setErr] = useState('')
   const formRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { getJSON(`/api/public/jobs/${id}`).then(x => { setJ(x); document.title = `${x.jd.title} at ${x.jd.company}` }).catch(e => setErr(e.message)) }, [id])
+  useEffect(() => { getJSON(`/api/public/orgs/${slug}/jobs/${id}`).then(x => { setJ(x); document.title = `${x.jd.title} at ${x.jd.company}` }).catch(e => setErr(e.message)) }, [slug, id])
   if (err) return <NotFound msg={err} />
   if (!j) return <Loading className="min-h-screen" />
   return (
@@ -101,7 +100,7 @@ export function PublicJobPage({ slug, id }: { slug: string; id: string }) {
         </Card>
         <div ref={formRef} className="scroll-mt-6"><Card className="mt-6 p-6 sm:p-8"><h2 className="text-xl font-semibold">Apply for {j.jd.title}</h2>
           {j.deadline && <p className="mt-1 text-sm text-slate-500">Applications close {j.deadline}.</p>}
-          <div className="mt-5"><ApplyForm url={`/api/public/jobs/${id}/apply`} orgName={j.jd.company} questions={j.questions} /></div></Card></div>
+          <div className="mt-5"><ApplyForm url={`/api/public/orgs/${slug}/jobs/${id}/apply`} orgName={j.jd.company} questions={j.questions} /></div></Card></div>
       </main>
       <Foot />
     </div>

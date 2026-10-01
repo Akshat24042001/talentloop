@@ -1,9 +1,8 @@
 import { FileUp, Plus, Search, Upload, Users } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Textarea, toast } from '../components/ui'
-import { Avatar, Empty, ErrorBox, Loading, PageHeader, Pager, TagInput, useApi } from '../components/kit'
+import { Avatar, Empty, ErrorBox, Loading, PageHeader, Pager, TagInput, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
-import { ago } from '../lib/format'
 import { navigate, useLocation } from '../lib/router'
 import { useMe } from '../lib/session'
 import type { Cand } from './JobDetail'
@@ -38,7 +37,7 @@ export default function Candidates() {
           <>
             <ul className="divide-y divide-slate-100 dark:divide-ink-800">
               {data.items.map(c => (
-                <li key={c.id}><a href={`/app/candidates/${c.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-slate-50/80 dark:hover:bg-ink-850 sm:px-5">
+                <li key={c.id}><a href={`/app/candidates/${c.ref}`} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-slate-50/80 dark:hover:bg-ink-850 sm:px-5">
                   <Avatar name={c.name} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-900 dark:text-white">{c.name}</span><Badge>{SOURCE_LABEL[c.source] || c.source}</Badge>
@@ -46,7 +45,7 @@ export default function Candidates() {
                     <div className="truncate text-xs text-slate-500 dark:text-slate-400">{[c.headline, c.years != null ? `${c.years} yrs` : '', c.location, c.email].filter(Boolean).join(' · ')}</div>
                     <div className="mt-1.5 flex flex-wrap gap-1">{c.skills.slice(0, 8).map(s => <span key={s} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-ink-800 dark:text-slate-300">{s}</span>)}{c.skills.length > 8 && <span className="text-[11px] text-slate-400">+{c.skills.length - 8}</span>}</div>
                   </div>
-                  <span className="text-xs text-slate-400">{ago(c.created_at)}</span>
+                  <span className="text-xs text-slate-400"><Ago ts={c.created_at} /></span>
                 </a></li>
               ))}
             </ul>
@@ -102,7 +101,7 @@ function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => vo
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(v => ({ ...v, [k]: e.target.value }))
   async function save() {
     setBusy(true); setErr('')
-    try { const c = await api('/api/candidates', { json: { ...f, skills: sk } }); toast('Candidate added'); onDone(); onClose(); navigate(`/app/candidates/${c.id}`) } catch (e: any) { setErr(e.message) }
+    try { const c = await api('/api/candidates', { json: { ...f, skills: sk } }); toast('Candidate added'); onDone(); onClose(); navigate(`/app/candidates/${c.ref}`) } catch (e: any) { setErr(e.message) }
     setBusy(false)
   }
   return (

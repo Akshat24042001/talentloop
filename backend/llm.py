@@ -107,6 +107,18 @@ async def resolve_models() -> None:
     log.info("OpenRouter models: fast=%s smart=%s", FAST_CHAIN, SMART_CHAIN)
 
 
+def plan_models() -> list[str]:
+    """Models for interview plans, fastest first. PLAN_MODEL (comma-separated) overrides. Plans must come back
+    in well under 30 seconds, so the fast chain leads; the smart models are slow on free tiers."""
+    own = _env_list("PLAN_MODEL")
+    if OPENROUTER:
+        own = [m for m in own if "/" in m]
+    if own:
+        return own
+    out = list(dict.fromkeys(FAST_CHAIN + SMART_CHAIN))
+    return out
+
+
 def scoring_models(passes: int) -> list[str]:
     """Different models per scoring pass: two models disagreeing is a far better warning sign
     than one model disagreeing with itself. Skips the generic router when a named model exists."""
@@ -133,7 +145,10 @@ def parse_json(text: str) -> dict:
 
 
 async def complete_json(system: str, user: str, model: str, temperature: float = 0.2,
-                        max_tokens: int = 1500, timeout: float = 60.0) -> dict:
+                        max_tokens: int = 1500, timeout: float = 60.0, fallbacks: list[str] | None = None,
+                        fast: bool = False) -> dict:
+    """fallbacks: OpenRouter models to try if `model` fails (None = the rest of its chain, [] = none).
+    fast: ask for low/hidden reasoning and the highest-throughput provider (plans, live turns)."""
     kwargs = dict(
         model=model,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -144,17 +159,22 @@ async def complete_json(system: str, user: str, model: str, temperature: float =
     if OPENROUTER:
         # OpenRouter tries the next model if the first is rate-limited or down (common on free models).
         chain = [model]
-        for c in (FAST_CHAIN, SMART_CHAIN):
-            if model in c:  # fall back through the rest of this model's chain
-                i = c.index(model)
-                chain = c[i:] + c[:i]
-                break
+        if fallbacks is not None:
+            chain += [m for m in fallbacks if m != model]
+        else:
+            for c in (FAST_CHAIN, SMART_CHAIN):
+                if model in c:  # fall back through the rest of this model's chain
+                    i = c.index(model)
+                    chain = c[i:] + c[:i]
+                    break
         extra = {}
         if len(chain) > 1:
             extra["models"] = chain[:3]
-        if model == FAST_MODEL:
-            # Live turns: long hidden "thinking" would add seconds of silence on a voice call.
+        if fast or model == FAST_MODEL:
+            # Live turns and plans: long hidden "thinking" adds seconds of silence or waiting.
             extra["reasoning"] = {"effort": "low", "exclude": True}
+        if fast:
+            extra["provider"] = {"sort": "throughput"}
         if extra:
             kwargs["extra_body"] = extra
     if JSON_MODE:

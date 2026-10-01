@@ -78,6 +78,27 @@ SKILLS: dict[str, list[str]] = {
     "Accounting": ["accounting", "bookkeeping"], "Tally": ["tally", "tally erp", "tally prime"], "GST": ["gst", "taxation", "income tax", "tds"],
     "Financial Analysis": ["financial analysis", "financial modelling", "financial modeling", "fp&a"], "Audit": ["audit", "auditing", "internal audit"],
     "SAP": ["sap", "sap fico", "sap mm", "sap sd"], "QuickBooks": ["quickbooks"], "Reconciliation": ["reconciliation", "bank reconciliation"],
+    # --- IT hardware, infrastructure and support
+    "IT Hardware": ["it hardware", "computer hardware", "hardware components", "hardware sales"],
+    "Hardware Troubleshooting": ["hardware troubleshooting", "troubleshooting hardware", "laptop repair", "desktop repair", "chip level"],
+    "Desktop Support": ["desktop support", "desktop engineer", "it support", "helpdesk", "help desk", "service desk", "l1 support", "l2 support"],
+    "System Administration": ["system administration", "system administrator", "sysadmin", "windows administration"],
+    "Windows Server": ["windows server", "windows server 2019", "windows server 2022"], "Active Directory": ["active directory", "ad ds", "group policy"],
+    "Server Hardware": ["server installation", "rack servers", "blade servers", "dell poweredge", "hpe proliant"],
+    "Storage": ["san storage", "nas storage", "storage systems", "netapp", "raid"], "Firewall": ["firewall", "fortinet", "fortigate", "sophos firewall", "palo alto"],
+    "CCNA": ["ccna", "ccnp"], "Printers": ["printers", "printer installation", "printer troubleshooting"],
+    "Network Troubleshooting": ["lan", "wan", "lan/wan", "switches", "routers", "structured cabling"],
+    "Data Centre": ["data center", "data centre", "datacenter"], "Virtualization": ["virtualization", "vmware", "vsphere", "hyper-v", "esxi"],
+    "Microsoft 365": ["microsoft 365", "office 365", "o365", "exchange online"],
+    # --- sales, pre-sales and channel (IT and B2B)
+    "Field Sales": ["field sales", "on-field sales", "outside sales"], "Channel Sales": ["channel sales", "channel partners", "distributor management", "dealer network"],
+    "Pre-sales": ["pre-sales", "presales", "pre sales", "solution consulting"], "Cold Calling": ["cold calling", "cold calls", "tele calling", "telecalling"],
+    "Tenders": ["tender", "tenders", "gem portal", "rfp", "rfq", "bid management"], "Key Account Management": ["key account management", "key accounts", "kam"],
+    # --- administration and office
+    "MS Office": ["ms office", "microsoft office", "ms word", "ms powerpoint", "ms-office"],
+    "Data Entry": ["data entry", "typing speed"], "Office Administration": ["office administration", "office admin", "front office", "admin executive"],
+    "Inventory Management": ["inventory management", "inventory control", "stock management"], "Procurement": ["procurement", "purchase orders", "purchasing"],
+    "Vendor Management": ["vendor management", "vendor coordination", "supplier management"], "MIS Reporting": ["mis", "mis reporting", "mis reports"],
     # --- soft skills (matched loosely)
     "Communication": ["communication", "communication skills", "verbal communication", "written communication"], "Leadership": ["leadership", "team lead", "team leadership", "people management"],
     "Mentoring": ["mentoring", "mentored", "coaching"], "Stakeholder Management": ["stakeholder management", "stakeholders"], "Problem Solving": ["problem solving", "problem-solving"],
@@ -95,6 +116,36 @@ for canon, alts in SKILLS.items():
 _AMBIGUOUS = {"go", "r", "c", "ts", "py", "ml", "bd", "ui", "node", "rest", "spring", "sketch", "lean", "sap", "s3", "lambda", "ats",
               "dns", "vpn", "sre", "kam", "sem", "smm", "elk", "rds", "ec2", "zoho", "gitlab", "operations", "analytics", "hiring", "demos"}
 _PATTERN = re.compile(r"(?<![a-z0-9+#.])(" + "|".join(sorted((re.escape(a) for a in _ALIAS if a not in _AMBIGUOUS), key=len, reverse=True)) + r")(?![a-z0-9+#])")
+
+
+# Families of skills where knowing one is good evidence for another ("semantic" partial credit in matching:
+# a Kubernetes job and an OpenShift resume, a Tableau job and a Power BI analyst). Never full credit.
+RELATED_GROUPS = [
+    ["React", "Angular", "Vue", "Svelte", "Next.js"], ["JavaScript", "TypeScript"], ["Java", "Spring", "Spring Boot", "Hibernate", "Kotlin"],
+    ["Django", "Flask", "FastAPI"], ["Pandas", "NumPy", "scikit-learn"],
+    ["Machine Learning", "Deep Learning", "PyTorch", "TensorFlow", "NLP", "Computer Vision", "LLMs"], ["AWS", "Azure", "GCP"],
+    ["Docker", "Kubernetes", "Helm"], ["CI/CD", "Jenkins", "GitHub Actions", "GitLab CI", "ArgoCD"], ["Terraform", "Ansible"],
+    ["PostgreSQL", "MySQL", "SQL Server", "Oracle", "SQL"], ["MongoDB", "Cassandra", "DynamoDB"], ["Snowflake", "BigQuery", "Redshift", "Databricks"],
+    ["Power BI", "Tableau", "Looker", "Data Visualization"], ["Excel", "Google Sheets", "MS Office"], ["Selenium", "Playwright", "Cypress", "Test Automation"],
+    ["Android", "iOS", "Flutter", "React Native"], ["Kafka", "RabbitMQ"], ["Prometheus", "Grafana"], ["Salesforce", "HubSpot", "Zoho CRM", "CRM"],
+    ["B2B Sales", "Inside Sales", "Field Sales", "Business Development", "Lead Generation", "Cold Calling", "Channel Sales"],
+    ["Account Management", "Key Account Management", "Pipeline Management"], ["Customer Service", "Chat Support", "Voice Process", "Ticketing"],
+    ["Recruitment", "Sourcing", "Campus Hiring", "LinkedIn Recruiter", "Naukri", "ATS"],
+    ["HR Operations", "Payroll", "Onboarding", "Employee Engagement", "Performance Management"],
+    ["Accounting", "Tally", "QuickBooks", "GST", "Reconciliation"], ["Digital Marketing", "SEO", "SEM", "Social Media Marketing", "Performance Marketing", "Email Marketing"],
+    ["Figma", "Sketch", "Adobe XD", "UI Design", "Wireframing"],
+    ["IT Hardware", "Hardware Troubleshooting", "Desktop Support", "Printers", "Server Hardware"], ["System Administration", "Windows Server", "Active Directory", "Microsoft 365", "Linux"],
+    ["Networking", "Network Troubleshooting", "CCNA", "Firewall"], ["Server Hardware", "Storage", "Data Centre", "Virtualization"],
+    ["Office Administration", "Data Entry", "MS Office", "MIS Reporting"], ["Procurement", "Vendor Management", "Inventory Management", "Supply Chain"],
+]
+_RELATED: dict[str, set[str]] = {}
+for _g in RELATED_GROUPS:
+    for _k in _g:
+        _RELATED.setdefault(_k, set()).update(x for x in _g if x != _k)
+
+
+def related(skill: str) -> set[str]:
+    return _RELATED.get(canonical(skill), set())
 
 
 def canonical(skill: str) -> str:

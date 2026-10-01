@@ -38,19 +38,18 @@ function Section({ id, title, description, action, children, className }: { id?:
 }
 
 export default function Report({ id }: { id: string }) {
-  iid = id
   const [rec, setRec] = useState<Rec | null>(null)
   const [err, setErr] = useState('')
   const timer = useRef<number>(undefined)
   const load = useCallback(async () => {
     try {
-      const r = await api<Rec>(`/api/interviews/${iid}`); setRec(r); setErr('')
+      const r = await api<Rec>(`/api/interviews/${encodeURIComponent(id)}`); iid = r.id; setRec(r); setErr('')
       clearTimeout(timer.current)
       const sc = r.scoring || {}
       if (sc.state === 'running' || r.status === 'in_progress' || (['completed', 'incomplete'].includes(r.status) && !r.report && sc.state !== 'failed'))
         timer.current = window.setTimeout(load, r.status === 'in_progress' ? 6000 : 5000)
     } catch (e: any) { setErr(e.message) }
-  }, [])
+  }, [id])
   useEffect(() => { load(); return () => clearTimeout(timer.current) }, [load])
 
   return (

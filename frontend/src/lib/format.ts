@@ -10,12 +10,29 @@ export function when(ts?: number | null): string {
 }
 export function ago(ts?: number | null): string {
   if (!ts) return '-'
-  const s = Date.now() / 1000 - ts
-  if (s < 60) return 'just now'
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`
-  return new Date(ts * 1000).toLocaleDateString([], { day: 'numeric', month: 'short' })
+  const s = Math.max(0, Date.now() / 1000 - ts)
+  const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? '' : 's'} ago`
+  if (s < 45) return 'just now'
+  if (s < 3600) return n(Math.max(1, Math.round(s / 60)), 'minute')
+  if (s < 86400) return n(Math.round(s / 3600), 'hour')
+  if (s < 86400 * 1.5) return 'yesterday'
+  if (s < 86400 * 7) return n(Math.round(s / 86400), 'day')
+  if (s < 86400 * 30) return n(Math.round(s / (86400 * 7)), 'week')
+  if (s < 86400 * 365) return n(Math.max(1, Math.round(s / (86400 * 30.44))), 'month')
+  return n(Math.round(s / (86400 * 365.25)), 'year')
+}
+/** Future times: "in 3 days", "tomorrow", "in 2 hours". */
+export function until(ts?: number | null): string {
+  if (!ts) return '-'
+  const s = ts - Date.now() / 1000
+  if (s < 0) return ago(ts)
+  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))} min`
+  if (s < 86400) return `in ${Math.round(s / 3600)} h`
+  if (s < 86400 * 2) return 'tomorrow'
+  return `in ${Math.round(s / 86400)} days`
+}
+export function dateOnly(ts?: number | null): string {
+  return ts ? new Date(ts * 1000).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
 }
 export function short(s: string | undefined | null, n = 70): string {
   const t = String(s || '')

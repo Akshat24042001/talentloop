@@ -1,13 +1,12 @@
 import { Briefcase, Copy, MapPin, Plus, Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge, Button, Card, Input, Select } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, useApi } from '../components/kit'
-import { ago } from '../lib/format'
+import { Empty, ErrorBox, Loading, PageHeader, useApi, Ago } from '../components/kit'
 import { useMe } from '../lib/session'
 import { JOB_STATUS } from './labels'
 
 export interface JobRow {
-  id: string; title: string; department: string; status: string; top_n: number; location: string; employment_type: string; experience: string
+  id: string; ref: string; title: string; department: string; status: string; top_n: number; location: string; employment_type: string; experience: string
   salary: string; created_at: number; updated_at: number; published_at?: number; matched_at?: number; priority?: string; openings?: number
   applications: number; new_applications: number; ai_reports: number; best_score?: number | null; permission: string
 }
@@ -37,7 +36,7 @@ export default function Jobs() {
           <ul className="divide-y divide-slate-100 dark:divide-ink-800">
             {rows.map(j => (
               <li key={j.id}>
-                <a href={`/app/jobs/${j.id}`} className="grid gap-3 px-5 py-4 transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850 md:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto] md:items-center">
+                <a href={`/app/jobs/${j.ref}`} className="grid gap-3 px-5 py-4 transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850 md:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto] md:items-center">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2"><span className="truncate font-semibold text-slate-900 dark:text-white">{j.title}</span>
                       <Badge tone={JOB_STATUS[j.status]?.tone}>{JOB_STATUS[j.status]?.label}</Badge>
@@ -48,7 +47,7 @@ export default function Jobs() {
                   <div className="text-sm"><div className="tabular font-semibold">{j.applications}</div><div className="text-xs text-slate-500 dark:text-slate-400">applicants{j.new_applications ? <span className="text-emerald-600"> · {j.new_applications} new</span> : ''}</div></div>
                   <div className="text-sm"><div className="tabular font-semibold">{j.best_score != null ? Math.round(j.best_score) : '-'}</div><div className="text-xs text-slate-500 dark:text-slate-400">best match</div></div>
                   <div className="text-sm"><div className="tabular font-semibold">{j.ai_reports}/{j.top_n}</div><div className="text-xs text-slate-500 dark:text-slate-400">AI reports</div></div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 md:text-right"><Users className="mr-1 inline size-3" />updated {ago(j.updated_at)}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 md:text-right"><Users className="mr-1 inline size-3" />updated <Ago ts={j.updated_at} /></div>
                 </a>
               </li>
             ))}

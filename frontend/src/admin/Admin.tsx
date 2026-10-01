@@ -1,9 +1,9 @@
 import { Ban, Briefcase, Building2, CircleCheck, FileText, Search, Sparkles, Users, Video } from 'lucide-react'
 import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Input, Stat, toast } from '../components/ui'
-import { ErrorBox, Loading, PageHeader, Tabs, useApi } from '../components/kit'
+import { ErrorBox, Loading, PageHeader, Tabs, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
-import { ago, when } from '../lib/format'
+import { when } from '../lib/format'
 
 interface Overview { orgs: number; users: number; active_users_7d: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; ai_calls_30d: number; signups_30d: number[]; storage: { s3: boolean; database: string } }
 interface OrgRow { id: string; name: string; slug: string; created_at: number; disabled: boolean; owner: string; members: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; last_activity?: number }
@@ -53,7 +53,7 @@ export default function Admin() {
                 <td className="px-4 py-3"><div className="font-semibold">{o.name}</div><div className="text-xs text-slate-500">/{o.slug} · since {when(o.created_at).split(',')[0]}</div></td>
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{o.owner}</td>
                 {[o.members, `${o.jobs} (${o.open_jobs} open)`, o.candidates, o.applications, o.interviews, o.ai_calls].map((v, i) => <td key={i} className="tabular whitespace-nowrap px-4 py-3">{v}</td>)}
-                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{o.last_activity ? ago(o.last_activity) : '-'}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500"><Ago ts={o.last_activity} /></td>
                 <td className="px-4 py-3 text-right"><Button size="sm" variant="ghost" icon={o.disabled ? <CircleCheck /> : <Ban />} onClick={() => toggleOrg(o)}>{o.disabled ? 'Enable' : 'Disable'}</Button></td>
               </tr>))}</tbody>
           </table>
@@ -66,8 +66,8 @@ export default function Admin() {
                 <td className="px-4 py-3"><div className="font-semibold">{u.name} {u.platform_admin && <Badge tone="violet">Admin</Badge>}</div><div className="text-xs text-slate-500">{u.email}</div></td>
                 <td className="px-4 py-3 text-xs">{u.memberships.map((m, i) => <div key={i}>{m.org} <span className="text-slate-500">· {m.role_label}</span></div>)}</td>
                 <td className="tabular px-4 py-3">{u.login_count}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{u.last_login_at ? ago(u.last_login_at) : 'never'}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{ago(u.created_at)}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{u.last_login_at ? <Ago ts={u.last_login_at} /> : 'never'}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500"><Ago ts={u.created_at} /></td>
                 <td className="px-4 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => toggleUser(u)}>{u.disabled ? 'Enable' : 'Disable'}</Button></td>
               </tr>))}</tbody>
           </table>

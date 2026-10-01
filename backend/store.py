@@ -205,6 +205,10 @@ def load(iid: str) -> dict | None:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+ON_SAVE: list = []        # callbacks(rec) after every save (the interview index registers here)
+ON_DELETE: list = []      # callbacks(iid) after a delete
+
+
 def save(rec: dict) -> None:
     p = _path(rec["id"])
     tmp = p.with_suffix(".tmp")
@@ -212,12 +216,16 @@ def save(rec: dict) -> None:
     tmp.replace(p)
     if S3_ENABLED:
         _queue_json(rec["id"])
+    for cb in ON_SAVE:
+        cb(rec)
 
 
 def delete(iid: str) -> None:
     p = _path(iid)
     if p.exists():
         p.unlink()
+    for cb in ON_DELETE:
+        cb(iid)
     shutil.rmtree(MEDIA_DIR / iid, ignore_errors=True)
     _locks.pop(iid, None)
     if S3_ENABLED:

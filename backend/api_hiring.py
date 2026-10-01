@@ -1,5 +1,6 @@
 """Jobs, collaborators, candidates, applications, matching, dashboard, and the public careers site."""
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -8,8 +9,9 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, or_
+from sqlalchemy.orm import defer
 
-from . import auth, db, docs_pdf, jd_schema, llm, matching, resumes, skills, store
+from . import auth, db, docs_pdf, jd_schema, llm, matching, refs, resumes, skills, store
 from .api_accounts import log_activity, org_settings
 
 router = APIRouter()
@@ -31,7 +33,7 @@ def ctx_of(req: Request, s) -> auth.Ctx:
 
 
 def get_job(s, ctx: auth.Ctx, job_id: str, need: str = "view") -> tuple[db.Job, str]:
-    job = s.get(db.Job, job_id)
+    job = refs.resolve(s, db.Job, ctx.org_id, job_id)
     perm = auth.job_permission(s, ctx, job) if job and job.org_id == ctx.org_id else None
     if not job or not perm:
         raise HTTPException(404, "Job not found")
@@ -47,20 +49,28 @@ def org_of(s, ctx: auth.Ctx, org_id: str | None = None) -> db.Org:
 
 def job_summary(job: db.Job, extra: dict | None = None) -> dict:
     f = job.fields or {}
-    return {"id": job.id, "title": job.title, "department": job.department, "status": job.status, "top_n": int(f.get("top_n") or job.top_n),
+    return {"id": job.id, "ref": refs.job_ref(job), "title": job.title, "department": job.department, "status": job.status, "top_n": int(f.get("top_n") or job.top_n),
             "location": jd_schema.location_text(f), "employment_type": f.get("employment_type", ""), "experience": jd_schema.experience_text(f),
             "salary": jd_schema.salary_text(f), "created_at": job.created_at, "updated_at": job.updated_at, "published_at": job.published_at,
             "matched_at": job.matched_at, "priority": f.get("priority", ""), "openings": f.get("openings", 1), **(extra or {})}
 
 
 def cand_summary(c: db.Candidate) -> dict:
-    p, parsed = c.profile or {}, c.parsed or {}
-    years = p.get("total_experience_years") if p.get("total_experience_years") not in (None, "") else parsed.get("years")
-    return {"id": c.id, "name": c.name or parsed.get("name_guess") or "Unnamed candidate", "email": c.email, "phone": c.phone, "location": c.location,
-            "headline": c.headline, "years": years, "skills": (sorted(set(parsed.get("skills") or []) | set(p.get("skills") or [])))[:30],
-            "source": c.source, "tags": c.tags or [], "has_resume": bool(c.resume_file), "resume_name": c.resume_name, "created_at": c.created_at,
-            "notice_days": p.get("notice_days") if p.get("notice_days") not in (None, "") else parsed.get("notice_days"),
-            "expected_salary": p.get("expected_salary"), "current_company": p.get("current_company", "")}
+    """List-friendly summary from the stored columns (never touches resume text)."""
+    f = c.features or {}
+    if not f:
+        matching.compute_features(c)
+        f = c.features or {}
+    return {"id": c.id, "ref": refs.cand_ref(c), "name": c.name or "Unnamed candidate", "email": c.email, "phone": c.phone, "location": c.location,
+            "headline": c.headline, "years": c.years, "skills": (f.get("skills") or [])[:30], "source": c.source, "tags": c.tags or [],
+            "has_resume": bool(c.resume_file), "resume_name": c.resume_name, "resume_type": Path(c.resume_file).suffix.lower().lstrip(".") if c.resume_file else "",
+            "resume_v": hashlib.sha1((c.resume_file or "").encode()).hexdigest()[:8] if c.resume_file else "",
+            "created_at": c.created_at, "updated_at": c.updated_at,
+            "notice_days": int(c.notice_days) if c.notice_days is not None else None, "expected_salary": c.expected_salary,
+            "current_company": c.current_company or "", "college": c.college or "", "has_photo": bool(c.photo_file)}
+
+
+LIST_COLS = (defer(db.Candidate.resume_text), defer(db.Candidate.profile), defer(db.Candidate.parsed))
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +106,11 @@ def list_jobs(req: Request, status: str = "", q: str = ""):
         top = {}
         for m in s.query(db.Match).filter(db.Match.job_id.in_(ids or [""]), db.Match.rank == 1):
             top[m.job_id] = m.score
-        perms = {j.id: auth.job_permission(s, ctx, j) for j in jobs}
+        if ctx.via_key or ctx.role in auth.MANAGE_JOBS:
+            perms = {j.id: "manage" for j in jobs}
+        else:
+            collab = dict(s.query(db.JobCollaborator.job_id, db.JobCollaborator.permission).filter(db.JobCollaborator.user_id == ctx.user_id))
+            perms = {j.id: ("edit" if collab[j.id] == "editor" else "view") if j.id in collab else "view" for j in jobs}
         return [job_summary(j, {"applications": apps.get(j.id, 0), "new_applications": new.get(j.id, 0), "ai_reports": ai.get(j.id, 0),
                                 "best_score": top.get(j.id), "permission": perms[j.id]}) for j in jobs]
 
@@ -119,7 +133,8 @@ async def create_job(req: Request):
         if status == "open" and (miss := jd_schema.missing_to_publish(fields)):
             raise HTTPException(400, "Fill in before publishing: " + ", ".join(miss))
         job = db.Job(org_id=org.id, title=fields["title"], department=fields.get("department", ""), status=status, fields=fields,
-                     top_n=int(fields.get("top_n") or 5), created_by=ctx.user_id, published_at=time.time() if status == "open" else None)
+                     top_n=int(fields.get("top_n") or 5), created_by=ctx.user_id, published_at=time.time() if status == "open" else None,
+                     number=db.next_number(s, org.id, "job"))
         s.add(job); s.flush()
         log_activity(s, ctx, "job_created", f"{job.title} ({status})", job_id=job.id)
         return job_detail(s, ctx, job)
@@ -133,7 +148,7 @@ def job_detail(s, ctx: auth.Ctx, job: db.Job) -> dict:
     org = s.get(db.Org, job.org_id)
     return {**job_summary(job), "fields": job.fields or {}, "permission": perm, "collaborators": collabs,
             "created_by": {"name": creator.name, "email": creator.email} if creator else None,
-            "missing_to_publish": jd_schema.missing_to_publish(job.fields or {}), "careers_url": f"/careers/{org.slug}/jobs/{job.id}",
+            "missing_to_publish": jd_schema.missing_to_publish(job.fields or {}), "careers_url": f"/careers/{org.slug}/jobs/{refs.job_ref(job)}",
             "applications": s.query(db.Application).filter_by(job_id=job.id).count()}
 
 
@@ -199,10 +214,11 @@ def duplicate_job(job_id: str, req: Request):
         job, _ = get_job(s, ctx, job_id, "manage")
         f = dict(job.fields or {})
         f["title"] = f"{f.get('title', '')} (copy)"[:120]
-        new = db.Job(org_id=job.org_id, title=f["title"], department=job.department, status="draft", fields=f, top_n=job.top_n, created_by=ctx.user_id)
+        new = db.Job(org_id=job.org_id, title=f["title"], department=job.department, status="draft", fields=f, top_n=job.top_n, created_by=ctx.user_id,
+                     number=db.next_number(s, job.org_id, "job"), flow=job.flow)
         s.add(new); s.flush()
         log_activity(s, ctx, "job_created", f"{new.title} (copy of {job.title})", job_id=new.id)
-        return {"id": new.id}
+        return {"id": new.id, "ref": refs.job_ref(new)}
 
 
 @router.get("/api/jobs/{job_id}/jd")
@@ -316,8 +332,9 @@ def remove_collaborator(job_id: str, cid: str, req: Request):
 def activity_rows(s, q, limit=50) -> list[dict]:
     rows = q.order_by(db.Activity.at.desc()).limit(limit).all()
     users = {u.id: u for u in s.query(db.User).filter(db.User.id.in_({r.user_id for r in rows if r.user_id} or {""}))}
-    jobs = {j.id: j.title for j in s.query(db.Job).filter(db.Job.id.in_({r.job_id for r in rows if r.job_id} or {""}))}
-    return [{"id": r.id, "action": r.action, "detail": r.detail, "at": r.at, "job_id": r.job_id, "job": jobs.get(r.job_id),
+    jobs = {j.id: j for j in s.query(db.Job).filter(db.Job.id.in_({r.job_id for r in rows if r.job_id} or {""}))}
+    return [{"id": r.id, "action": r.action, "detail": r.detail, "at": r.at, "job_id": r.job_id, "job": jobs[r.job_id].title if r.job_id in jobs else None,
+             "job_ref": refs.job_ref(jobs[r.job_id]) if r.job_id in jobs else None,
              "candidate_id": r.candidate_id, "user": (users[r.user_id].name or users[r.user_id].email) if r.user_id in users else None} for r in rows]
 
 
@@ -342,7 +359,7 @@ def visible_candidate_ids(s, ctx: auth.Ctx) -> set[str] | None:
 
 
 def get_candidate(s, ctx: auth.Ctx, cid: str) -> db.Candidate:
-    c = s.get(db.Candidate, cid)
+    c = refs.resolve(s, db.Candidate, ctx.org_id, cid)
     if not c or c.org_id != ctx.org_id:
         raise HTTPException(404, "Candidate not found")
     vis = visible_candidate_ids(s, ctx)
@@ -351,39 +368,70 @@ def get_candidate(s, ctx: auth.Ctx, cid: str) -> db.Candidate:
     return c
 
 
+def _visible_cand_filter(s, ctx: auth.Ctx):
+    """SQL condition limiting candidates to what this person may see (None = all in the company)."""
+    vis = auth.visible_job_ids(s, ctx)
+    if vis is None:
+        return None
+    jobs = vis or [""]
+    return or_(db.Candidate.id.in_(s.query(db.Application.candidate_id).filter(db.Application.job_id.in_(jobs))),
+               db.Candidate.id.in_(s.query(db.Match.candidate_id).filter(db.Match.job_id.in_(jobs))))
+
+
+SORTS = {"new": db.Candidate.created_at.desc(), "updated": db.Candidate.updated_at.desc(), "name": db.Candidate.name.asc(),
+         "experience": db.Candidate.years.desc(), "notice": db.Candidate.notice_days.asc()}
+
+
 @router.get("/api/candidates")
-def list_candidates(req: Request, q: str = "", skill: str = "", min_years: float | None = None, source: str = "", page: int = 1, limit: int = 50):
+def list_candidates(req: Request, q: str = "", skill: str = "", min_years: float | None = None, max_years: float | None = None,
+                    source: str = "", location: str = "", max_notice: int | None = None, tag: str = "", college: str = "",
+                    sort: str = "new", page: int = 1, limit: int = 50):
     with db.session() as s:
         ctx = ctx_of(req, s)
-        qry = s.query(db.Candidate).filter(db.Candidate.org_id == ctx.org_id)
-        vis = visible_candidate_ids(s, ctx)
+        qry = s.query(db.Candidate).options(*LIST_COLS).filter(db.Candidate.org_id == ctx.org_id)
+        vis = _visible_cand_filter(s, ctx)
         if vis is not None:
-            qry = qry.filter(db.Candidate.id.in_(vis or {""}))
+            qry = qry.filter(vis)
         if source:
             qry = qry.filter(db.Candidate.source == source)
-        if q:
-            like = f"%{q}%"
+        if q.strip():
+            like = f"%{q.strip()}%"
             qry = qry.filter(or_(db.Candidate.name.ilike(like), db.Candidate.email.ilike(like), db.Candidate.headline.ilike(like),
-                                 db.Candidate.location.ilike(like), db.Candidate.resume_text.ilike(like)))
-        rows = qry.order_by(db.Candidate.created_at.desc()).all()
-        out = [cand_summary(c) for c in rows]
-        if skill:
-            want = skills.canonical(skill).lower()
-            out = [c for c in out if any(x.lower() == want for x in c["skills"])]
+                                 db.Candidate.location.ilike(like), db.Candidate.current_company.ilike(like), db.Candidate.skills_text.ilike(like),
+                                 db.Candidate.phone.ilike(like), db.Candidate.resume_text.ilike(like)))
+        for sk in [x for x in skill.split(",") if x.strip()]:
+            qry = qry.filter(db.Candidate.skills_text.ilike(f"%|{skills.canonical(sk.strip()).lower()}|%"))
         if min_years is not None:
-            out = [c for c in out if c["years"] is not None and float(c["years"]) >= min_years]
-        apps = dict(s.query(db.Application.candidate_id, func.count()).filter(db.Application.org_id == ctx.org_id).group_by(db.Application.candidate_id).all())
-        total = len(out)
+            qry = qry.filter(db.Candidate.years >= min_years)
+        if max_years is not None:
+            qry = qry.filter(db.Candidate.years <= max_years)
+        if max_notice is not None:
+            qry = qry.filter(db.Candidate.notice_days <= max_notice)
+        if location.strip():
+            qry = qry.filter(db.Candidate.location.ilike(f"%{location.strip()}%"))
+        if college.strip():
+            qry = qry.filter(db.Candidate.college.ilike(f"%{college.strip()}%"))
+        if tag.strip():
+            qry = qry.filter(func.lower(db.Candidate.tags.cast(db.Text)).like(f'%"{tag.strip().lower()}"%'))
+        total = qry.order_by(None).count()
         limit = max(1, min(200, limit))
-        page_rows = out[(page - 1) * limit: page * limit]
-        for c in page_rows:
-            c["applications"] = apps.get(c["id"], 0)
-        return {"total": total, "page": page, "limit": limit, "items": page_rows}
+        page = max(1, page)
+        order = SORTS.get(sort, SORTS["new"])
+        rows = qry.order_by(order, db.Candidate.id).offset((page - 1) * limit).limit(limit).all()
+        ids = [c.id for c in rows]
+        apps = dict(s.query(db.Application.candidate_id, func.count()).filter(db.Application.candidate_id.in_(ids or [""]))
+                    .group_by(db.Application.candidate_id).all())
+        items = []
+        for c in rows:
+            row = cand_summary(c)
+            row["applications"] = apps.get(c.id, 0)
+            items.append(row)
+        return {"total": total, "page": page, "limit": limit, "items": items}
 
 
 def _save_resume(org_id: str, cand_id: str, raw: bytes, filename: str) -> tuple[str, str]:
     ext = Path(filename or "resume.pdf").suffix.lower() or ".pdf"
-    key = f"{org_id}/candidates/{cand_id}/resume{ext}"
+    key = f"{org_id}/candidates/{cand_id}/resume-{hashlib.sha1(raw).hexdigest()[:10]}{ext}"
     store.put_file(key, raw, resumes.RESUME_TYPES.get(ext, "application/octet-stream"))
     return key, Path(filename).name[:200] if filename else f"resume{ext}"
 
@@ -405,7 +453,7 @@ def upsert_candidate(s, org_id: str, *, text: str, parsed: dict, profile: dict, 
     cand = s.query(db.Candidate).filter_by(org_id=org_id, email=email).first() if email else None
     created = cand is None
     if created:
-        cand = db.Candidate(org_id=org_id, source=source)
+        cand = db.Candidate(org_id=org_id, source=source, number=db.next_number(s, org_id, "candidate"))
         s.add(cand); s.flush()
     merged = {**(cand.profile or {}), **{k: v for k, v in profile.items() if v not in (None, "", [])}}
     cand.profile = merged
@@ -418,7 +466,13 @@ def upsert_candidate(s, org_id: str, *, text: str, parsed: dict, profile: dict, 
         cand.resume_text = text[:200000]
         cand.parsed = parsed
     if raw is not None:
+        old_file = cand.resume_file
         cand.resume_file, cand.resume_name = _save_resume(org_id, cand.id, raw, filename)
+        if old_file and old_file != cand.resume_file:
+            store.delete_files(old_file)          # the replaced resume is not kept
+    if profile.get("college"):
+        cand.college = str(profile["college"])[:200]
+    matching.compute_features(cand)
     cand.updated_at = time.time()
     return cand, created
 
@@ -478,7 +532,8 @@ def candidate_detail(cid: str, req: Request):
         c = get_candidate(s, ctx, cid)
         org = s.get(db.Org, c.org_id)
         st = org_settings(org)
-        apps = [{"id": a.id, "job_id": j.id, "job": j.title, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at,
+        iv_refs = _interview_refs(s, [a.interview_id for a in s.query(db.Application.interview_id).filter(db.Application.candidate_id == c.id) if a.interview_id])
+        apps = [{"id": a.id, "job_id": j.id, "job_ref": refs.job_ref(j), "job": j.title, "stage": a.stage, "interview_ref": iv_refs.get(a.interview_id), "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at,
                  "rating": a.rating, "knockout_failed": a.knockout_failed, "interview_id": a.interview_id, "answers": a.answers}
                 for a, j in s.query(db.Application, db.Job).join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.candidate_id == c.id)]
         best = matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=8)
@@ -510,7 +565,16 @@ async def update_candidate(cid: str, req: Request):
                     setattr(c, k, prof[k])
             if prof.get("headline"):
                 c.headline = prof["headline"]
+            if "email" in prof:
+                dup = s.query(db.Candidate.id).filter(db.Candidate.org_id == c.org_id, db.Candidate.email == prof["email"], db.Candidate.id != c.id).first()
+                if dup:
+                    raise HTTPException(409, "Another candidate already has this email.")
+                c.email = prof["email"]
+            if prof.get("college"):
+                c.college = prof["college"]
+            matching.compute_features(c)
         c.updated_at = time.time()
+        log_activity(s, ctx, "candidate_updated", f"{c.name}: profile edited", candidate_id=c.id)
         return cand_summary(c)
 
 
@@ -530,17 +594,20 @@ def delete_candidate(cid: str, req: Request):
 
 
 @router.get("/api/candidates/{cid}/resume")
-def candidate_resume(cid: str, req: Request, download: int = 0):
+async def candidate_resume(cid: str, req: Request, download: int = 0, v: str = ""):
     with db.session() as s:
         ctx = ctx_of(req, s)
         c = get_candidate(s, ctx, cid)
         key, name = c.resume_file, c.resume_name
     if not key:
         raise HTTPException(404, "No resume file")
-    p = store.get_file(key)
+    p = await asyncio.to_thread(store.get_file, key)
     if not p:
         raise HTTPException(404, "Resume file not found in storage")
-    return FileResponse(p, filename=name if download else None, content_disposition_type="attachment" if download else "inline")
+    # The browser keeps a private copy, so reopening a resume is instant; a new upload gets a new name (no stale copy).
+    return FileResponse(p, filename=name if download else None, content_disposition_type="attachment" if download else "inline",
+                        media_type=resumes.RESUME_TYPES.get(Path(key).suffix.lower(), "application/octet-stream"),
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/api/candidates/{cid}/jobs")
@@ -555,8 +622,14 @@ def candidate_jobs(cid: str, req: Request):
 # ---------------------------------------------------------------------------
 # applications
 # ---------------------------------------------------------------------------
-def app_row(a: db.Application, c: db.Candidate, m: db.Match | None) -> dict:
-    return {"id": a.id, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at, "updated_at": a.updated_at,
+def _interview_refs(s, ids: list[str]) -> dict[str, str]:
+    from . import ivindex
+    rows = s.query(db.InterviewIndex).filter(db.InterviewIndex.id.in_(ids or [""])).all()
+    return {r.id: ivindex.ref_of(r) for r in rows}
+
+
+def app_row(a: db.Application, c: db.Candidate, m: db.Match | None, iv_ref: str | None = None) -> dict:
+    return {"id": a.id, "stage": a.stage, "interview_ref": iv_ref, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at, "updated_at": a.updated_at,
             "rating": a.rating, "notes": a.notes, "knockout_failed": a.knockout_failed, "answers": a.answers, "cover_letter": a.cover_letter,
             "interview_id": a.interview_id, "source": a.source, "candidate": cand_summary(c),
             "match": {"score": m.score, "rank": m.rank, "ai_score": m.ai_score, "verdict": (m.ai_report or {}).get("verdict")} if m else None}
@@ -568,9 +641,11 @@ def job_applications(job_id: str, req: Request):
         ctx = ctx_of(req, s)
         job, _ = get_job(s, ctx, job_id)
         ms = {m.candidate_id: m for m in s.query(db.Match).filter_by(job_id=job.id)}
-        rows = s.query(db.Application, db.Candidate).join(db.Candidate, db.Candidate.id == db.Application.candidate_id) \
+        rows = s.query(db.Application, db.Candidate).options(*LIST_COLS).join(db.Candidate, db.Candidate.id == db.Application.candidate_id) \
             .filter(db.Application.job_id == job.id).order_by(db.Application.created_at.desc()).all()
-        return {"stages": [{"id": x, "label": STAGE_LABEL[x]} for x in STAGES], "items": [app_row(a, c, ms.get(c.id)) for a, c in rows]}
+        ivr = _interview_refs(s, [a.interview_id for a, _ in rows if a.interview_id])
+        return {"stages": [{"id": x, "label": STAGE_LABEL[x]} for x in STAGES],
+                "items": [app_row(a, c, ms.get(c.id), ivr.get(a.interview_id)) for a, c in rows]}
 
 
 @router.post("/api/jobs/{job_id}/applications")
@@ -615,13 +690,36 @@ async def update_application(aid: str, req: Request):
         return {"ok": True, "stage": a.stage}
 
 
+@router.delete("/api/applications/{aid}")
+def remove_application(aid: str, req: Request):
+    """Take a candidate off a job's pipeline (the candidate stays in the talent pool)."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        a = s.get(db.Application, aid)
+        if not a or a.org_id != ctx.org_id:
+            raise HTTPException(404, "Application not found")
+        job, perm = get_job(s, ctx, a.job_id)
+        if perm != "manage":
+            raise HTTPException(403, "Only HR can remove a candidate from a job.")
+        c = s.get(db.Candidate, a.candidate_id)
+        s.query(db.RoundResult).filter_by(application_id=a.id).delete()
+        s.delete(a)
+        s.query(db.Job).filter_by(id=job.id).update({db.Job.matched_at: None})
+        log_activity(s, ctx, "application_removed", f"{c.name if c else ''} removed from {job.title}", job_id=job.id, candidate_id=a.candidate_id)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # matching
 # ---------------------------------------------------------------------------
-def _stale(s, job: db.Job) -> bool:
+def _latest_cand_update(s, org_id: str) -> float:
+    return s.query(func.max(db.Candidate.updated_at)).filter(db.Candidate.org_id == org_id).scalar() or 0
+
+
+def _stale(s, job: db.Job, latest: float | None = None) -> bool:
     if not job.matched_at:
         return True
-    latest = s.query(func.max(db.Candidate.updated_at)).filter(db.Candidate.org_id == job.org_id).scalar() or 0
+    latest = _latest_cand_update(s, job.org_id) if latest is None else latest
     return latest > job.matched_at or job.updated_at > job.matched_at
 
 
@@ -638,17 +736,18 @@ async def match_run(req: Request):
         return stats
 
 
+def _match_row(m: db.Match, c: db.Candidate, a: db.Application | None) -> dict:
+    return {"rank": m.rank, "score": m.score, "breakdown": m.breakdown, "knocked_out": m.knocked_out, "ai_score": m.ai_score,
+            "ai_report": m.ai_report, "ai_at": m.ai_at, "candidate": cand_summary(c),
+            "application": {"id": a.id, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage)} if a else None}
+
+
 def match_rows(s, job: db.Job, limit: int) -> list[dict]:
-    rows = s.query(db.Match, db.Candidate).join(db.Candidate, db.Candidate.id == db.Match.candidate_id) \
+    rows = s.query(db.Match, db.Candidate).options(*LIST_COLS).join(db.Candidate, db.Candidate.id == db.Match.candidate_id) \
         .filter(db.Match.job_id == job.id, db.Match.rank < 9999).order_by(db.Match.rank).limit(limit).all()
-    apps = {a.candidate_id: a for a in s.query(db.Application).filter_by(job_id=job.id)}
-    out = []
-    for m, c in rows:
-        a = apps.get(c.id)
-        out.append({"rank": m.rank, "score": m.score, "breakdown": m.breakdown, "knocked_out": m.knocked_out, "ai_score": m.ai_score,
-                    "ai_report": m.ai_report, "ai_at": m.ai_at, "candidate": cand_summary(c),
-                    "application": {"id": a.id, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage)} if a else None})
-    return out
+    ids = [c.id for _, c in rows]
+    apps = {a.candidate_id: a for a in s.query(db.Application).filter(db.Application.job_id == job.id, db.Application.candidate_id.in_(ids or [""]))}
+    return [_match_row(m, c, apps.get(c.id)) for m, c in rows]
 
 
 @router.get("/api/jobs/{job_id}/matches")
@@ -663,7 +762,7 @@ def job_matches(job_id: str, req: Request, limit: int = 30):
         top_n = int((job.fields or {}).get("top_n") or job.top_n)
         rows = match_rows(s, job, max(top_n, min(100, limit)))
         pending = len(matching.pending_reports(s, job.org_id, [job.id]))
-        return {"top_n": top_n, "matched_at": job.matched_at, "pool": s.query(db.Candidate).filter_by(org_id=job.org_id).count(),
+        return {"top_n": top_n, "matched_at": job.matched_at, "pool": s.query(func.count(db.Candidate.id)).filter(db.Candidate.org_id == job.org_id).scalar(),
                 "ai_pending": pending, "ai_budget": st["ai_reports_per_run"], "items": rows, "can_run_ai": perm == "manage"}
 
 
@@ -677,22 +776,28 @@ def match_overview(req: Request):
         if vis is not None:
             q = q.filter(db.Job.id.in_(vis or [""]))
         jobs = q.order_by(db.Job.updated_at.desc()).all()
-        stale = [j.id for j in jobs if _stale(s, j)]
-        if stale and ctx.has(auth.MANAGE_JOBS | {"hiring_manager", "viewer"}):
+        latest = _latest_cand_update(s, ctx.org_id)
+        stale = [j.id for j in jobs if _stale(s, j, latest)]
+        if stale:
             matching.run(s, ctx.org_id, st["match_weights"], st["match_top_n"], stale)
             s.flush()
-        out, total_pending = [], 0
-        for j in jobs:
-            n = int((j.fields or {}).get("top_n") or j.top_n)
-            rows = match_rows(s, j, n)
-            pend = len(matching.pending_reports(s, ctx.org_id, [j.id]))
-            total_pending += pend
-            out.append({**job_summary(j), "shortlist": [{"candidate_id": r["candidate"]["id"], "name": r["candidate"]["name"], "score": r["score"],
-                                                          "ai_score": r["ai_score"], "verdict": (r["ai_report"] or {}).get("verdict"),
-                                                          "knocked_out": r["knocked_out"], "applied": bool(r["application"])} for r in rows],
-                        "ai_pending": pend, "scored": s.query(db.Match).filter(db.Match.job_id == j.id, db.Match.rank < 9999).count()})
-        return {"jobs": out, "pool": s.query(db.Candidate).filter_by(org_id=ctx.org_id).count(), "ai_pending": total_pending,
-                "ai_budget": st["ai_reports_per_run"], "mock": llm.MOCK, "model": llm.FAST_MODEL}
+        ids = [j.id for j in jobs]
+        tops = {j.id: int((j.fields or {}).get("top_n") or j.top_n or 5) for j in jobs}
+        rows = s.query(db.Match.job_id, db.Match.rank, db.Match.score, db.Match.ai_score, db.Match.ai_report, db.Match.knocked_out,
+                       db.Candidate.id, db.Candidate.name, db.Candidate.number) \
+            .join(db.Candidate, db.Candidate.id == db.Match.candidate_id) \
+            .filter(db.Match.job_id.in_(ids or [""]), db.Match.rank <= max(tops.values() or [1])).order_by(db.Match.rank).all()
+        applied = {(a, c) for a, c in s.query(db.Application.job_id, db.Application.candidate_id).filter(db.Application.job_id.in_(ids or [""]))}
+        scored = dict(s.query(db.Match.job_id, func.count()).filter(db.Match.job_id.in_(ids or [""]), db.Match.rank < 9999).group_by(db.Match.job_id).all())
+        pend = matching.pending_count(s, ctx.org_id, ids)
+        short: dict[str, list] = {i: [] for i in ids}
+        for jid, rank, score, ai_score, rep, ko, cid, name, num in rows:
+            if rank <= tops[jid]:
+                short[jid].append({"candidate_id": cid, "ref": refs.make(name or "candidate", num, cid), "name": name, "score": score,
+                                   "ai_score": ai_score, "verdict": (rep or {}).get("verdict"), "knocked_out": ko, "applied": (jid, cid) in applied})
+        out = [{**job_summary(j), "shortlist": short[j.id], "ai_pending": pend.get(j.id, 0), "scored": scored.get(j.id, 0)} for j in jobs]
+        return {"jobs": out, "pool": s.query(func.count(db.Candidate.id)).filter(db.Candidate.org_id == ctx.org_id).scalar(),
+                "ai_pending": sum(pend.values()), "ai_budget": st["ai_reports_per_run"], "mock": llm.MOCK, "model": llm.FAST_MODEL}
 
 
 @router.post("/api/match/ai-reports")
@@ -702,14 +807,19 @@ async def match_ai(req: Request):
         ctx = ctx_of(req, s)
         auth.require(ctx, auth.MANAGE_JOBS, "generate AI match reports")
         st = org_settings(org_of(s, ctx))
-        job_ids = [str(x) for x in (body.get("job_ids") or [])]
-        if not job_ids:
-            job_ids = [j.id for j in s.query(db.Job).filter(db.Job.org_id == ctx.org_id, db.Job.status == "open")]
-        for j in s.query(db.Job).filter(db.Job.id.in_(job_ids or [""])):
-            if j.org_id != ctx.org_id:
+        keys = [str(x) for x in (body.get("job_ids") or [])]
+        if keys:
+            found = [refs.resolve(s, db.Job, ctx.org_id, k) for k in keys]
+            if any(j is None for j in found):
                 raise HTTPException(404, "Job not found")
-            if _stale(s, j):
-                matching.run(s, ctx.org_id, st["match_weights"], st["match_top_n"], [j.id])
+            jobs = found
+        else:
+            jobs = s.query(db.Job).filter(db.Job.org_id == ctx.org_id, db.Job.status == "open").all()
+        job_ids = [j.id for j in jobs]
+        latest = _latest_cand_update(s, ctx.org_id)
+        stale = [j.id for j in jobs if _stale(s, j, latest)]
+        if stale:
+            matching.run(s, ctx.org_id, st["match_weights"], st["match_top_n"], stale)
         org_id = ctx.org_id
     budget = min(int(body.get("max") or st["ai_reports_per_run"]), st["ai_reports_per_run"])
     res = await matching.run_ai(org_id, job_ids, budget)
@@ -735,8 +845,7 @@ def dashboard(req: Request):
             aq = aq.filter(db.Application.job_id.in_(vis or [""]))
         jobs = jq.all()
         stage_counts = dict(aq.with_entities(db.Application.stage, func.count()).group_by(db.Application.stage).all())
-        from . import store as _store
-        interviews = [r for r in _store.list_all() if r.get("org_id") == org_id]
+        iv = dict(s.query(db.InterviewIndex.status, func.count()).filter(db.InterviewIndex.org_id == org_id).group_by(db.InterviewIndex.status).all())
         series = [0] * 14
         for (ts,) in aq.with_entities(db.Application.created_at).filter(db.Application.created_at > t - 14 * 86400):
             series[13 - int((t - ts) // 86400)] += 1
@@ -744,9 +853,9 @@ def dashboard(req: Request):
         apps_by_job = dict(aq.with_entities(db.Application.job_id, func.count()).group_by(db.Application.job_id).all())
         for j in jobs:
             if j.status == "open" and not apps_by_job.get(j.id):
-                attention.append({"job_id": j.id, "title": j.title, "reason": "No applications yet. Share the careers link or add candidates."})
+                attention.append({"job_id": j.id, "job_ref": refs.job_ref(j), "title": j.title, "reason": "No applications yet. Share the careers link or add candidates."})
             elif j.status == "draft" and jd_schema.missing_to_publish(j.fields or {}):
-                attention.append({"job_id": j.id, "title": j.title, "reason": "Draft: " + ", ".join(jd_schema.missing_to_publish(j.fields or {})[:3]) + " missing"})
+                attention.append({"job_id": j.id, "job_ref": refs.job_ref(j), "title": j.title, "reason": "Draft: " + ", ".join(jd_schema.missing_to_publish(j.fields or {})[:3]) + " missing"})
         act_q = s.query(db.Activity).filter(db.Activity.org_id == org_id)
         if vis is not None:
             act_q = act_q.filter(db.Activity.job_id.in_(vis or [""]))
@@ -757,8 +866,8 @@ def dashboard(req: Request):
             "new_candidates_7d": s.query(db.Candidate).filter(db.Candidate.org_id == org_id, db.Candidate.created_at > t - 7 * 86400).count() if vis is None else None,
             "applications": sum(stage_counts.values()), "applications_7d": sum(series[-7:]), "applications_14d": series,
             "pipeline": [{"id": st, "label": STAGE_LABEL[st], "count": stage_counts.get(st, 0)} for st in STAGES if st != "withdrawn"],
-            "interviews": {"total": len(interviews), "completed": sum(r["status"] in ("completed", "scored", "incomplete") for r in interviews),
-                           "in_progress": sum(r["status"] == "in_progress" for r in interviews)},
+            "interviews": {"total": sum(iv.values()), "completed": sum(iv.get(k, 0) for k in ("completed", "scored", "incomplete")),
+                           "in_progress": iv.get("in_progress", 0)},
             "ai_reports": s.query(db.Match).filter(db.Match.org_id == org_id, db.Match.ai_report.isnot(None)).count(),
             "attention": attention[:6], "activity": activity_rows(s, act_q, 12),
         }
@@ -788,11 +897,37 @@ def public_careers(slug: str):
         out = []
         for j in jobs:
             f = j.fields or {}
-            out.append({"id": j.id, "title": j.title, "department": j.department, "location": jd_schema.location_text(f),
+            out.append({"id": j.id, "ref": refs.job_ref(j), "title": j.title, "department": j.department, "location": jd_schema.location_text(f),
                         "workplace_type": f.get("workplace_type", ""), "employment_type": f.get("employment_type", ""),
                         "experience": jd_schema.experience_text(f), "salary": jd_schema.salary_text(f) if f.get("show_salary", True) else "",
                         "published_at": j.published_at, "confidential": bool(f.get("confidential"))})
         return {"org": public_org(org), "jobs": out}
+
+
+def _public_lookup(s, slug: str, ref: str) -> db.Job | None:
+    org = s.query(db.Org).filter_by(slug=slug).first()
+    return refs.resolve(s, db.Job, org.id, ref) if org else None
+
+
+@router.get("/api/public/orgs/{slug}/jobs/{ref}")
+def public_job_by_ref(slug: str, ref: str):
+    with db.session() as s:
+        job = _public_lookup(s, slug, ref)
+        if not _public_job_ok(job):
+            raise HTTPException(404, "This job is no longer open.")
+        job_id = job.id
+    return public_job(job_id)
+
+
+@router.post("/api/public/orgs/{slug}/jobs/{ref}/apply")
+async def apply_by_ref(slug: str, ref: str, req: Request, data: str = Form(...), resume: UploadFile | None = File(None),
+                       photo: UploadFile | None = File(None)):
+    with db.session() as s:
+        job = _public_lookup(s, slug, ref)
+        if not _public_job_ok(job):
+            raise HTTPException(404, "This job is no longer open.")
+        job_id = job.id
+    return await apply(job_id, req, data, resume, photo)
 
 
 @router.get("/api/public/jobs/{job_id}")
@@ -806,13 +941,14 @@ def public_job(job_id: str):
             raise HTTPException(404, "This job is no longer open.")
         jd = jd_schema.compose(job.fields or {}, org.name, org_settings(org), public=True)
         qs = [{k: q.get(k) for k in ("id", "question", "kind", "required")} for q in (job.fields or {}).get("screening_questions") or []]
-        return {"id": job.id, "org": public_org(org) if not (job.fields or {}).get("confidential") else {**public_org(org), "name": jd["company"], "about": "", "website": ""},
+        return {"id": job.id, "ref": refs.job_ref(job), "org": public_org(org) if not (job.fields or {}).get("confidential") else {**public_org(org), "name": jd["company"], "about": "", "website": ""},
                 "jd": jd, "questions": qs, "published_at": job.published_at, "deadline": (job.fields or {}).get("deadline")}
 
 
 PROFILE_KEYS = {"name": 200, "email": 320, "phone": 60, "location": 200, "headline": 300, "current_title": 200, "current_company": 200,
                 "summary": 3000, "linkedin": 300, "portfolio": 300, "github": 300, "work_authorization": 200, "salary_currency": 10,
-                "pronouns": 40, "referral": 200, "how_heard": 120}
+                "pronouns": 40, "referral": 200, "how_heard": 120, "college": 200, "degree": 120, "graduation_year": 10,
+                "preferred_location": 200}
 
 
 def clean_profile(d: dict) -> dict:
@@ -901,7 +1037,7 @@ async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | Non
 
 
 @router.post("/api/public/jobs/{job_id}/apply")
-async def apply(job_id: str, req: Request, data: str = Form(...), resume: UploadFile | None = File(None)):
+async def apply(job_id: str, req: Request, data: str = Form(...), resume: UploadFile | None = File(None), photo: UploadFile | None = File(None)):
     with db.session() as s:
         job = s.get(db.Job, job_id)
         if not _public_job_ok(job):

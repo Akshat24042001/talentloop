@@ -50,7 +50,8 @@ def me_payload(s, ctx: auth.Ctx) -> dict:
     u = ctx.user
     mems = []
     if u:
-        for m, o in s.query(db.Membership, db.Org).join(db.Org, db.Org.id == db.Membership.org_id).filter(db.Membership.user_id == u.id):
+        for m, o in s.query(db.Membership, db.Org).join(db.Org, db.Org.id == db.Membership.org_id) \
+                .filter(db.Membership.user_id == u.id, db.Membership.active.isnot(False)):
             mems.append({"org_id": o.id, "name": o.name, "slug": o.slug, "role": m.role})
     org = ctx.org
     return {
@@ -104,7 +105,10 @@ async def login(req: Request, resp: Response):
             raise HTTPException(403, "This account is disabled. Contact support.")
         if email in auth.PLATFORM_ADMINS and not user.is_platform_admin:
             user.is_platform_admin = True
-        mem = s.query(db.Membership).filter_by(user_id=user.id).order_by(db.Membership.created_at).first()
+        mem = s.query(db.Membership).filter(db.Membership.user_id == user.id, db.Membership.active.isnot(False)) \
+            .order_by(db.Membership.created_at).first()
+        if not mem and not user.is_platform_admin and s.query(db.Membership).filter_by(user_id=user.id).first():
+            raise HTTPException(403, "Your access has been paused by your company admin.")
         auth.start_session(s, resp, req, user, mem.org_id if mem else None)
         s.flush()
         return me_payload(s, auth.current(req, s, required=False) or auth.Ctx(user=user, org=s.get(db.Org, mem.org_id) if mem else None,
@@ -133,7 +137,7 @@ async def switch_org(req: Request):
         if not ctx.user:
             raise HTTPException(400, "Not available for API keys")
         mem = s.query(db.Membership).filter_by(user_id=ctx.user.id, org_id=str(body.get("org_id"))).first()
-        if not mem:
+        if not mem or mem.active is False:
             raise HTTPException(404, "You are not a member of that company")
         sess = s.get(db.AuthSession, auth.token_hash(req.cookies.get(auth.COOKIE, "")))
         sess.org_id = mem.org_id
@@ -218,15 +222,16 @@ def team(req: Request):
         ctx = auth.current(req, s)
         org_id = auth.require_org(ctx)
         members = [{"id": m.id, "user_id": u.id, "name": u.name, "email": u.email, "role": m.role, "role_label": auth.ROLE_LABEL.get(m.role, m.role),
-                    "title": m.title, "last_login_at": u.last_login_at, "joined_at": m.created_at, "you": u.id == ctx.user_id}
+                    "title": m.title, "last_login_at": u.last_login_at, "joined_at": m.created_at, "you": u.id == ctx.user_id,
+                    "active": m.active is not False}
                    for m, u in s.query(db.Membership, db.User).join(db.User, db.User.id == db.Membership.user_id)
                    .filter(db.Membership.org_id == org_id).order_by(db.Membership.created_at)]
         invites = []
         if ctx.has(auth.MANAGE_TEAM):
             invites = [{"id": i.id, "email": i.email, "role": i.role, "role_label": auth.ROLE_LABEL.get(i.role, i.role), "title": i.title,
-                        "created_at": i.created_at, "expires_at": i.expires_at}
-                       for i in s.query(db.Invite).filter(db.Invite.org_id == org_id, db.Invite.accepted_at.is_(None),
-                                                          db.Invite.expires_at > time.time())]
+                        "created_at": i.created_at, "expires_at": i.expires_at, "expired": i.expires_at < time.time()}
+                       for i in s.query(db.Invite).filter(db.Invite.org_id == org_id, db.Invite.accepted_at.is_(None))
+                       .order_by(db.Invite.created_at.desc())]
         return {"members": members, "invites": invites, "roles": [{"id": r, "label": auth.ROLE_LABEL[r]} for r in auth.ROLES]}
 
 
@@ -254,6 +259,21 @@ async def create_invite(req: Request):
         return {"id": inv.id, "path": f"/invite/{tok}", "email": email, "expires_days": INVITE_DAYS}
 
 
+@router.post("/api/team/invites/{inv_id}/renew")
+def renew_invite(inv_id: str, req: Request):
+    """A fresh link for a pending invite (the old link stops working) with a new 7-day expiry."""
+    with db.session() as s:
+        ctx = auth.current(req, s)
+        auth.require(ctx, auth.MANAGE_TEAM, "manage invites")
+        inv = s.query(db.Invite).filter_by(id=inv_id, org_id=auth.require_org(ctx)).first()
+        if not inv or inv.accepted_at:
+            raise HTTPException(404, "Invite not found")
+        tok = auth.secrets.token_urlsafe(24)
+        inv.token_hash, inv.expires_at = auth.token_hash(tok), time.time() + INVITE_DAYS * 86400
+        log_activity(s, ctx, "member_invited", f"{inv.email}: new invite link")
+        return {"id": inv.id, "path": f"/invite/{tok}", "email": inv.email, "expires_days": INVITE_DAYS}
+
+
 @router.delete("/api/team/invites/{inv_id}")
 def revoke_invite(inv_id: str, req: Request):
     with db.session() as s:
@@ -264,7 +284,8 @@ def revoke_invite(inv_id: str, req: Request):
 
 
 def _owners_left(s, org_id: str, excluding: str) -> int:
-    return s.query(db.Membership).filter(db.Membership.org_id == org_id, db.Membership.role == "owner", db.Membership.id != excluding).count()
+    return s.query(db.Membership).filter(db.Membership.org_id == org_id, db.Membership.role == "owner", db.Membership.id != excluding,
+                                         db.Membership.active.isnot(False)).count()
 
 
 @router.patch("/api/team/members/{mid}")
@@ -287,7 +308,19 @@ async def update_member(mid: str, req: Request):
             m.role = role
         if "title" in body:
             m.title = str(body["title"] or "")[:120]
-        log_activity(s, ctx, "member_updated", f"{m.user_id} -> {m.role}")
+        u = s.get(db.User, m.user_id)
+        who = (u.name or u.email) if u else m.user_id
+        if "active" in body and bool(body["active"]) != (m.active is not False):
+            if m.user_id == ctx.user_id:
+                raise HTTPException(400, "You can't pause your own access.")
+            if not body["active"] and m.role == "owner" and not _owners_left(s, m.org_id, m.id):
+                raise HTTPException(400, "A company needs at least one active owner.")
+            m.active = bool(body["active"])
+            if not m.active:                       # sign them out of this company now
+                s.query(db.AuthSession).filter_by(user_id=m.user_id, org_id=m.org_id).delete()
+            log_activity(s, ctx, "member_updated", f"{who}: access {'resumed' if m.active else 'paused'}")
+        else:
+            log_activity(s, ctx, "member_updated", f"{who}: {auth.ROLE_LABEL.get(m.role, m.role)}" + (f", {m.title}" if m.title else ""))
     return {"ok": True}
 
 
@@ -303,8 +336,12 @@ def remove_member(mid: str, req: Request):
             raise HTTPException(400, "A company needs at least one owner.")
         s.query(db.JobCollaborator).filter(db.JobCollaborator.user_id == m.user_id,
                                            db.JobCollaborator.job_id.in_(s.query(db.Job.id).filter(db.Job.org_id == m.org_id))).delete(synchronize_session=False)
+        if m.user_id == ctx.user_id:
+            raise HTTPException(400, "You can't remove yourself. Ask another owner or admin.")
+        u = s.get(db.User, m.user_id)
+        s.query(db.AuthSession).filter_by(user_id=m.user_id, org_id=m.org_id).delete()
         s.delete(m)
-        log_activity(s, ctx, "member_removed", m.user_id)
+        log_activity(s, ctx, "member_removed", (u.name or u.email) if u else m.user_id)
     return {"ok": True}
 
 
@@ -358,10 +395,8 @@ def _admin(req: Request, s) -> auth.Ctx:
 
 
 def _interview_counts() -> dict[str | None, int]:
-    out: dict[str | None, int] = {}
-    for r in store.list_all():
-        out[r.get("org_id")] = out.get(r.get("org_id"), 0) + 1
-    return out
+    with db.session() as s:
+        return dict(s.query(db.InterviewIndex.org_id, func.count()).group_by(db.InterviewIndex.org_id).all())
 
 
 @router.get("/api/admin/overview")

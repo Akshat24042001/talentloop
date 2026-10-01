@@ -1,8 +1,8 @@
 // Building blocks shared by the workspace pages.
 import { TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { api } from '../lib/api'
-import { initials } from '../lib/format'
+import { api, pageCache } from '../lib/api'
+import { ago, initials, when } from '../lib/format'
 import { Alert, Button, Spinner, cn } from './ui'
 
 export function PageHeader({ title, description, actions, back }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; back?: ReactNode }) {
@@ -47,17 +47,19 @@ export function ErrorBox({ error, retry }: { error: string; retry?: () => void }
   return <Alert tone="danger" icon={<TriangleAlert />} title="Something went wrong">{error}{retry && <> <button className="font-semibold underline" onClick={retry}>Try again</button></>}</Alert>
 }
 
-/** Load JSON from the API; `reload` refetches. */
+/** Load JSON from the API; `reload` refetches. Shows the last copy of the same page instantly, then refreshes it. */
 export function useApi<T>(path: string | null, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null)
+  const cached = path ? (pageCache.get(path) as T | undefined) : undefined
+  const [data, setData] = useState<T | null>(cached ?? null)
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(!!path)
+  const [loading, setLoading] = useState(!!path && cached === undefined)
   const seq = useRef(0)
   const reload = useCallback(async () => {
     if (!path) return
     const n = ++seq.current
-    setLoading(true)
-    try { const d = await api<T>(path); if (n === seq.current) { setData(d); setError('') } }
+    if (!pageCache.has(path)) setLoading(true)
+    else setData(pageCache.get(path) as T)
+    try { const d = await api<T>(path); pageCache.set(path, d); if (n === seq.current) { setData(d); setError('') } }
     catch (e: any) { if (n === seq.current) setError(e.message) }
     if (n === seq.current) setLoading(false)
   }, [path, ...deps])                          // eslint-disable-line react-hooks/exhaustive-deps
@@ -168,4 +170,10 @@ export function Pager({ page, total, limit, onPage }: { page: number; total: num
 
 export function KV({ k, children }: { k: ReactNode; children: ReactNode }) {
   return <div className="flex justify-between gap-4 py-2 text-sm"><dt className="text-slate-500 dark:text-slate-400">{k}</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-100">{children || '-'}</dd></div>
+}
+
+/** "3 weeks ago", with the exact date and time on hover. */
+export function Ago({ ts, prefix = '' }: { ts?: number | null; prefix?: string }) {
+  if (!ts) return <>-</>
+  return <time dateTime={new Date(ts * 1000).toISOString()} title={when(ts)}>{prefix}{ago(ts)}</time>
 }

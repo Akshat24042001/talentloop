@@ -1,7 +1,7 @@
 import { Copy, Download, ExternalLink, FileText, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, Users, Video, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Modal, Select, Textarea, Tip, copyText, toast } from '../components/ui'
-import { Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, ScoreBar, ScoreRing, Tabs, useApi } from '../components/kit'
+import { Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, ScoreBar, ScoreRing, Tabs, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
 import { ago, when } from '../lib/format'
 import { navigate, useLocation } from '../lib/router'
@@ -10,14 +10,14 @@ import { ACTION_LABEL, JOB_STATUS, STAGE_TONE, actor } from './labels'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 
 interface Job {
-  id: string; title: string; department: string; status: string; top_n: number; location: string; employment_type: string; experience: string; salary: string
+  id: string; ref: string; title: string; department: string; status: string; top_n: number; location: string; employment_type: string; experience: string; salary: string
   fields: Record<string, any>; permission: 'manage' | 'edit' | 'view'; collaborators: { id: string; user_id: string; name: string; email: string; permission: string }[]
   created_by?: { name: string; email: string }; missing_to_publish: string[]; careers_url: string; applications: number; created_at: number; updated_at: number; published_at?: number
 }
 interface JD { title: string; company: string; facts: string[]; sections: { title: string; body?: string; items?: string[] }[]; contact?: string }
-export interface Cand { id: string; name: string; email: string; phone?: string; location?: string; headline?: string; years?: number | null; skills: string[]; source: string; has_resume: boolean; notice_days?: number | null; current_company?: string }
+export interface Cand { id: string; ref: string; name: string; email: string; phone?: string; location?: string; headline?: string; years?: number | null; skills: string[]; source: string; has_resume: boolean; notice_days?: number | null; current_company?: string }
 interface MatchRow { rank: number; score: number; breakdown: Breakdown; knocked_out: boolean; ai_score?: number | null; ai_report?: AIReport | null; candidate: Cand; application?: { id: string; stage: string; stage_label: string } | null }
-interface AppRow { id: string; stage: string; stage_label: string; created_at: number; rating?: number | null; notes?: string; knockout_failed?: string[]; answers?: Record<string, any>; cover_letter?: string; interview_id?: string; source?: string; candidate: Cand; match?: { score: number; rank: number; ai_score?: number; verdict?: string } | null }
+interface AppRow { id: string; stage: string; stage_label: string; created_at: number; rating?: number | null; notes?: string; knockout_failed?: string[]; answers?: Record<string, any>; cover_letter?: string; interview_id?: string; interview_ref?: string; source?: string; candidate: Cand; match?: { score: number; rank: number; ai_score?: number; verdict?: string } | null }
 
 type Tab = 'overview' | 'pipeline' | 'matches' | 'team' | 'activity'
 
@@ -66,7 +66,7 @@ export default function JobDetail({ id }: { id: string }) {
 function Overview({ job }: { job: Job }) {
   const { data: jd } = useApi<JD>(`/api/jobs/${job.id}/jd`)
   const me = useMe()
-  async function dup() { const r = await api(`/api/jobs/${job.id}/duplicate`, { method: 'POST' }); toast('Copied as a new draft'); navigate(`/app/jobs/${r.id}/edit`) }
+  async function dup() { const r = await api(`/api/jobs/${job.id}/duplicate`, { method: 'POST' }); toast('Copied as a new draft'); navigate(`/app/jobs/${r.ref}/edit`) }
   async function del() { if (!confirm(`Delete "${job.title}" with its applications and matches? Candidates stay in your pool.`)) return; await api(`/api/jobs/${job.id}`, { method: 'DELETE' }); toast('Job deleted'); navigate('/app/jobs') }
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -123,7 +123,7 @@ function Matches({ job, canManage }: { job: Job; canManage: boolean }) {
     <div className="space-y-4">
       <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="text-sm"><b>{data.pool}</b> candidates in your pool ranked instantly by skills, experience, relevance, location and notice period. The AI writes reports for the top <b>{data.top_n}</b> only.
-          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Ranked {ago(data.matched_at)}. Updates automatically when the job or candidates change.</div></div>
+          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Ranked <Ago ts={data.matched_at} />. Updates automatically when the job or candidates change.</div></div>
         {data.can_run_ai && canManage && (data.ai_pending > 0
           ? <Button variant="primary" icon={<Sparkles />} loading={busy} onClick={runAI}>Write {Math.min(data.ai_pending, data.ai_budget)} AI report{data.ai_pending > 1 ? 's' : ''}</Button>
           : <Badge tone="success" icon={<Sparkles />}>AI reports up to date</Badge>)}
@@ -153,7 +153,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
         <ScoreRing value={m.score} label="Match score" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <a href={`/app/candidates/${c.id}`} className="font-semibold text-slate-900 hover:underline dark:text-white">{c.name}</a>
+            <a href={`/app/candidates/${c.ref}`} className="font-semibold text-slate-900 hover:underline dark:text-white">{c.name}</a>
             {m.application && <Badge tone={STAGE_TONE[m.application.stage]}>{m.application.stage_label}</Badge>}
             {m.breakdown.applied && !m.application && <Badge tone="brand">Applied</Badge>}
             {m.knocked_out && <Badge tone="danger">{(m.breakdown.knocked_out || []).join(', ') || 'Screened out'}</Badge>}
@@ -164,7 +164,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
         <div className="flex flex-wrap gap-2">
           {!compact || open ? null : <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>Details</Button>}
           {canManage && !m.application && <Button size="sm" icon={<UserPlus />} onClick={() => onAdd(c)}>Shortlist</Button>}
-          {canManage && <Tip label="Send an AI first-round interview"><Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${job.id}&candidate=${c.id}${m.application ? `&application=${m.application.id}` : ''}`}>Interview</Button></Tip>}
+          {canManage && <Tip label="Send an AI first-round interview"><Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${job.ref}&candidate=${c.ref}${m.application ? `&application=${m.application.id}` : ''}`}>Interview</Button></Tip>}
         </div>
       </div>
       {open && (
@@ -227,6 +227,10 @@ function ApplicationDrawer({ a, job, onClose, onSaved }: { a: AppRow; job: Job; 
     try { await api(`/api/applications/${a.id}`, { method: 'PATCH', json: { rating: rating || null, notes } }); toast('Saved'); onSaved(); onClose() } catch (e: any) { toast(e.message) }
     setBusy(false)
   }
+  async function removeFromJob() {
+    if (!confirm(`Remove ${a.candidate.name} from ${job.title}? They stay in your talent pool.`)) return
+    try { await api(`/api/applications/${a.id}`, { method: 'DELETE' }); toast('Removed from the job'); onSaved(); onClose() } catch (e: any) { toast(e.message) }
+  }
   return (
     <Modal open onOpenChange={o => !o && onClose()} title={a.candidate.name} description={[a.candidate.email, a.candidate.phone].filter(Boolean).join(' · ')}>
       <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto pr-1 text-sm">
@@ -238,9 +242,10 @@ function ApplicationDrawer({ a, job, onClose, onSaved }: { a: AppRow; job: Job; 
         <Field label="Notes" htmlFor="notes"><Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Visible to your team" /></Field>
       </div>
       <div className="mt-5 flex flex-wrap justify-between gap-2">
-        <div className="flex gap-2"><Button size="sm" href={`/app/candidates/${a.candidate.id}`} icon={<FileText />}>Full profile</Button>
-          {a.interview_id && <Button size="sm" href={`/app/interviews/${a.interview_id}`} icon={<Video />}>Interview report</Button>}</div>
-        <Button variant="primary" size="sm" loading={busy} onClick={save}>Save</Button>
+        <div className="flex gap-2"><Button size="sm" href={`/app/candidates/${a.candidate.ref}`} icon={<FileText />}>Full profile</Button>
+          {a.interview_ref && <Button size="sm" href={`/app/interviews/${a.interview_ref}`} icon={<Video />}>Interview report</Button>}</div>
+        <span className="flex gap-2">{job.permission === 'manage' && <Button size="sm" variant="ghost" className="text-red-600" onClick={removeFromJob}>Remove from job</Button>}
+          <Button variant="primary" size="sm" loading={busy} onClick={save}>Save</Button></span>
       </div>
     </Modal>
   )

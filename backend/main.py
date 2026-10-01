@@ -20,9 +20,10 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse, RedirectResponse,  # noqa: E402
                                Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
-from . import api_accounts, api_hiring, auth, brain, db, exports, llm, media, proctor, store  # noqa: E402
+from . import api_accounts, api_hiring, auth, brain, db, exports, ivindex, llm, matching, media, proctor, refs, store  # noqa: E402
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -46,6 +47,8 @@ if WEAK_ADMIN:
     log.warning("ADMIN_KEY is weak. Use a long random string, or remove it if you don't use the API.")
 
 db.migrate()   # idempotent: creates missing tables (also when the app is imported by tests or tools)
+store.ON_SAVE.append(ivindex.sync)
+store.ON_DELETE.append(ivindex.remove)
 app = FastAPI(title="TalentLoop")
 app.include_router(api_accounts.router)
 _presence: dict[str, float] = {}     # interview id -> last heartbeat from a live call (memory only)
@@ -58,6 +61,12 @@ async def _startup():
     n = await asyncio.to_thread(store.restore_all)
     if n:
         log.info("restored %d interviews from S3", n)
+    n = await asyncio.to_thread(ivindex.backfill)
+    if n:
+        log.info("indexed %d interviews", n)
+    n = await asyncio.to_thread(matching.backfill_features)
+    if n:
+        log.info("computed matching features for %d candidates", n)
     await llm.resolve_models()
     if SWEEP_EVERY_SEC > 0:
         asyncio.create_task(_sweeper())
@@ -101,9 +110,18 @@ def can_see_interview(ctx: auth.Ctx, rec: dict) -> bool:
     return vis is None or rec.get("job_id") in vis or rec.get("created_by") == ctx.user_id
 
 
+def resolve_iid(ctx: auth.Ctx, key: str) -> str:
+    """Interview id for a readable ref (rohan-mehta-7) in this company, or the id itself."""
+    if store._valid(key) and not refs.number_of(key):
+        return key
+    with db.session() as s:
+        row = refs.resolve(s, db.InterviewIndex, ctx.org_id, key)
+        return row.id if row else key
+
+
 def hr_rec(iid: str, req: Request, manage: bool = False) -> tuple[auth.Ctx, dict]:
     ctx = require_admin(req)
-    rec = get_rec(iid)
+    rec = get_rec(resolve_iid(ctx, iid))
     if not can_see_interview(ctx, rec):
         raise HTTPException(404, "Interview not found")
     if manage and not (ctx.has(auth.MANAGE_JOBS) or rec.get("created_by") == ctx.user_id):
@@ -238,12 +256,17 @@ async def create_interview(req: Request):
     ctx = require_admin(req)
     body = await req.json()
     job_id = str(body.get("job_id") or "") or None
+    cand_id = str(body.get("candidate_id") or "") or None
     with db.session() as s:
-        job = s.get(db.Job, job_id) if job_id else None
+        job = refs.resolve(s, db.Job, ctx.org_id, job_id) if job_id else None
         if job_id and (not job or not auth.job_permission(s, ctx, job)):
             raise HTTPException(404, "Job not found")
         if not ctx.has(auth.MANAGE_JOBS) and not (job and auth.job_permission(s, ctx, job) in ("manage", "edit")):
             raise HTTPException(403, "Your role can't create interviews.")
+        job_id = job.id if job else None
+        if cand_id:
+            cand = refs.resolve(s, db.Candidate, ctx.org_id, cand_id)
+            cand_id = cand.id if cand else None
     inputs = body.get("inputs") or {}
     plan = body.get("plan")
     if not plan:
@@ -257,7 +280,7 @@ async def create_interview(req: Request):
     settings = _settings(body)
     starts = settings["available_from"] or now
     rec = {"id": iid, "created_at": now, "org_id": ctx.org_id, "created_by": ctx.user_id, "job_id": job_id,
-           "candidate_id": str(body.get("candidate_id") or "") or None, "application_id": str(body.get("application_id") or "") or None,
+           "candidate_id": cand_id, "application_id": str(body.get("application_id") or "") or None,
            "expires_at": starts + max(0.5, float(body.get("expires_hours") or 72)) * 3600,
            "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
            "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
@@ -270,7 +293,10 @@ async def create_interview(req: Request):
                 app_.interview_id = iid
                 if app_.stage in ("applied", "screening", "shortlisted"):
                     app_.stage = "interview"
-    return {"id": iid, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/app/interviews/{iid}",
+    with db.session() as s:
+        row = s.get(db.InterviewIndex, iid)
+        ref = ivindex.ref_of(row) if row else iid
+    return {"id": iid, "ref": ref, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/app/interviews/{ref}",
             "warnings": _history_warnings(settings["candidate_email"], iid, org_id=ctx.org_id, all_orgs=ctx.via_key)}
 
 
@@ -279,15 +305,15 @@ def _history_warnings(email: str, skip: str = "", org_id: str | None = None, all
     if not email:
         return []
     out = []
-    for r in store.list_all():
-        if r["id"] == skip or (r.get("settings") or {}).get("candidate_email", "").strip().lower() != email:
-            continue
-        if not all_orgs and r.get("org_id") != org_id:      # a company only sees its own history
-            continue
-        dq = r.get("disqualified")
-        if dq:
-            out.append(f"This email was disqualified in an earlier interview ({r['plan'].get('role', '')}, "
-                       f"{time.strftime('%d %b %Y', time.localtime(dq.get('at', 0)))}): {dq.get('reason', '')}")
+    with db.session() as s:
+        q = s.query(db.InterviewIndex).filter(db.InterviewIndex.email == email, db.InterviewIndex.id != skip)
+        if not all_orgs:                                    # a company only sees its own history
+            q = q.filter(db.InterviewIndex.org_id == org_id)
+        for r in q:
+            sm = r.summary or {}
+            if sm.get("disqualified"):
+                out.append(f"This email was disqualified in an earlier interview ({r.role}, "
+                           f"{time.strftime('%d %b %Y', time.localtime(sm.get('dq_at') or 0))}): {sm.get('dq_reason', '')}")
     return out
 
 
@@ -298,29 +324,33 @@ def candidate_history(req: Request, email: str = ""):
     return {"warnings": _history_warnings(email, org_id=ctx.org_id, all_orgs=ctx.via_key)}
 
 
-def _row(r: dict) -> dict:
-    rep = r.get("report") or {}
-    pr = proctor.summary(r) if r.get("state") else {}
-    return {"id": r["id"], "created_at": r["created_at"], "status": r["status"],
-            "candidate": r["plan"].get("candidate_name"), "role": r["plan"].get("role"),
-            "email": (r.get("settings") or {}).get("candidate_email", ""),
-            "recommendation": rep.get("recommendation"), "overall": (rep.get("computed") or {}).get("overall"),
-            "risk": pr.get("risk"), "decision": (r.get("hr") or {}).get("decision"),
-            "ended_early": bool(r.get("ended_early")), "expires_at": r.get("expires_at"),
-            "disqualified": bool(r.get("disqualified")), "warnings": len(r.get("warnings") or []),
-            "company": r["plan"].get("company"), "started_at": proctor.interview_start(r) if r.get("state") else None}
+def visible_index(ctx: auth.Ctx, s) -> list[db.InterviewIndex]:
+    q = s.query(db.InterviewIndex)
+    if not ctx.via_key:
+        q = q.filter(db.InterviewIndex.org_id == ctx.org_id) if ctx.org_id else q.filter(db.InterviewIndex.id == "")
+        vis = getattr(ctx, "visible_jobs", None)
+        if vis is not None:
+            q = q.filter(or_(db.InterviewIndex.job_id.in_(vis or [""]), db.InterviewIndex.created_by == ctx.user_id))
+    rows = q.order_by(db.InterviewIndex.created_at.desc()).all()
+    if ctx.platform_admin and not ctx.via_key:     # interviews created before companies existed
+        rows += s.query(db.InterviewIndex).filter(db.InterviewIndex.org_id.is_(None)).order_by(db.InterviewIndex.created_at.desc()).all()
+    return rows
 
 
 @app.get("/api/interviews")
 def list_interviews(req: Request):
     ctx = require_admin(req)
-    return [_row(r) for r in store.list_all() if can_see_interview(ctx, r)]
+    with db.session() as s:
+        return [ivindex.row_json(r) for r in visible_index(ctx, s)]
 
 
 @app.get("/api/interviews.csv")
 def interviews_csv(req: Request):
     ctx = require_admin(req)
-    return Response(exports.interviews_csv([r for r in store.list_all() if can_see_interview(ctx, r)]), media_type="text/csv",
+    with db.session() as s:
+        ids = [r.id for r in visible_index(ctx, s)]
+    recs = [r for r in (store.load(i) for i in ids) if r]
+    return Response(exports.interviews_csv(recs), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="interviews_{time.strftime("%Y%m%d")}.csv"'})
 
 
@@ -434,8 +464,10 @@ def calibration(req: Request):
     """Across all interviews HR has scored: how often does the AI land within +/-1 of HR?"""
     ctx = require_admin(req)
     pairs = []
-    for r in store.list_all():
-        if not can_see_interview(ctx, r):
+    with db.session() as s:
+        ids = [r.id for r in visible_index(ctx, s) if r.status == "scored"]
+    for r in (store.load(i) for i in ids):
+        if not r:
             continue
         hr = (r.get("hr") or {}).get("scores") or {}
         for qr in ((r.get("report") or {}).get("questions") or []):
@@ -876,8 +908,15 @@ async def _finish_up(iid: str):
 # ---------------------------------------------------------------------------
 async def sweep_once() -> None:
     now = time.time()
-    for rec in store.list_all():
-        iid = rec["id"]
+    with db.session() as s:
+        work = [r.id for r in s.query(db.InterviewIndex.id, db.InterviewIndex.summary) if (r.summary or {}).get("needs_sweep")]
+        if RETENTION_DAYS:
+            work += [i for (i,) in s.query(db.InterviewIndex.id).filter(db.InterviewIndex.created_at < now - RETENTION_DAYS * 86400)]
+    for iid in dict.fromkeys(work):
+        rec = store.load(iid)
+        if not rec:
+            ivindex.remove(iid)
+            continue
         if iid in _sweeping:
             continue
         _sweeping.add(iid)

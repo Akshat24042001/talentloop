@@ -4,11 +4,11 @@ import { SplitBar } from '../components/charts'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Input, Select, Spinner, Stat, Tip, copyText, useInterval } from '../components/ui'
 import { api, withKey } from '../lib/api'
 import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, ago, initials, when } from '../lib/format'
-import { PageHeader } from '../components/kit'
+import { PageHeader, Ago } from '../components/kit'
 import { useHealth } from '../lib/health'
 
 interface Row {
-  id: string; created_at: number; status: string; candidate?: string; role?: string; company?: string; email?: string
+  id: string; ref: string; created_at: number; status: string; candidate?: string; role?: string; company?: string; email?: string
   recommendation?: string; overall?: number | null; risk?: 'low' | 'medium' | 'high'; decision?: string; ended_early: boolean
   disqualified: boolean; warnings: number
 }
@@ -98,10 +98,10 @@ export default function Interviews() {
             <ul className="divide-y divide-slate-100 dark:divide-ink-800 md:hidden">
               {filtered.map(r => (
                 <li key={r.id}>
-                  <a href={`/app/interviews/${encodeURIComponent(r.id)}`} className="flex gap-3 px-4 py-3.5 active:bg-slate-50 dark:active:bg-ink-850">
+                  <a href={`/app/interviews/${encodeURIComponent(r.ref)}`} className="flex gap-3 px-4 py-3.5 active:bg-slate-50 dark:active:bg-ink-850">
                     <span className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-xs font-bold text-brand-700 dark:from-brand-500/25 dark:to-violet-500/25 dark:text-brand-200">{initials(r.candidate)}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2"><span className="truncate font-semibold text-slate-900 dark:text-white">{r.candidate || 'Candidate'}</span><span className="shrink-0 text-xs text-slate-400">{ago(r.created_at)}</span></div>
+                      <div className="flex items-baseline justify-between gap-2"><span className="truncate font-semibold text-slate-900 dark:text-white">{r.candidate || 'Candidate'}</span><span className="shrink-0 text-xs text-slate-400"><Ago ts={r.created_at} /></span></div>
                       <div className="truncate text-xs text-slate-500 dark:text-slate-400">{r.role}{r.company ? ` · ${r.company}` : ''}</div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status] || r.status}</Badge>
@@ -121,7 +121,7 @@ export default function Interviews() {
                 </tr></thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-ink-800">
                   {filtered.map(r => (
-                    <tr key={r.id} className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850" onClick={e => { if (!(e.target as HTMLElement).closest('a,button')) location.href = `/app/interviews/${encodeURIComponent(r.id)}` }}>
+                    <tr key={r.id} className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850" onClick={e => { if (!(e.target as HTMLElement).closest('a,button')) location.href = `/app/interviews/${encodeURIComponent(r.ref)}` }}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-xs font-bold text-brand-700 dark:from-brand-500/25 dark:to-violet-500/25 dark:text-brand-200">{initials(r.candidate)}</span>
@@ -142,7 +142,7 @@ export default function Interviews() {
                       <td className="hidden px-4 py-3 capitalize text-slate-700 dark:text-slate-200 lg:table-cell">{(r.decision || '').replace('_', ' ') || <span className="text-slate-400">-</span>}</td>
                       <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-slate-500 dark:text-slate-400 lg:table-cell" title={when(r.created_at)}>{ago(r.created_at)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
-                        <Button size="sm" href={`/app/interviews/${encodeURIComponent(r.id)}`}>Report</Button>
+                        <Button size="sm" href={`/app/interviews/${encodeURIComponent(r.ref)}`}>Report</Button>
                         <Tip label="Copy candidate link"><button className="ml-1 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white" aria-label="Copy candidate link"
                           onClick={() => copyText(`${base}/interview.html?id=${r.id}`, 'Candidate link copied')}><Link2 className="size-4" /></button></Tip>
                       </td>

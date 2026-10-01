@@ -51,8 +51,8 @@ export default function JobEditor({ id }: { id?: string }) {
     try {
       const fields = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Array.isArray(x) ? x.filter(y => typeof y !== 'string' || y.trim()) : x]))
       let jid = id
-      if (id) await api(`/api/jobs/${id}`, { method: 'PATCH', json: { fields, ...(publish && perm === 'manage' ? { status: 'open' } : {}) } })
-      else jid = (await api('/api/jobs', { json: { fields, status: publish ? 'open' : 'draft' } })).id
+      if (id) jid = (await api(`/api/jobs/${id}`, { method: 'PATCH', json: { fields, ...(publish && perm === 'manage' ? { status: 'open' } : {}) } })).ref
+      else jid = (await api('/api/jobs', { json: { fields, status: publish ? 'open' : 'draft' } })).ref
       toast(publish ? 'Job published' : 'Saved')
       navigate(`/app/jobs/${jid}`)
     } catch (e: any) { setErr(e.message) }
@@ -63,7 +63,7 @@ export default function JobEditor({ id }: { id?: string }) {
     setAiBusy(true); setErr('')
     try {
       let jid = id
-      if (!jid) { jid = (await api('/api/jobs', { json: { fields: v, status: 'draft' } })).id; history.replaceState(null, '', `/app/jobs/${jid}/edit`) }
+      if (!jid) { jid = (await api('/api/jobs', { json: { fields: v, status: 'draft' } })).ref; history.replaceState(null, '', `/app/jobs/${jid}/edit`) }
       const out = await api(`/api/jobs/${jid}/ai-write`, { method: 'POST' })
       setV(o => ({ ...o!, ...Object.fromEntries(Object.entries(out).filter(([k, x]) => !empty(x) && empty(o![k]))) }))
       toast('Draft written. Review and edit before publishing.')

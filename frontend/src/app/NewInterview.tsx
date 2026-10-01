@@ -107,7 +107,10 @@ export default function NewInterview() {
     setGen(true)
     try {
       const r = await api<{ plan: Plan; warnings: string[] }>('/api/plan', { json: inp })
-      setPlan(r.plan); setJson(JSON.stringify(r.plan, null, 2)); setPlanWarn(r.warnings || []); setInputs(inp); setLink(null)
+      const p: any = r.plan
+      const notes = p.source === 'template' ? [`${p.fallback_reason || 'The AI was slow.'} This is a template plan built from the JD, resume and your questions. Review it, or press "Generate interview plan" again to retry with AI.`] : []
+      setPlan(r.plan); setJson(JSON.stringify(r.plan, null, 2)); setPlanWarn([...notes, ...(r.warnings || [])]); setInputs(inp); setLink(null)
+      toast(p.source === 'template' ? 'Template plan ready (AI was slow)' : `Plan ready in ${Math.max(1, Math.round((p.generated_ms || 0) / 1000))} s`)
       setTimeout(() => planRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
     } catch (e: any) { setErr1(e.message) }
     setGen(false)
@@ -170,7 +173,7 @@ export default function NewInterview() {
           <Field label="Your questions" htmlFor="qs" hint="One per line. Every one of them will be asked.">
             <Textarea id="qs" className="min-h-24" placeholder={'Why are you looking for a change?\nWhat is your notice period?'} value={f.qs} onChange={set('qs')} /></Field>
           {err1 && <Alert tone="danger" icon={<TriangleAlert />}>{err1}</Alert>}
-          <Button id="genBtn" variant="primary" size="lg" icon={<Wand2 />} loading={gen} onClick={generate}>{gen ? 'Generating the plan (20-60 s)...' : 'Generate interview plan'}</Button>
+          <Button id="genBtn" variant="primary" size="lg" icon={<Wand2 />} loading={gen} onClick={generate}>{gen ? 'Generating the plan (usually under 20 s)...' : 'Generate interview plan'}</Button>
         </CardBody>
       </Card>
 

@@ -5,7 +5,7 @@ are marked (jobs: fields["_sample"], candidates: source "demo") so they can be r
 import random
 import time
 
-from . import db, docs_pdf, jd_schema, resumes
+from . import db, docs_pdf, jd_schema, matching, resumes
 
 FIRST = ["Aarav", "Ananya", "Rohan", "Priya", "Vikram", "Sneha", "Arjun", "Kavya", "Rahul", "Meera", "Karan", "Isha", "Aditya", "Neha",
          "Siddharth", "Pooja", "Nikhil", "Divya", "Manish", "Riya", "Farhan", "Zoya", "Harpreet", "Lakshmi", "Tenzin", "Joseph", "Fatima",
@@ -123,7 +123,8 @@ def seed(s, org: db.Org, user_id: str | None) -> dict:
     for spec in JOBS:
         f = {**jd_schema.defaults(), **jd_schema.clean({k: v for k, v in spec.items() if k != "kind"}), "screening_questions": jd_schema.clean({"screening_questions": SCREENING})["screening_questions"],
              "top_n": 5, "_sample": True, "ai_interview_questions": ["What is your notice period?", "Why are you looking for a change?"]}
-        j = db.Job(org_id=org.id, title=f["title"], department=f["department"], status="open", fields=f, top_n=5, created_by=user_id, published_at=time.time())
+        j = db.Job(org_id=org.id, title=f["title"], department=f["department"], status="open", fields=f, top_n=5, created_by=user_id, published_at=time.time(),
+                   number=db.next_number(s, org.id, "job"))
         s.add(j)
         jobs.append((spec["kind"], j))
     s.flush()
@@ -133,7 +134,8 @@ def seed(s, org: db.Org, user_id: str | None) -> dict:
         profile, text = _resume(rnd, kind, i)
         c = db.Candidate(org_id=org.id, name=profile["name"], email=profile["email"], phone=profile["phone"], location=profile["location"],
                          headline=profile["headline"], profile=profile, parsed=resumes.parse(text), resume_text=text, source="demo", tags=["sample"],
-                         created_at=time.time() - rnd.randint(0, 20) * 86400)
+                         created_at=time.time() - rnd.randint(0, 20) * 86400, number=db.next_number(s, org.id, "candidate"))
+        matching.compute_features(c)
         s.add(c); s.flush()
         from .api_hiring import _save_resume
         c.resume_file, c.resume_name = _save_resume(org.id, c.id, docs_pdf.resume_pdf(profile), f"{profile['name'].replace(' ', '-')}-resume.pdf")

@@ -1,9 +1,8 @@
 import { ArrowRight, Briefcase, CircleAlert, Database, Plus, Sparkles, Upload, UserPlus, Users, Video } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Stat, toast } from '../components/ui'
-import { ErrorBox, Loading, PageHeader, useApi } from '../components/kit'
+import { ErrorBox, Loading, PageHeader, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
-import { ago } from '../lib/format'
 import { healthProblems, useHealth } from '../lib/health'
 import { useMe } from '../lib/session'
 import { ACTION_LABEL, actor } from './labels'
@@ -12,8 +11,8 @@ interface Dash {
   jobs: { open: number; draft: number; paused: number; closed: number }; candidates: number; new_candidates_7d: number | null
   applications: number; applications_7d: number; applications_14d: number[]; pipeline: { id: string; label: string; count: number }[]
   interviews: { total: number; completed: number; in_progress: number }; ai_reports: number
-  attention: { job_id: string; title: string; reason: string }[]
-  activity: { id: string; action: string; detail: string; at: number; job_id?: string; job?: string; candidate_id?: string; user?: string }[]
+  attention: { job_id: string; job_ref?: string; title: string; reason: string }[]
+  activity: { id: string; action: string; detail: string; at: number; job_id?: string; job_ref?: string; job?: string; candidate_id?: string; user?: string }[]
 }
 
 export default function Dashboard() {
@@ -92,7 +91,7 @@ export default function Dashboard() {
               <CardBody className="pt-3">
                 {!d.attention.length ? <p className="text-sm text-slate-500 dark:text-slate-400">All clear. Nothing waiting on you.</p> : (
                   <ul className="space-y-3">{d.attention.map(a => (
-                    <li key={a.job_id}><a href={`/app/jobs/${a.job_id}`} className="block rounded-xl p-3 ring-1 ring-slate-200/70 hover:bg-slate-50 dark:ring-ink-700 dark:hover:bg-ink-850">
+                    <li key={a.job_id}><a href={`/app/jobs/${a.job_ref || a.job_id}`} className="block rounded-xl p-3 ring-1 ring-slate-200/70 hover:bg-slate-50 dark:ring-ink-700 dark:hover:bg-ink-850">
                       <div className="text-sm font-semibold">{a.title}</div><div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{a.reason}</div></a></li>
                   ))}</ul>
                 )}
@@ -106,8 +105,8 @@ export default function Dashboard() {
                 <ul className="divide-y divide-slate-100 dark:divide-ink-800">{d.activity.map(a => (
                   <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 text-sm">
                     <span className="min-w-0"><Badge tone="neutral">{ACTION_LABEL[a.action] || a.action}</Badge> <span className="text-slate-700 dark:text-slate-200">{a.detail}</span>
-                      {a.job && a.job_id && <> · <a className="text-brand-600 hover:underline dark:text-brand-300" href={`/app/jobs/${a.job_id}`}>{a.job}</a></>}</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">{actor(a)} · {ago(a.at)}</span>
+                      {a.job && a.job_id && <> · <a className="text-brand-600 hover:underline dark:text-brand-300" href={`/app/jobs/${a.job_ref || a.job_id}`}>{a.job}</a></>}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{actor(a)} · <Ago ts={a.at} /></span>
                   </li>
                 ))}</ul>
               )}

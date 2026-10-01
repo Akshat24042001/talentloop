@@ -111,10 +111,13 @@ def interviews_scoped(cs):
            "jd": "Java Spring Boot developer " * 10, "resume": "Java Spring Boot SQL " * 10, "questions": ["Notice period?"]}
     plan = ok(owner.post("/api/plan", json=inp))["plan"]
     made = ok(owner.post("/api/interviews", json={"plan": plan, "inputs": inp}))
-    assert made["report_path"] == f"/app/interviews/{made['id']}"
+    assert made["ref"] == "rohan-1" and made["report_path"] == "/app/interviews/rohan-1", made
+    assert ok(owner.get("/api/interviews/rohan-1"))["id"] == made["id"], "readable ref opens the interview"
+    assert other.get("/api/interviews/rohan-1").status_code == 404, "refs are per company"
     assert [r["id"] for r in ok(owner.get("/api/interviews"))] == [made["id"]]
     assert ok(other.get("/api/interviews")) == [], "another company must not see this interview"
     assert other.get(f"/api/interviews/{made['id']}").status_code == 404
+    assert ok(owner.get("/api/interviews"))[0]["ref"] == "rohan-1"
     assert cs["mgr"].post("/api/interviews", json={"plan": plan, "inputs": inp}).status_code == 403, "hiring managers need a job assignment"
     print("INTERVIEWS SCOPED TO COMPANY: OK")
     return made["id"]

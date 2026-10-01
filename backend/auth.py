@@ -16,6 +16,8 @@ import hmac
 import os
 import re
 import secrets
+
+from sqlalchemy import and_
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -145,24 +147,23 @@ def current(req: Request, s, required: bool = True) -> Ctx | None:
         return Ctx(user=None, org=None, role="owner", platform_admin=True, via_key=True)
     tok = req.cookies.get(COOKIE)
     if tok:
-        sess = s.get(db.AuthSession, token_hash(tok))
-        if sess and sess.expires_at > time.time():
-            user = s.get(db.User, sess.user_id)
-            if user and not user.disabled:
-                org = role = None
-                mem = None
-                if sess.org_id:
-                    mem = s.query(db.Membership).filter_by(user_id=user.id, org_id=sess.org_id).first()
-                if not mem:
-                    mem = s.query(db.Membership).filter_by(user_id=user.id).order_by(db.Membership.created_at).first()
-                    if mem:
-                        sess.org_id = mem.org_id
-                if mem:
-                    org = s.get(db.Org, mem.org_id)
-                    role = mem.role
-                    if org and org.disabled and not user.is_platform_admin:
-                        raise HTTPException(403, "This company account is disabled. Contact support.")
-                return Ctx(user=user, org=org, role=role, platform_admin=bool(user.is_platform_admin))
+        # One round trip: session + user + the membership/company the session points at.
+        row = s.query(db.AuthSession, db.User, db.Membership, db.Org) \
+            .join(db.User, db.User.id == db.AuthSession.user_id) \
+            .outerjoin(db.Membership, and_(db.Membership.user_id == db.User.id, db.Membership.org_id == db.AuthSession.org_id)) \
+            .outerjoin(db.Org, db.Org.id == db.Membership.org_id) \
+            .filter(db.AuthSession.token_hash == token_hash(tok)).first()
+        if row:
+            sess, user, mem, org = row
+            if sess.expires_at > time.time() and not user.disabled:
+                if mem is None or not mem.active:      # session's company gone or access paused: fall back to another
+                    alt = s.query(db.Membership, db.Org).join(db.Org, db.Org.id == db.Membership.org_id) \
+                        .filter(db.Membership.user_id == user.id, db.Membership.active.isnot(False)).order_by(db.Membership.created_at).first()
+                    mem, org = alt if alt else (None, None)
+                    sess.org_id = mem.org_id if mem else None
+                if org and org.disabled and not user.is_platform_admin:
+                    raise HTTPException(403, "This company account is disabled. Contact support.")
+                return Ctx(user=user, org=org if mem else None, role=mem.role if mem else None, platform_admin=bool(user.is_platform_admin))
     if required:
         raise HTTPException(401, "Please sign in.")
     return None

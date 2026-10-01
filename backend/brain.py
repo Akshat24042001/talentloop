@@ -118,18 +118,132 @@ def plan_warnings(plan: dict, hr_questions: list[str] | None = None) -> list[str
     return w
 
 
+PLAN_DEADLINE_SEC = float(os.getenv("PLAN_DEADLINE_SEC", "25"))     # HR always has a plan within ~30 s
+PLAN_HEDGE_SEC = float(os.getenv("PLAN_HEDGE_SEC", "10"))           # start a second model if the first is slow
+
+
 async def generate_plan(inp: dict) -> dict:
-    """inp: company, role, candidate_name, duration_min, jd, resume, questions (list[str])."""
+    """inp: company, role, candidate_name, duration_min, jd, resume, questions (list[str]).
+
+    Speed: the fast model with reasoning off and a compact output; if it hasn't answered after PLAN_HEDGE_SEC a
+    second model is asked in parallel and the first valid plan wins. At PLAN_DEADLINE_SEC a template plan built
+    from the JD, resume and HR questions is returned instead (marked source=template, so HR knows to review it)."""
     if llm.MOCK:
         return normalize_plan(_mock_plan(inp))
     user = prompts.PLAN_USER_TEMPLATE.format(
         company=inp.get("company", ""), role=inp.get("role", ""),
         candidate_name=inp.get("candidate_name", ""), duration_min=inp.get("duration_min", 20),
-        jd=inp.get("jd", "")[:12000], resume=inp.get("resume", "")[:12000],
+        jd=_trim(inp.get("jd", ""), 7000), resume=_trim(inp.get("resume", ""), 7000),
         questions="\n".join(inp.get("questions") or []) or "(none provided)",
     )
-    plan = await llm.complete_json(prompts.PLAN_SYSTEM, user, llm.SMART_MODEL, temperature=0.3, max_tokens=4000)
-    return normalize_plan(plan, inp.get("duration_min"))
+    lang = (inp.get("language") or "en").lower()
+    if lang != "en":
+        user += f"\n\nWrite every question and keyterm in {prompts.LANGUAGE_NAMES.get(lang, lang)} as it is naturally spoken."
+    models = llm.plan_models()
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+
+    async def attempt(model: str) -> dict:
+        left = max(3.0, PLAN_DEADLINE_SEC - (loop.time() - t0))
+        out = await llm.complete_json(prompts.PLAN_SYSTEM, user, model, temperature=0.3, max_tokens=2600,
+                                      timeout=left, fallbacks=[], fast=True)
+        plan = normalize_plan(out, inp.get("duration_min"))
+        plan["source"], plan["model"] = "ai", model
+        return plan
+
+    deadline, hedge_at = t0 + PLAN_DEADLINE_SEC, t0 + PLAN_HEDGE_SEC
+
+    def start(model: str) -> asyncio.Task:
+        t = asyncio.create_task(attempt(model))
+        t.add_done_callback(lambda x: x.cancelled() or x.exception())   # a losing attempt's error is expected
+        return t
+
+    tasks = {start(models[0])}
+    next_i, errors = 1, []
+    try:
+        while tasks:
+            now = loop.time()
+            if now >= deadline:
+                break
+            can_hedge = next_i < len(models) and len(tasks) < 2
+            timeout = hedge_at - now if can_hedge and now < hedge_at else deadline - now
+            done, _ = await asyncio.wait(tasks, timeout=max(0.05, timeout), return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                tasks.discard(t)
+                try:
+                    plan = t.result()
+                    plan["generated_ms"] = int((loop.time() - t0) * 1000)
+                    return plan
+                except Exception as e:
+                    errors.append(f"{type(e).__name__}: {str(e)[:160]}")
+            now = loop.time()
+            # the first model is slow (hedge time passed) or an attempt failed: ask the next model too
+            if next_i < len(models) and len(tasks) < 2 and now < deadline - 3 and (now >= hedge_at or done):
+                tasks.add(start(models[next_i]))
+                next_i += 1
+    finally:
+        for t in tasks:
+            t.cancel()
+    log.warning("plan: AI did not deliver in %.0fs (%s); using the template plan", loop.time() - t0, "; ".join(errors) or "timeout")
+    plan = normalize_plan(template_plan(inp))
+    plan["source"] = "template"
+    plan["fallback_reason"] = "The AI took too long or failed" + (f" ({errors[-1][:120]})" if errors else "") + "."
+    plan["generated_ms"] = int((loop.time() - t0) * 1000)
+    return plan
+
+
+def _trim(text: str, n: int) -> str:
+    """Keep the start and the end (skills and requirements often sit at the bottom of a JD)."""
+    text = (text or "").strip()
+    return text if len(text) <= n else text[: int(n * 0.7)] + "\n[...]\n" + text[-int(n * 0.3):]
+
+
+_CLAIM_VERBS = re.compile(r"\b(built|led|designed|developed|launched|managed|reduced|increased|improved|migrated|owned|delivered|"
+                          r"implemented|closed|grew|achieved|handled|trained|automated|created)\b", re.I)
+
+
+def template_plan(inp: dict) -> dict:
+    """A sound interview plan without AI: warm-up, every HR question, probes of concrete resume claims, the JD's
+    must-have skills, one behavioural question. Used when the AI is slow or down."""
+    from . import resumes as _res, skills as _sk
+    role = inp.get("role") or "this role"
+    dur = max(5, min(60, _int(inp.get("duration_min"), 15)))
+    qs = [{"id": "q1", "type": "warmup", "ask": "To start, please introduce yourself in about a minute: your current role and what you enjoy about it.",
+           "scored": False, "good_answer_covers": [], "max_followups": 0, "time_budget_sec": 75, "competency_id": "c2"}]
+    for t in [q.strip() for q in (inp.get("questions") or []) if q.strip()]:
+        qs.append({"type": "hr_mandatory", "ask": t, "scored": True, "competency_id": "c1", "max_followups": 1, "time_budget_sec": 120,
+                   "good_answer_covers": ["a direct answer", "a specific example", "relevant detail"]})
+    lines = [ln.strip(" -•*\t") for ln in (inp.get("resume") or "").splitlines()]
+    claims = [ln for ln in lines if 25 <= len(ln) <= 160 and (_CLAIM_VERBS.search(ln) or re.search(r"\d+\s*%|\d{2,}", ln))][:2]
+    for cl in claims:
+        short = cl if len(cl) <= 90 else cl[:87].rsplit(" ", 1)[0] + "..."
+        qs.append({"type": "resume_probe", "competency_id": "c1", "scored": True, "max_followups": 2, "time_budget_sec": 180,
+                   "ask": f"Your resume says: \"{short}\". Walk me through what you did yourself and what the result was.",
+                   "good_answer_covers": ["their own contribution", "how they did it", "a measurable result"]})
+    jd_skills = sorted(_sk.extract(inp.get("jd") or ""))
+    cv_skills = set(_res.parse(inp.get("resume") or "")["skills"])
+    for skl in ([x for x in jd_skills if x in cv_skills] + [x for x in jd_skills if x not in cv_skills])[:3]:
+        qs.append({"type": "jd_skill", "competency_id": "c1", "scored": True, "max_followups": 1, "time_budget_sec": 150,
+                   "ask": f"Tell me about a recent piece of work where you used {skl}. What was the problem and what did you do?",
+                   "good_answer_covers": [f"hands-on use of {skl}", "a concrete problem", "the outcome"]})
+    qs.append({"type": "behavioral", "competency_id": "c3", "scored": True, "max_followups": 1, "time_budget_sec": 150,
+               "ask": "Tell me about a time something went wrong at work. What happened, what did you do, and what was the result?",
+               "good_answer_covers": ["a real situation", "their own actions", "what they learned"]})
+    cap = dur * 60 * 0.85            # drop the lowest-value optional questions until it fits
+    while sum(q["time_budget_sec"] for q in qs) > cap and any(q["type"] in ("behavioral", "jd_skill", "resume_probe") for q in qs[1:]):
+        for kind in ("behavioral", "jd_skill", "resume_probe"):
+            idx = [i for i, q in enumerate(qs) if q["type"] == kind]
+            if idx:
+                qs.pop(idx[-1])
+                break
+    for i, q in enumerate(qs, 1):
+        q["id"] = f"q{i}"
+    return {"company": inp.get("company", ""), "role": role, "candidate_name": inp.get("candidate_name", ""), "duration_min": dur,
+            "competencies": [{"id": "c1", "name": "Role skills", "weight": 0.6, "anchors": {"1": "Vague or generic answers", "3": "Relevant experience, some depth", "5": "Specific, hands-on, measurable results"}},
+                             {"id": "c2", "name": "Communication", "weight": 0.2, "anchors": {"1": "Hard to follow", "3": "Clear enough", "5": "Clear, structured, concise"}},
+                             {"id": "c3", "name": "Problem solving and ownership", "weight": 0.2, "anchors": {"1": "Blames others, no actions", "3": "Some ownership", "5": "Owns the problem and the fix"}}],
+            "questions": qs, "keyterms": jd_skills[:25] + [inp.get("candidate_name", "")], "company_facts": [],
+            "resume_claims_to_verify": claims, "do_not_ask": ["age", "marital status", "religion", "caste", "health", "family plans"]}
 
 
 # ---------------------------------------------------------------------------

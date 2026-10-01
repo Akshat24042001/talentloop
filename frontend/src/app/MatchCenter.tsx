@@ -7,8 +7,8 @@ import { useMe } from '../lib/session'
 import { JOB_STATUS, VERDICT } from './labels'
 
 interface Ov {
-  jobs: { id: string; title: string; department: string; status: string; top_n: number; location: string; ai_pending: number; scored: number
-    shortlist: { candidate_id: string; name: string; score: number; ai_score?: number | null; verdict?: string; knocked_out: boolean; applied: boolean }[] }[]
+  jobs: { id: string; ref: string; title: string; department: string; status: string; top_n: number; location: string; ai_pending: number; scored: number
+    shortlist: { candidate_id: string; ref: string; name: string; score: number; ai_score?: number | null; verdict?: string; knocked_out: boolean; applied: boolean }[] }[]
   pool: number; ai_pending: number; ai_budget: number; mock: boolean; model: string
 }
 
@@ -38,12 +38,12 @@ export default function MatchCenter() {
               {data.jobs.map(j => (
                 <Card key={j.id} className="flex flex-col">
                   <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-4 dark:border-ink-800">
-                    <div className="min-w-0"><a href={`/app/jobs/${j.id}`} className="font-semibold hover:underline">{j.title}</a><div className="truncate text-xs text-slate-500">{j.department}{j.location ? ` · ${j.location}` : ''}</div></div>
+                    <div className="min-w-0"><a href={`/app/jobs/${j.ref}`} className="font-semibold hover:underline">{j.title}</a><div className="truncate text-xs text-slate-500">{j.department}{j.location ? ` · ${j.location}` : ''}</div></div>
                     <Badge tone={JOB_STATUS[j.status]?.tone}>{JOB_STATUS[j.status]?.label}</Badge>
                   </div>
                   <ol className="flex-1 divide-y divide-slate-100 dark:divide-ink-800">
                     {j.shortlist.length ? j.shortlist.map((s, i) => (
-                      <li key={s.candidate_id}><a href={`/app/candidates/${s.candidate_id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-ink-850">
+                      <li key={s.candidate_id}><a href={`/app/candidates/${s.ref}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-ink-850">
                         <span className="tabular w-4 text-xs font-bold text-slate-400">{i + 1}</span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
                         {s.applied && <Badge tone="brand">Applied</Badge>}
