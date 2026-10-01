@@ -364,6 +364,7 @@ async def _one_report(job: db.Job, cand: db.Candidate, row: db.Match, sem: async
             out = await llm.complete_json(MATCH_SYSTEM, prompt, model, temperature=0.1, max_tokens=700, timeout=60)
         except Exception as e:
             log.warning("match report failed for %s/%s: %s", job.id, cand.id, e)
+            _LAST_ERROR["error"] = e
             return None, model, len(prompt), 0
         try:
             out["score"] = max(0, min(100, int(round(float(out.get("score", 0))))))
@@ -375,6 +376,9 @@ async def _one_report(job: db.Job, cand: db.Candidate, row: db.Match, sem: async
             out[k] = [str(x)[:300] for x in (out.get(k) or [])][:5]
         out["summary"] = str(out.get("summary") or "")[:600]
         return out, model, len(prompt), len(json.dumps(out))
+
+
+_LAST_ERROR: dict = {}
 
 
 def pending_reports(s, org_id: str, job_ids: list[str]) -> list[tuple[db.Job, db.Candidate, db.Match]]:
@@ -392,6 +396,7 @@ def pending_reports(s, org_id: str, job_ids: list[str]) -> list[tuple[db.Job, db
 
 
 async def run_ai(org_id: str, job_ids: list[str], budget: int) -> dict:
+    _LAST_ERROR.clear()
     with db.session() as s:
         todo = pending_reports(s, org_id, job_ids)
         work = todo[:max(0, budget)]
@@ -404,4 +409,8 @@ async def run_ai(org_id: str, job_ids: list[str], budget: int) -> dict:
                 done += 1
             if model != "mock":
                 s.add(db.AIUsage(org_id=org_id, kind="match_report", model=model, input_chars=inp, output_chars=outp))
-        return {"generated": done, "failed": len(work) - done, "skipped_over_budget": max(0, len(todo) - len(work)), "pending_before": len(todo)}
+        out = {"generated": done, "failed": len(work) - done, "skipped_over_budget": max(0, len(todo) - len(work)), "pending_before": len(todo)}
+        if out["failed"] and _LAST_ERROR.get("error"):
+            from .api_hiring import ai_unavailable
+            out["error"] = ai_unavailable(_LAST_ERROR["error"])
+        return out

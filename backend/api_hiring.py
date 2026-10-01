@@ -226,6 +226,19 @@ def job_pdf(job_id: str, req: Request):
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{name}.pdf"'})
 
 
+def ai_unavailable(e: Exception) -> str:
+    """A message HR can act on when the AI provider refuses (rate limit, daily free limit, no credit, outage)."""
+    msg = str(e).lower()
+    if "429" in msg or "rate limit" in msg or "per-day" in msg or "quota" in msg:
+        return ("The AI provider is rate-limiting us (free models allow about 20 requests a minute and 50 a day without "
+                "credit). Try again in a minute, or add OpenRouter credit for a higher limit.")
+    if "401" in msg or "invalid api key" in msg or "no auth" in msg:
+        return "The AI key was rejected. Check LLM_API_KEY on the server."
+    if "402" in msg or "credit" in msg:
+        return "The AI account is out of credit. Add credit at openrouter.ai."
+    return "The AI didn't respond. Try again in a minute."
+
+
 AI_WRITE_SYSTEM = """You help a recruiter write a clear, inclusive, specific job description. Output ONLY JSON:
 {"summary": str (2-3 sentences, no fluff), "responsibilities": [str] (5-7, start with a verb), "first_90_days": [str] (3),
 "nice_to_have_skills": [str] (up to 5), "day_in_life": str (2 sentences)}
@@ -253,7 +266,10 @@ async def ai_write(job_id: str, req: Request):
                "nice_to_have_skills": [], "day_in_life": "A mix of focused work, collaboration and review."}
     else:
         user = json.dumps(facts, ensure_ascii=False)
-        out = await llm.complete_json(AI_WRITE_SYSTEM, user, llm.SMART_MODEL, temperature=0.4, max_tokens=900)
+        try:
+            out = await llm.complete_json(AI_WRITE_SYSTEM, user, llm.SMART_MODEL, temperature=0.4, max_tokens=900)
+        except Exception as e:
+            raise HTTPException(503, ai_unavailable(e))
         with db.session() as s:
             s.add(db.AIUsage(org_id=org_id, kind="jd_write", model=llm.SMART_MODEL, input_chars=len(user), output_chars=len(json.dumps(out))))
     return jd_schema.clean({k: out.get(k) for k in ("summary", "responsibilities", "first_90_days", "nice_to_have_skills", "day_in_life")})

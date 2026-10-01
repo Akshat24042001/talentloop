@@ -6,7 +6,7 @@ import os
 import tempfile
 
 os.environ.update({"LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com", "VAPI_PUBLIC_KEY": "pk_test",
-                   "ADMIN_KEY": "", "DATA_DIR": tempfile.mkdtemp(), "DATABASE_URL": "", "FINISH_DELAY_SEC": "0",
+                   "ADMIN_KEY": "", "DATA_DIR": tempfile.mkdtemp(), "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""), "FINISH_DELAY_SEC": "0",
                    "PLATFORM_ADMIN_EMAILS": "founder@talentloop.test"})
 
 from fastapi.testclient import TestClient  # noqa: E402

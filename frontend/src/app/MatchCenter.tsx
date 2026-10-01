@@ -18,7 +18,7 @@ export default function MatchCenter() {
   const [busy, setBusy] = useState(false)
   async function runAll() {
     setBusy(true)
-    try { const r = await api('/api/match/ai-reports', { json: {} }); toast(`${r.generated} AI report${r.generated === 1 ? '' : 's'} written${r.skipped_over_budget ? `, ${r.skipped_over_budget} left for the next run` : ''}`); reload() }
+    try { const r = await api('/api/match/ai-reports', { json: {} }); toast(r.error ? `${r.generated ? `${r.generated} written. ` : ''}${r.error}` : `${r.generated} AI report${r.generated === 1 ? '' : 's'} written${r.skipped_over_budget ? `, ${r.skipped_over_budget} left for the next run` : ''}`); reload() }
     catch (e: any) { toast(e.message) }
     setBusy(false)
   }

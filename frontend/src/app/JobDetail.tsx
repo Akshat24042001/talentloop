@@ -109,7 +109,7 @@ function Matches({ job, canManage }: { job: Job; canManage: boolean }) {
   const [busy, setBusy] = useState(false)
   async function runAI() {
     setBusy(true)
-    try { const r = await api('/api/match/ai-reports', { json: { job_ids: [job.id] } }); toast(r.generated ? `${r.generated} AI report${r.generated > 1 ? 's' : ''} written` : 'Reports are up to date'); reload() }
+    try { const r = await api('/api/match/ai-reports', { json: { job_ids: [job.id] } }); toast(r.error ? `${r.generated ? `${r.generated} written. ` : ''}${r.error}` : r.generated ? `${r.generated} AI report${r.generated > 1 ? 's' : ''} written` : 'Reports are up to date'); reload() }
     catch (e: any) { toast(e.message) }
     setBusy(false)
   }

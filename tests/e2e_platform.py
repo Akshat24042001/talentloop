@@ -23,7 +23,7 @@ SHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 def main():
     data = tempfile.mkdtemp()
     env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test", ADMIN_KEY="", DATA_DIR=data,
-               LOG_LEVEL="WARNING", PLATFORM_ADMIN_EMAILS="founder@e2e.test", DATABASE_URL="", PYTHONUNBUFFERED="1")
+               LOG_LEVEL="WARNING", PLATFORM_ADMIN_EMAILS="founder@e2e.test", DATABASE_URL=os.getenv("TEST_DATABASE_URL", ""), PYTHONUNBUFFERED="1")
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
                            stdout=open(Path(data) / "server.log", "w"), stderr=subprocess.STDOUT)
     assert free_port_wait(PORT), "server did not start"
