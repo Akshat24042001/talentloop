@@ -22,14 +22,14 @@ from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse, Re
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
-from . import brain, exports, llm, media, proctor, store  # noqa: E402
+from . import api_accounts, api_hiring, auth, brain, db, exports, llm, media, proctor, store  # noqa: E402
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("app")
 
-ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
-WEAK_ADMIN = ADMIN_KEY in ("", "change-me") or len(ADMIN_KEY) < 12
+ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()      # optional API key for automation (acts as a platform admin)
+WEAK_ADMIN = bool(ADMIN_KEY) and (ADMIN_KEY == "change-me" or len(ADMIN_KEY) < 12)
 # The React frontend (frontend/, built with `npm run build`). WEB_DIR overrides it.
 WEB_DIR = Path(os.getenv("WEB_DIR") or Path(__file__).resolve().parent.parent / "frontend" / "dist")
 MEDIA_CAP_BYTES = int(os.getenv("MEDIA_CAP_MB", "900")) * 1024 * 1024
@@ -43,9 +43,11 @@ FINISH_DELAY_SEC = float(os.getenv("FINISH_DELAY_SEC", "25"))   # after a disqua
 CLOSED = ("completed", "incomplete", "scored")
 
 if WEAK_ADMIN:
-    log.warning("ADMIN_KEY is empty or weak. Anyone who finds your URL can read every resume and report.")
+    log.warning("ADMIN_KEY is weak. Use a long random string, or remove it if you don't use the API.")
 
-app = FastAPI(title="TalentLoop AI Interview")
+db.migrate()   # idempotent: creates missing tables (also when the app is imported by tests or tools)
+app = FastAPI(title="TalentLoop")
+app.include_router(api_accounts.router)
 _presence: dict[str, float] = {}     # interview id -> last heartbeat from a live call (memory only)
 _sweeping: set[str] = set()
 _tasks: set[asyncio.Task] = set()
@@ -77,12 +79,36 @@ async def _no_stale_pages(req: Request, call_next):
     return resp
 
 
-def require_admin(req: Request):
-    if not ADMIN_KEY:
-        return
-    key = req.headers.get("x-admin-key") or req.query_params.get("key") or ""
-    if not secrets.compare_digest(key.encode(), ADMIN_KEY.encode()):
-        raise HTTPException(401, "Admin key required")
+def require_admin(req: Request) -> auth.Ctx:
+    """A signed-in team member (any role) or the ADMIN_KEY. Interview access is then checked per record."""
+    with db.session() as s:
+        ctx = auth.current(req, s)
+        if not ctx.via_key and not ctx.org_id and not ctx.platform_admin:
+            raise HTTPException(403, "Join or create a company workspace first.")
+        ctx.visible_jobs = auth.visible_job_ids(s, ctx)   # type: ignore[attr-defined]
+        return ctx
+
+
+def can_see_interview(ctx: auth.Ctx, rec: dict) -> bool:
+    if ctx.via_key:
+        return True
+    org = rec.get("org_id")
+    if org is None:                       # created before companies existed
+        return ctx.platform_admin
+    if org != ctx.org_id:
+        return False
+    vis = getattr(ctx, "visible_jobs", None)
+    return vis is None or rec.get("job_id") in vis or rec.get("created_by") == ctx.user_id
+
+
+def hr_rec(iid: str, req: Request, manage: bool = False) -> tuple[auth.Ctx, dict]:
+    ctx = require_admin(req)
+    rec = get_rec(iid)
+    if not can_see_interview(ctx, rec):
+        raise HTTPException(404, "Interview not found")
+    if manage and not (ctx.has(auth.MANAGE_JOBS) or rec.get("created_by") == ctx.user_id):
+        raise HTTPException(403, "Your role can't change this interview.")
+    return ctx, rec
 
 
 def get_rec(iid: str) -> dict:
@@ -139,7 +165,7 @@ def health():
             "model_note": llm.MODEL_CHECK["note"],
             "public_url": public_url(), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
             "vapi_private_key_set": bool(os.getenv("VAPI_PRIVATE_KEY")),
-            "admin_protected": bool(ADMIN_KEY), "admin_weak": WEAK_ADMIN,
+            "admin_protected": True, "admin_weak": WEAK_ADMIN, "platform": api_accounts.platform_status(),
             "storage": {"s3": store.S3_ENABLED, "s3_error": store.S3_STATUS["last_error"],
                         "persistent_disk": os.getenv("PERSISTENT_DISK", "") == "1"},
             "ffmpeg": bool(media.ffmpeg_exe()), "reconnect_window_sec": RECONNECT_WINDOW_SEC}
@@ -214,8 +240,15 @@ def _settings(body: dict) -> dict:
 async def create_interview(req: Request):
     """Body: {plan, inputs:{jd,resume,questions,...}, expires_hours, settings}. This is also the API
     TalentLoop's main app would call with its payload."""
-    require_admin(req)
+    ctx = require_admin(req)
     body = await req.json()
+    job_id = str(body.get("job_id") or "") or None
+    with db.session() as s:
+        job = s.get(db.Job, job_id) if job_id else None
+        if job_id and (not job or not auth.job_permission(s, ctx, job)):
+            raise HTTPException(404, "Job not found")
+        if not ctx.has(auth.MANAGE_JOBS) and not (job and auth.job_permission(s, ctx, job) in ("manage", "edit")):
+            raise HTTPException(403, "Your role can't create interviews.")
     inputs = body.get("inputs") or {}
     plan = body.get("plan")
     if not plan:
@@ -228,23 +261,33 @@ async def create_interview(req: Request):
     now = time.time()
     settings = _settings(body)
     starts = settings["available_from"] or now
-    rec = {"id": iid, "created_at": now,
+    rec = {"id": iid, "created_at": now, "org_id": ctx.org_id, "created_by": ctx.user_id, "job_id": job_id,
+           "candidate_id": str(body.get("candidate_id") or "") or None, "application_id": str(body.get("application_id") or "") or None,
            "expires_at": starts + max(0.5, float(body.get("expires_hours") or 72)) * 3600,
            "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
            "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
            "scoring": None, "settings": settings}
     store.save(rec)
-    return {"id": iid, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/report.html?id={iid}",
-            "warnings": _history_warnings(settings["candidate_email"], iid)}
+    if rec["application_id"]:
+        with db.session() as s:
+            app_ = s.get(db.Application, rec["application_id"])
+            if app_ and app_.org_id == ctx.org_id:
+                app_.interview_id = iid
+                if app_.stage in ("applied", "screening", "shortlisted"):
+                    app_.stage = "interview"
+    return {"id": iid, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/app/interviews/{iid}",
+            "warnings": _history_warnings(settings["candidate_email"], iid, org_id=ctx.org_id, all_orgs=ctx.via_key)}
 
 
-def _history_warnings(email: str, skip: str = "") -> list[str]:
+def _history_warnings(email: str, skip: str = "", org_id: str | None = None, all_orgs: bool = False) -> list[str]:
     email = (email or "").strip().lower()
     if not email:
         return []
     out = []
     for r in store.list_all():
         if r["id"] == skip or (r.get("settings") or {}).get("candidate_email", "").strip().lower() != email:
+            continue
+        if not all_orgs and r.get("org_id") != org_id:      # a company only sees its own history
             continue
         dq = r.get("disqualified")
         if dq:
@@ -256,8 +299,8 @@ def _history_warnings(email: str, skip: str = "") -> list[str]:
 @app.get("/api/candidates/history")
 def candidate_history(req: Request, email: str = ""):
     """Lets the HR form warn before a link is sent to a previously disqualified candidate."""
-    require_admin(req)
-    return {"warnings": _history_warnings(email)}
+    ctx = require_admin(req)
+    return {"warnings": _history_warnings(email, org_id=ctx.org_id, all_orgs=ctx.via_key)}
 
 
 def _row(r: dict) -> dict:
@@ -275,21 +318,20 @@ def _row(r: dict) -> dict:
 
 @app.get("/api/interviews")
 def list_interviews(req: Request):
-    require_admin(req)
-    return [_row(r) for r in store.list_all()]
+    ctx = require_admin(req)
+    return [_row(r) for r in store.list_all() if can_see_interview(ctx, r)]
 
 
 @app.get("/api/interviews.csv")
 def interviews_csv(req: Request):
-    require_admin(req)
-    return Response(exports.interviews_csv(store.list_all()), media_type="text/csv",
+    ctx = require_admin(req)
+    return Response(exports.interviews_csv([r for r in store.list_all() if can_see_interview(ctx, r)]), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="interviews_{time.strftime("%Y%m%d")}.csv"'})
 
 
 @app.get("/api/interviews/{iid}")
 def get_interview(iid: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     out = exports.public_record(rec)
     if rec.get("state"):
         out["proctoring"] = proctor.summary(rec)
@@ -301,15 +343,13 @@ def get_interview(iid: str, req: Request):
 
 @app.get("/api/interviews/{iid}/proctoring")
 def get_proctoring(iid: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     return {"proctoring": proctor.summary(rec), "stats": proctor.stats(rec) if rec.get("state") else None}
 
 
 @app.get("/api/interviews/{iid}/report.pdf")
 async def report_pdf(iid: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     pdf = await asyncio.to_thread(exports.report_pdf, rec)
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{exports.base_name(rec)}_report.pdf"'})
@@ -317,16 +357,14 @@ async def report_pdf(iid: str, req: Request):
 
 @app.get("/api/interviews/{iid}/transcript.txt")
 def transcript_txt(iid: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     return PlainTextResponse(exports.transcript_text(rec), headers={
         "Content-Disposition": f'attachment; filename="{exports.base_name(rec)}_transcript.txt"'})
 
 
 @app.get("/api/interviews/{iid}/export.json")
 def export_json(iid: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     data = exports.public_record(rec)
     if rec.get("state"):
         data["proctoring"] = proctor.summary(rec)
@@ -337,8 +375,7 @@ def export_json(iid: str, req: Request):
 
 @app.get("/api/interviews/{iid}/bundle.zip")
 async def bundle(iid: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     fd, tmp = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     await asyncio.to_thread(exports.bundle_zip, rec, Path(tmp))
@@ -350,7 +387,7 @@ async def bundle(iid: str, req: Request):
 async def delete_interview(iid: str, req: Request):
     """The consent screen promises deletion on request. This deletes our copy (and the S3 copy).
     Vapi and the LLM provider keep their own copies under their retention policies."""
-    require_admin(req)
+    hr_rec(iid, req, manage=True)
     async with store.lock(iid):
         get_rec(iid)
         await asyncio.to_thread(store.delete, iid)
@@ -361,8 +398,7 @@ async def delete_interview(iid: str, req: Request):
 @app.post("/api/interviews/{iid}/score")
 async def rescore(iid: str, req: Request, bg: BackgroundTasks):
     """Runs in the background: scoring can take longer than a proxy's request timeout."""
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req, manage=True)
     if not rec.get("state"):
         raise HTTPException(400, "Interview has not started")
     bg.add_task(run_scoring, iid, True)
@@ -372,7 +408,7 @@ async def rescore(iid: str, req: Request, bg: BackgroundTasks):
 @app.post("/api/interviews/{iid}/close")
 async def close_interview(iid: str, req: Request, bg: BackgroundTasks):
     """HR closes an interview the candidate abandoned, without waiting for the sweeper."""
-    require_admin(req)
+    hr_rec(iid, req, manage=True)
     async with store.lock(iid):
         rec = get_rec(iid)
         if rec["status"] in ("created", "in_progress"):
@@ -388,7 +424,7 @@ async def close_interview(iid: str, req: Request, bg: BackgroundTasks):
 @app.post("/api/interviews/{iid}/hr")
 async def save_hr_review(iid: str, req: Request):
     """HR's own scores per question: this is the calibration data (AI vs HR agreement)."""
-    require_admin(req)
+    ctx, _ = hr_rec(iid, req)
     body = await req.json()
     async with store.lock(iid):
         rec = get_rec(iid)
@@ -401,9 +437,11 @@ async def save_hr_review(iid: str, req: Request):
 @app.get("/api/calibration")
 def calibration(req: Request):
     """Across all interviews HR has scored: how often does the AI land within +/-1 of HR?"""
-    require_admin(req)
+    ctx = require_admin(req)
     pairs = []
     for r in store.list_all():
+        if not can_see_interview(ctx, r):
+            continue
         hr = (r.get("hr") or {}).get("scores") or {}
         for qr in ((r.get("report") or {}).get("questions") or []):
             h = hr.get(qr.get("q_id"))
@@ -420,8 +458,7 @@ def calibration(req: Request):
 
 @app.get("/media/{iid}/{fname}")
 async def get_media(iid: str, fname: str, req: Request):
-    require_admin(req)
-    rec = get_rec(iid)
+    ctx, rec = hr_rec(iid, req)
     try:
         name = store.safe_name(fname)
     except ValueError:
@@ -1042,6 +1079,10 @@ async def _download_and_attach(iid: str, url: str, kind: str):
         v["downloaded"] = sorted(set(v.get("downloaded", [])) | {url})
         store.save(rec)
 
+
+# Jobs, candidates, matching and careers. Included after the routes above so fixed paths such as
+# /api/candidates/history win over /api/candidates/{id}.
+app.include_router(api_hiring.router)
 
 if (WEB_DIR / "dashboard.html").exists():
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

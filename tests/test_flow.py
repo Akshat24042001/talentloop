@@ -8,7 +8,7 @@ import os
 import tempfile
 
 os.environ.update({"LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com",
-                   "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "", "FINISH_DELAY_SEC": "0", "DATA_DIR": tempfile.mkdtemp()})
+                   "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "test-admin-key-123456", "FINISH_DELAY_SEC": "0", "DATA_DIR": tempfile.mkdtemp()})
 
 from pathlib import Path  # noqa: E402
 
@@ -19,7 +19,7 @@ from backend.main import app  # noqa: E402
 from backend.media import public_https_url  # noqa: E402
 
 S = Path(__file__).resolve().parent.parent / "frontend" / "public" / "samples"
-c = TestClient(app)
+c = TestClient(app, headers={"X-Admin-Key": "test-admin-key-123456"})
 ANSWER = ("Sure. In my current role I built the tracking API, added composite indexes and Redis caching which "
           "cut p95 latency from 1.8 seconds to 350 ms, and we moved notifications to Kafka consumers.")
 

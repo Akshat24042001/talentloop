@@ -237,3 +237,59 @@ def list_all() -> list[dict]:
         except Exception:
             continue
     return out
+
+
+# ---------------------------------------------------------------------------
+# Generic files (resumes, generated PDFs): DATA_DIR/files/<key>, mirrored to S3 under files/<key>
+# ---------------------------------------------------------------------------
+FILES_DIR = DATA_DIR / "files"
+
+
+def _file_path(key: str) -> Path:
+    parts = key.split("/")
+    if not parts or any(not p or p in (".", "..") or not all(c.isascii() and (c.isalnum() or c in "._-") for c in p) for p in parts):
+        raise ValueError("bad file key")
+    return FILES_DIR.joinpath(*parts)
+
+
+def put_file(key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+    """Blocking: writes locally and (with S3 configured) uploads, so a disk wipe loses nothing."""
+    p = _file_path(key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    if S3_ENABLED:
+        try:
+            s3().put_object(Bucket=S3_BUCKET, Key=_key("files", key), Body=data, ContentType=content_type)
+        except Exception as e:
+            _s3_err(f"upload file {key}", e)
+
+
+def get_file(key: str) -> Path | None:
+    p = _file_path(key)
+    if p.exists():
+        return p
+    if S3_ENABLED:
+        try:
+            obj = s3().get_object(Bucket=S3_BUCKET, Key=_key("files", key))
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(obj["Body"].read())
+            return p
+        except Exception as e:
+            _s3_err(f"fetch file {key}", e)
+    return None
+
+
+def delete_files(prefix: str) -> None:
+    p = _file_path(prefix)
+    if p.is_dir():
+        shutil.rmtree(p, ignore_errors=True)
+    elif p.exists():
+        p.unlink()
+    if S3_ENABLED:
+        try:
+            cli = s3()
+            resp = cli.list_objects_v2(Bucket=S3_BUCKET, Prefix=_key("files", prefix))
+            for o in resp.get("Contents", []):
+                cli.delete_object(Bucket=S3_BUCKET, Key=o["Key"])
+        except Exception as e:
+            _s3_err(f"delete files {prefix}", e)
