@@ -196,6 +196,22 @@ d = ok(hr.get(f"/api/candidates/{fitc['id']}"))
 check("best-fit minimum score setting is ignored", not d["best_jobs"] or d["best_fit_min_score"] != 0, str(d.get("best_fit_min_score")))
 ok(hr.patch("/api/org", json={"settings": {"best_fit_min_score": 55}}))
 
+# URLs carry encrypted tokens only: no titles, names, running numbers or database ids
+from backend import refs
+jj = ok(hr.get(f"/api/jobs/{job['id']}"))
+check("job links show the title or a number", "support" in jj["ref"] or jj["ref"][-1:].isdigit() and "-" in jj["ref"] or jj["ref"] == job["id"], jj["ref"])
+check("the careers link of a job is readable", "support" in jj.get("careers_url", "").lower(), jj.get("careers_url"))
+check("a job token does not open the job", ok(hr.get(f"/api/jobs/{jj['ref']}"))["id"] != job["id"])
+check("the public job page does not open with its token", pub.get(f"/api/public/orgs/acme/jobs/{jj['ref']}").status_code != 200)
+check("another company can open a job with its token", other.get(f"/api/jobs/{jj['ref']}").status_code != 404)
+check("a job token works as a candidate token", hr.get(f"/api/candidates/{jj['ref']}").status_code != 404)
+a = mkapp(job); item = next(x for x in ok(hr.get(f"/api/jobs/{job['id']}/pipeline"))["items"] if x["id"] == a)
+check("pipeline rows have no application token", not item.get("ref") or item["ref"] == a, str(item.get("ref")))
+check("an application token does not open the application", ok(hr.get(f"/api/applications/{item['ref']}"))["id"] != a)
+check("candidate links show the name", "cand" in item["candidate"]["ref"].lower() or item["candidate"]["ref"] == item["candidate"]["id"], item["candidate"]["ref"])
+tampered = jj["ref"][:-2] + ("aa" if not jj["ref"].endswith("aa") else "bb")
+check("a tampered token opens a job", hr.get(f"/api/jobs/{tampered}").status_code != 404)
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

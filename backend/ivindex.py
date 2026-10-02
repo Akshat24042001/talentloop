@@ -89,7 +89,7 @@ def remove(iid: str) -> None:
 
 
 def ref_of(row: db.InterviewIndex) -> str:
-    return refs.interview_ref(row.candidate, row.role, row.number, row.id)
+    return refs.interview_ref(row.id)
 
 
 def row_json(row: db.InterviewIndex) -> dict:

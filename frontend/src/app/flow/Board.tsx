@@ -10,7 +10,7 @@ import AppDrawer from './AppDrawer'
 import { STATUS_TONE, type Round, type RoundSummary } from './types'
 
 export interface PipeItem {
-  id: string; stage: string; stage_label: string; round_id: string | null; round_status: string | null; created_at: number; updated_at: number; rating: number | null
+  id: string; ref?: string; stage: string; stage_label: string; round_id: string | null; round_status: string | null; created_at: number; updated_at: number; rating: number | null
   source: string; college: string; match_score: number | null; human_requested: boolean; accommodation: string | null; knockout_failed: string[] | null
   candidate: { id: string; ref: string; name: string; email: string; location?: string; headline?: string; years?: number | null; notice_days?: number | null; expected_salary?: number | null; college?: string }
   current: RoundSummary | null; scores: Record<string, number>; flags: string[]
@@ -20,7 +20,7 @@ type Col = { id: string; title: string; round?: Round; items: PipeItem[] }
 
 const CLOSED = ['rejected', 'withdrawn'], DONE = ['offer', 'hired']
 
-export default function Board({ jobId }: { jobId: string }) {
+export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: string }) {
   const { query } = useLocation()
   const { data, error, reload } = useApi<Pipe>(`/api/jobs/${jobId}/pipeline`)
   const [view, setView] = useState<'board' | 'list'>((localStorage.getItem('tl.pipeView') as 'board' | 'list') || 'board')
@@ -56,7 +56,7 @@ export default function Board({ jobId }: { jobId: string }) {
   if (orphan.length) cols.splice(cols.length - (f.closed ? 2 : 1), 0, { id: '_removed', title: 'In a removed round', items: orphan })
   const listItems = items.filter(a => f.closed || !CLOSED.includes(a.stage))
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const openApp = (id: string | null) => { setOpen(id); navigate(`/app/jobs/${jobId}?tab=pipeline${id ? `&app=${id}` : ''}`, { replace: true, keepScroll: true }) }
+  const openApp = (id: string | null) => { setOpen(id); const ref = id && (items.find(a => a.id === id)?.ref || id); navigate(`/app/jobs/${jobRef || jobId}?tab=pipeline${ref ? `&app=${ref}` : ''}`, { replace: true, keepScroll: true }) }
   async function runBulk(action: string, extra: Record<string, unknown> = {}) {
     try {
       const r = await api<{ done: number; errors: { id: string; error: string }[] }>('/api/applications/bulk', { json: { ids: [...sel], action, ...extra } })

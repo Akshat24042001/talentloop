@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import { ago, when } from '../lib/format'
 import { MSG_LABEL, MSG_TONE } from './flow/AppDrawer'
 
-interface Req { kind: 'human' | 'accommodation'; application_id: string; candidate: string; candidate_ref: string; job: string; job_ref: string; at: number; note: string; status: string; extra_time_pct?: number }
+interface Req { kind: 'human' | 'accommodation'; application_id: string; application_ref?: string; candidate: string; candidate_ref: string; job: string; job_ref: string; at: number; note: string; status: string; extra_time_pct?: number }
 
 export function Requests() {
   const { data, error, reload } = useApi<Req[]>('/api/requests')
@@ -27,7 +27,7 @@ export function Requests() {
         <div className="space-y-3">{open.map(r => (
           <Card key={`${r.kind}-${r.application_id}`}><CardBody className="space-y-2">
             <div className="flex flex-wrap items-center gap-2"><Badge tone="warning">{r.kind === 'human' ? 'Human interview' : 'Accommodation'}</Badge>
-              <a className="font-semibold hover:underline" href={`/app/candidates/${r.candidate_ref}`}>{r.candidate}</a><span className="text-sm text-slate-500">for <a className="hover:underline" href={`/app/jobs/${r.job_ref}?tab=pipeline&app=${r.application_id}`}>{r.job}</a> · {ago(r.at)}</span></div>
+              <a className="font-semibold hover:underline" href={`/app/candidates/${r.candidate_ref}`}>{r.candidate}</a><span className="text-sm text-slate-500">for <a className="hover:underline" href={`/app/jobs/${r.job_ref}?tab=pipeline&app=${r.application_ref || r.application_id}`}>{r.job}</a> · {ago(r.at)}</span></div>
             {r.note && <p className="text-sm">"{r.note}"</p>}
             {r.kind === 'human' ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="primary" onClick={() => human(r, 'human')}>Switch to a human interview</Button><Button size="sm" onClick={() => human(r, 'keep')}>Keep the AI round and reply</Button></div>
               : <div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-1.5 text-sm">Extra time on tests<Input type="number" aria-label="Extra time percent" className="h-8 w-16" min={0} max={100} value={pct[r.application_id] ?? 25} onChange={e => setPct({ ...pct, [r.application_id]: +e.target.value })} />%</label>

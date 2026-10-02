@@ -48,6 +48,7 @@ if WEAK_ADMIN:
     log.warning("ADMIN_KEY is weak. Use a long random string, or remove it if you don't use the API.")
 
 db.migrate()   # idempotent: creates missing tables (also when the app is imported by tests or tools)
+refs.key()      # load (or create once) the key that encrypts ids in URLs, outside any request transaction
 store.ON_SAVE.append(ivindex.sync)
 store.ON_DELETE.append(ivindex.remove)
 app = FastAPI(title="TalentLoop")
@@ -114,6 +115,8 @@ def can_see_interview(ctx: auth.Ctx, rec: dict) -> bool:
 
 def resolve_iid(ctx: auth.Ctx, key: str) -> str:
     """Interview id for a readable ref (rohan-mehta-7) in this company, or the id itself."""
+    if refs.decode("interview", key):
+        return refs.decode("interview", key)
     if store._valid(key) and not refs.number_of(key):
         return key
     with db.session() as s:
@@ -262,7 +265,7 @@ async def create_interview(req: Request):
         raise HTTPException(400, f"Invalid plan: {e}")
     settings = _settings(body)
     rec = interviews.create_record(org_id=ctx.org_id, created_by=ctx.user_id, job_id=job_id, candidate_id=cand_id,
-                                   application_id=str(body.get("application_id") or "") or None, plan=plan, inputs=inputs,
+                                   application_id=refs.app_id(str(body.get("application_id") or "")) or None, plan=plan, inputs=inputs,
                                    settings=settings, expires_hours=body.get("expires_hours") or 72,
                                    lines=await brain.localize_lines(settings.get("language") or "en"))
     iid = rec["id"]

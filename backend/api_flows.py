@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 def _app_and_job(s, ctx, aid: str, need: str = "edit"):
-    a = s.get(db.Application, aid)
+    a = s.get(db.Application, refs.app_id(aid))
     if not a or a.org_id != ctx.org_id:
         raise HTTPException(404, "Application not found")
     job, perm = get_job(s, ctx, a.job_id, need)
@@ -169,7 +169,7 @@ def pipeline(job_id: str, req: Request):
         for a, c in rows:
             rrs = results.get(a.id, {})
             cur = rrs.get(a.round_id)
-            items.append({"id": a.id, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "round_id": a.round_id,
+            items.append({"id": a.id, "ref": refs.app_ref(a.id), "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "round_id": a.round_id,
                           "round_status": a.round_status, "created_at": a.created_at, "updated_at": a.updated_at, "rating": a.rating,
                           "source": a.source, "college": drives.get(a.drive_id) or c.college, "match_score": ms.get(c.id),
                           "human_requested": bool(a.human_requested_at), "accommodation": (a.accommodation or {}).get("status"),
@@ -299,7 +299,7 @@ def application_detail(aid: str, req: Request):
             item = {"round": r, "result": flows.summary_for(rr) if rr else None, "data": _safe_data(rr) if rr else None}
             rounds.append(item)
         msgs = [_msg_json(m) for m in s.query(db.Message).filter(db.Message.application_id == a.id).order_by(db.Message.created_at.desc()).limit(50)]
-        return {"id": a.id, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "round_id": a.round_id, "round_status": a.round_status,
+        return {"id": a.id, "ref": refs.app_ref(a.id), "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "round_id": a.round_id, "round_status": a.round_status,
                 "candidate": cand_summary(c), "job": {"id": job.id, "ref": refs.job_ref(job), "title": job.title}, "rounds": rounds,
                 "answers": a.answers, "cover_letter": a.cover_letter, "knockout_failed": a.knockout_failed, "rating": a.rating, "notes": a.notes,
                 "human_requested_at": a.human_requested_at, "human_request_note": a.human_request_note, "accommodation": a.accommodation,
@@ -309,6 +309,8 @@ def application_detail(aid: str, req: Request):
 def _safe_data(rr: db.RoundResult) -> dict:
     """Round data for HR, without secrets (link tokens) and with the test paper reduced to the result."""
     d = {k: v for k, v in (rr.data or {}).items() if k not in ("t", "mt", "paper", "answers")}
+    if d.get("interview_id"):
+        d["interview_ref"] = refs.interview_ref(d["interview_id"])
     return d
 
 
@@ -918,10 +920,10 @@ def candidate_requests(req: Request):
         for a, c, j in rows:
             acc = a.accommodation or {}
             if a.human_requested_at and not acc.get("human_handled"):
-                out.append({"kind": "human", "application_id": a.id, "candidate": c.name, "candidate_ref": refs.cand_ref(c), "job": j.title,
+                out.append({"kind": "human", "application_id": a.id, "application_ref": refs.app_ref(a.id), "candidate": c.name, "candidate_ref": refs.cand_ref(c), "job": j.title,
                             "job_ref": refs.job_ref(j), "at": a.human_requested_at, "note": a.human_request_note, "status": "open"})
             if acc.get("request"):
-                out.append({"kind": "accommodation", "application_id": a.id, "candidate": c.name, "candidate_ref": refs.cand_ref(c), "job": j.title,
+                out.append({"kind": "accommodation", "application_id": a.id, "application_ref": refs.app_ref(a.id), "candidate": c.name, "candidate_ref": refs.cand_ref(c), "job": j.title,
                             "job_ref": refs.job_ref(j), "at": acc.get("requested_at"), "note": acc.get("request"), "status": acc.get("status", "requested"),
                             "extra_time_pct": acc.get("extra_time_pct")})
         return out

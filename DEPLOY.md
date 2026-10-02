@@ -91,7 +91,8 @@ language on the AI interview round; `STT_<LANG>` / `VOICE_<LANG>` override the d
    | `SMTP_*`, `WHATSAPP_*`, `DEEPGRAM_API_KEY`, `VAPI_PHONE_NUMBER_ID`, `IMAP_*` | optional: see "Optional services" above |
 
    Don't set `PUBLIC_URL`, `APP_URL`, `DATA_DIR`, `PORT` or `COOKIE_SECURE`: they're automatic. `ADMIN_KEY` is no longer
-   needed (people sign in); delete it unless a script uses the API.
+   needed (people sign in); delete it unless a script uses the API. `URL_SECRET` is optional: links carry encrypted
+   tokens, and without it the key is generated once and kept in the database (changing it later breaks old links).
 4. **Advanced > Health Check Path**: `/api/health`. Click **Create Web Service**. The first build takes about 5 minutes
    (it builds the website with Node, then the Python server). Every push to `main` redeploys.
 5. Custom domain (optional): Render > Settings > **Custom Domains** > add e.g. `app.talentloop.in` and create the CNAME

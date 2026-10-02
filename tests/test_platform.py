@@ -111,13 +111,19 @@ def interviews_scoped(cs):
            "jd": "Java Spring Boot developer " * 10, "resume": "Java Spring Boot SQL " * 10, "questions": ["Notice period?"]}
     plan = ok(owner.post("/api/plan", json=inp))["plan"]
     made = ok(owner.post("/api/interviews", json={"plan": plan, "inputs": inp}))
-    assert made["ref"] == "rohan-1" and made["report_path"] == "/app/interviews/rohan-1", made
-    assert ok(owner.get("/api/interviews/rohan-1"))["id"] == made["id"], "readable ref opens the interview"
+    ref = made["ref"]
+    assert ref != made["id"] and "rohan" not in ref and len(ref) >= 24, f"URL token reveals nothing: {ref}"
+    assert made["report_path"] == f"/app/interviews/{ref}", made
+    assert ok(owner.get(f"/api/interviews/{ref}"))["id"] == made["id"], "the encrypted token opens the interview"
+    assert ok(owner.get("/api/interviews/rohan-1"))["id"] == made["id"], "old readable links keep working"
+    assert other.get(f"/api/interviews/{ref}").status_code == 404, "tokens are scoped to the company"
     assert other.get("/api/interviews/rohan-1").status_code == 404, "refs are per company"
+    bad = ref[:-1] + ("a" if ref[-1] != "a" else "b")
+    assert owner.get(f"/api/interviews/{bad}").status_code == 404, "a tampered token opens nothing"
     assert [r["id"] for r in ok(owner.get("/api/interviews"))] == [made["id"]]
     assert ok(other.get("/api/interviews")) == [], "another company must not see this interview"
     assert other.get(f"/api/interviews/{made['id']}").status_code == 404
-    assert ok(owner.get("/api/interviews"))[0]["ref"] == "rohan-1"
+    assert ok(owner.get("/api/interviews"))[0]["ref"] == ref
     assert cs["mgr"].post("/api/interviews", json={"plan": plan, "inputs": inp}).status_code == 403, "hiring managers need a job assignment"
     print("INTERVIEWS SCOPED TO COMPANY: OK")
     return made["id"]

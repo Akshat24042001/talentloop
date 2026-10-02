@@ -537,7 +537,7 @@ def candidate_detail(cid: str, req: Request):
         org = s.get(db.Org, c.org_id)
         st = org_settings(org)
         iv_refs = _interview_refs(s, [a.interview_id for a in s.query(db.Application.interview_id).filter(db.Application.candidate_id == c.id) if a.interview_id])
-        apps = [{"id": a.id, "job_id": j.id, "job_ref": refs.job_ref(j), "job": j.title, "stage": a.stage, "interview_ref": iv_refs.get(a.interview_id), "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at,
+        apps = [{"id": a.id, "ref": refs.app_ref(a.id), "job_id": j.id, "job_ref": refs.job_ref(j), "job": j.title, "stage": a.stage, "interview_ref": iv_refs.get(a.interview_id), "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at,
                  "rating": a.rating, "knockout_failed": a.knockout_failed, "interview_id": a.interview_id, "answers": a.answers}
                 for a, j in s.query(db.Application, db.Job).join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.candidate_id == c.id)]
         best = matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=8,
@@ -663,7 +663,7 @@ def _interview_refs(s, ids: list[str]) -> dict[str, str]:
 
 
 def app_row(a: db.Application, c: db.Candidate, m: db.Match | None, iv_ref: str | None = None) -> dict:
-    return {"id": a.id, "stage": a.stage, "round_id": a.round_id, "round_status": a.round_status, "interview_ref": iv_ref, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at, "updated_at": a.updated_at,
+    return {"id": a.id, "ref": refs.app_ref(a.id), "stage": a.stage, "round_id": a.round_id, "round_status": a.round_status, "interview_ref": iv_ref, "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at, "updated_at": a.updated_at,
             "rating": a.rating, "notes": a.notes, "knockout_failed": a.knockout_failed, "answers": a.answers, "cover_letter": a.cover_letter,
             "interview_id": a.interview_id, "source": a.source, "candidate": cand_summary(c),
             "match": {"score": m.score, "rank": m.rank, "ai_score": m.ai_score, "verdict": (m.ai_report or {}).get("verdict")} if m else None}
@@ -709,7 +709,7 @@ async def update_application(aid: str, req: Request):
     body = await req.json()
     with db.session() as s:
         ctx = ctx_of(req, s)
-        a = s.get(db.Application, aid)
+        a = s.get(db.Application, refs.app_id(aid))
         if not a:
             raise HTTPException(404, "Application not found")
         job, perm = get_job(s, ctx, a.job_id)
@@ -746,7 +746,7 @@ def remove_application(aid: str, req: Request):
     """Take a candidate off a job's pipeline (the candidate stays in the talent pool)."""
     with db.session() as s:
         ctx = ctx_of(req, s)
-        a = s.get(db.Application, aid)
+        a = s.get(db.Application, refs.app_id(aid))
         if not a or a.org_id != ctx.org_id:
             raise HTTPException(404, "Application not found")
         job, perm = get_job(s, ctx, a.job_id)
@@ -793,7 +793,7 @@ async def match_run(req: Request):
 def _match_row(m: db.Match, c: db.Candidate, a: db.Application | None) -> dict:
     return {"rank": m.rank, "score": m.score, "breakdown": m.breakdown, "knocked_out": m.knocked_out, "ai_score": m.ai_score,
             "ai_report": m.ai_report, "ai_at": m.ai_at, "candidate": cand_summary(c),
-            "application": {"id": a.id, "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage)} if a else None}
+            "application": {"id": a.id, "ref": refs.app_ref(a.id), "stage": a.stage, "stage_label": STAGE_LABEL.get(a.stage)} if a else None}
 
 
 def match_rows(s, job: db.Job, limit: int) -> list[dict]:
@@ -847,7 +847,7 @@ def match_overview(req: Request):
         short: dict[str, list] = {i: [] for i in ids}
         for jid, rank, score, ai_score, rep, ko, cid, name, num in rows:
             if rank <= tops[jid]:
-                short[jid].append({"candidate_id": cid, "ref": refs.make(name or "candidate", num, cid), "name": name, "score": score,
+                short[jid].append({"candidate_id": cid, "ref": refs.cand_ref_of(cid), "name": name, "score": score,
                                    "ai_score": ai_score, "verdict": (rep or {}).get("verdict"), "knocked_out": ko, "applied": (jid, cid) in applied})
         out = [{**job_summary(j), "shortlist": short[j.id], "ai_pending": pend.get(j.id, 0), "scored": scored.get(j.id, 0)} for j in jobs]
         return {"jobs": out, "pool": s.query(func.count(db.Candidate.id)).filter(db.Candidate.org_id == ctx.org_id).scalar(),

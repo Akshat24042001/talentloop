@@ -262,6 +262,13 @@ class Counter(Base):
     value: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class AppSecret(Base):
+    """Server-side keys generated once (for example the key that encrypts ids in URLs)."""
+    __tablename__ = "app_secrets"
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200))
+
+
 class InterviewIndex(Base):
     """Summary row per AI interview (the full record stays in store.py), so lists never read every JSON file."""
     __tablename__ = "interview_index"

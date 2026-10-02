@@ -182,7 +182,7 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
   if (type === 'ai_interview') return <>
     {res.status === 'setting_up' && <p className="flex items-center gap-1.5 text-slate-500"><Spinner className="size-3.5" />Preparing the interview…</p>}
     {data.summary && <p>{data.summary}</p>}
-    {data.interview_id && <Button size="sm" icon={<Play />} href={`/app/interviews/${data.interview_id}`}>Interview report</Button>}
+    {data.interview_id && <Button size="sm" icon={<Play />} href={`/app/interviews/${data.interview_ref || data.interview_id}`}>Interview report</Button>}
   </>
   if (type === 'human_interview') {
     const b = data.booking, fb = data.feedback

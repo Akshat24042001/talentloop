@@ -19,7 +19,7 @@ interface Job {
 }
 interface JD { title: string; company: string; facts: string[]; sections: { title: string; body?: string; items?: string[] }[]; contact?: string }
 export interface Cand { id: string; ref: string; name: string; email: string; phone?: string; location?: string; headline?: string; years?: number | null; skills: string[]; source: string; has_resume: boolean; notice_days?: number | null; current_company?: string }
-interface MatchRow { rank: number; score: number; breakdown: Breakdown; knocked_out: boolean; ai_score?: number | null; ai_report?: AIReport | null; candidate: Cand; application?: { id: string; stage: string; stage_label: string } | null }
+interface MatchRow { rank: number; score: number; breakdown: Breakdown; knocked_out: boolean; ai_score?: number | null; ai_report?: AIReport | null; candidate: Cand; application?: { id: string; ref?: string; stage: string; stage_label: string } | null }
 
 type Tab = 'overview' | 'pipeline' | 'flow' | 'drives' | 'matches' | 'team' | 'activity'
 
@@ -58,7 +58,7 @@ export default function JobDetail({ id }: { id: string }) {
         { id: 'overview', label: 'Job description' }, { id: 'drives', label: 'Campus drives' }, { id: 'team', label: 'Team access', count: job.collaborators.length }, { id: 'activity', label: 'Activity' }]} />
       {tab === 'overview' && <Overview job={job} />}
       {tab === 'matches' && <Matches job={job} canManage={job.permission === 'manage'} />}
-      {tab === 'pipeline' && <Board jobId={job.id} />}
+      {tab === 'pipeline' && <Board jobId={job.id} jobRef={job.ref} />}
       {tab === 'flow' && <FlowBuilder jobId={job.id} canEdit={job.permission !== 'view'} canManage={job.permission === 'manage'} />}
       {tab === 'drives' && <JobDrives jobId={job.id} canManage={job.permission === 'manage'} />}
       {tab === 'team' && <TeamAccess job={job} reload={reload} canManage={job.permission === 'manage' && me.can.manage_jobs} />}
@@ -168,7 +168,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
         <div className="flex flex-wrap gap-2">
           {!compact || open ? null : <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>Details</Button>}
           {canManage && !m.application && <Button size="sm" icon={<UserPlus />} onClick={() => onAdd(c)}>Shortlist</Button>}
-          {canManage && <Tip label="Send an AI first-round interview"><Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${job.ref}&candidate=${c.ref}${m.application ? `&application=${m.application.id}` : ''}`}>Interview</Button></Tip>}
+          {canManage && <Tip label="Send an AI first-round interview"><Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${job.ref}&candidate=${c.ref}${m.application ? `&application=${m.application.ref || m.application.id}` : ''}`}>Interview</Button></Tip>}
         </div>
       </div>
       {open && (
