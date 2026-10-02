@@ -161,7 +161,7 @@ def tracks_stopped(pg) -> bool:
 
 def main():
     data = tempfile.mkdtemp()
-    env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test",
+    env = dict(os.environ, ALLOW_SAMPLE_DATA="1", LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test",
                ADMIN_KEY=KEY, DATA_DIR=data, RECONNECT_WINDOW_SEC="12", SWEEP_EVERY_SEC="3", LOG_LEVEL="WARNING",
                PYTHONUNBUFFERED="1", PLATFORM_ADMIN_EMAILS="admin@e2e.test", DATABASE_URL="")
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(PORT)], cwd=ROOT, env=env,

@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 
-os.environ.update({"LLM_MOCK": "0", "LLM_API_KEY": "sk-or-test-key", "LLM_BASE_URL": "", "FAST_MODEL": "", "SMART_MODEL": "",
+os.environ.update({"ALLOW_SAMPLE_DATA": "1", "LLM_MOCK": "0", "LLM_API_KEY": "sk-or-test-key", "LLM_BASE_URL": "", "FAST_MODEL": "", "SMART_MODEL": "",
                    "DATA_DIR": tempfile.mkdtemp(), "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""), "ADMIN_KEY": "",
                    "PUBLIC_URL": "https://example.com", "VAPI_PUBLIC_KEY": "pk",
                    "PLAN_DEADLINE_SEC": "6", "PLAN_HEDGE_SEC": "2"})

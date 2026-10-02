@@ -67,7 +67,8 @@ def me_payload(s, ctx: auth.Ctx) -> dict:
     if u:
         for m, o in s.query(db.Membership, db.Org).join(db.Org, db.Org.id == db.Membership.org_id) \
                 .filter(db.Membership.user_id == u.id, db.Membership.active.isnot(False)):
-            mems.append({"org_id": o.id, "name": o.name, "slug": o.slug, "role": m.role})
+            mems.append({"org_id": o.id, "name": o.name, "slug": o.slug, "role": m.role, "role_label": auth.ROLE_LABEL.get(m.role, m.role),
+                         "title": m.title or "", "joined_at": m.created_at})
     org = ctx.org
     return {
         "user": {"id": u.id, "email": u.email, "name": u.name} if u else {"id": None, "email": "api-key", "name": "API key"},
@@ -399,7 +400,10 @@ def get_org(req: Request):
     with db.session() as s:
         ctx = auth.current(req, s)
         auth.require_org(ctx)
-        return {"id": ctx.org.id, "name": ctx.org.name, "slug": ctx.org.slug, "settings": org_settings(ctx.org), "created_at": ctx.org.created_at}
+        samples = s.query(db.Candidate.id).filter_by(org_id=ctx.org.id, source="demo").first() is not None \
+            or any((f or {}).get("_sample") for (f,) in s.query(db.Job.fields).filter_by(org_id=ctx.org.id))
+        return {"id": ctx.org.id, "name": ctx.org.name, "slug": ctx.org.slug, "settings": org_settings(ctx.org), "created_at": ctx.org.created_at,
+                "has_sample_data": samples}
 
 
 @router.patch("/api/org")

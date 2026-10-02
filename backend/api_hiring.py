@@ -1197,8 +1197,10 @@ def demo_seed(req: Request):
     with db.session() as s:
         ctx = ctx_of(req, s)
         auth.require(ctx, auth.MANAGE_JOBS, "load sample data")
+        if not (ctx.platform_admin or ctx.via_key or os.getenv("ALLOW_SAMPLE_DATA") == "1"):
+            raise HTTPException(403, "Sample data is loaded by the platform admin.")
         if s.query(db.Candidate).filter_by(org_id=ctx.org_id, source="demo").count():
-            raise HTTPException(409, "Sample data is already loaded. Remove it first from Settings > Data.")
+            raise HTTPException(409, "Sample data is already loaded. Remove it first.")
         out = demo.seed(s, s.get(db.Org, ctx.org_id), ctx.user_id)
         log_activity(s, ctx, "demo_seeded", f"{out['jobs']} sample jobs, {out['candidates']} sample candidates")
         return out

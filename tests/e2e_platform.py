@@ -22,7 +22,7 @@ SHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 
 def main():
     data = tempfile.mkdtemp()
-    env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test", ADMIN_KEY="", DATA_DIR=data,
+    env = dict(os.environ, ALLOW_SAMPLE_DATA="1", LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test", ADMIN_KEY="", DATA_DIR=data,
                LOG_LEVEL="WARNING", PLATFORM_ADMIN_EMAILS="founder@e2e.test", DATABASE_URL=os.getenv("TEST_DATABASE_URL", ""), PYTHONUNBUFFERED="1")
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
                            stdout=open(Path(data) / "server.log", "w"), stderr=subprocess.STDOUT)
@@ -56,8 +56,9 @@ def main():
             pg.get_by_role("button", name="Create workspace").click()
             expect(pg.get_by_text("Welcome to TalentLoop")).to_be_visible()
             shot(pg, "02-welcome")
-            pg.get_by_role("button", name="Load samples").click()
-            expect(pg.get_by_text("Added 6 sample jobs")).to_be_visible(timeout=30000)
+            expect(pg.get_by_role("button", name="Load samples")).to_have_count(0)   # company owners don't load sample data
+            assert pg.request.post(BASE + "/api/demo/seed").ok
+            pg.reload()
             expect(pg.locator("text=Open jobs").locator("..").locator("..")).to_contain_text("6")
             shot(pg, "03-dashboard")
 

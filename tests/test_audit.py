@@ -5,7 +5,7 @@ candidate left, a deleted job breaking the background worker, other companies' u
 link types mixed up, abandoned tests never scored, permissions of viewers and reviewers). A check passes when the
 bug does NOT happen. TEST_DATABASE_URL runs it on Postgres."""
 import json, os, sys, tempfile, time, asyncio, traceback
-os.environ.update({"LLM_MOCK": "1", "PUBLIC_URL": "https://x.test", "VAPI_PUBLIC_KEY": "pk", "ADMIN_KEY": "", "DATA_DIR": tempfile.mkdtemp(),
+os.environ.update({"ALLOW_SAMPLE_DATA": "1", "LLM_MOCK": "1", "PUBLIC_URL": "https://x.test", "VAPI_PUBLIC_KEY": "pk", "ADMIN_KEY": "", "DATA_DIR": tempfile.mkdtemp(),
                    "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""), "FINISH_DELAY_SEC": "0", "PLATFORM_ADMIN_EMAILS": "", "APP_URL": "https://hire.test", "SWEEP_EVERY_SEC": "0"})
 import logging; logging.disable(logging.CRITICAL)
 from fastapi.testclient import TestClient
@@ -211,6 +211,16 @@ check("an application token does not open the application", ok(hr.get(f"/api/app
 check("candidate links show the name", "cand" in item["candidate"]["ref"].lower() or item["candidate"]["ref"] == item["candidate"]["id"], item["candidate"]["ref"])
 tampered = jj["ref"][:-2] + ("aa" if not jj["ref"].endswith("aa") else "bb")
 check("a tampered token opens a job", hr.get(f"/api/jobs/{tampered}").status_code != 404)
+
+# server configuration and sample data belong to the platform admin, not company users
+h = ok(hr.get("/api/health"))
+check("company users see server configuration in /api/health", any(k in h for k in ("fast_model", "storage", "llm_key_set", "platform")), str(sorted(h)))
+check("anonymous visitors see server configuration", any(k in ok(pub.get("/api/health")) for k in ("fast_model", "storage")))
+os.environ["ALLOW_SAMPLE_DATA"] = "0"
+check("a company owner can load sample data", hr.post("/api/demo/seed").status_code != 403)
+os.environ["ALLOW_SAMPLE_DATA"] = "1"
+me_ = ok(hr.get("/api/auth/me"))
+check("the account payload doesn't say the user's role and title", not me_["memberships"][0].get("role_label"), str(me_["memberships"][0]))
 
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"

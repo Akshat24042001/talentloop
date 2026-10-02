@@ -1,11 +1,13 @@
-import { ArrowLeft, Check, Copy, ExternalLink, FileText, FileUp, Link2, ShieldCheck, Sparkles, TriangleAlert, Wand2 } from 'lucide-react'
+import { ArrowLeft, Check, ExternalLink, FileText, FileUp, Link2, ShieldCheck, Sparkles, TriangleAlert, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, cn, copyText, toast } from '../components/ui'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, cn, toast } from '../components/ui'
 import { api } from '../lib/api'
 import { TYPE_LABEL } from '../lib/format'
 import { PageHeader } from '../components/kit'
 import { useHealth } from '../lib/health'
 import { useLocation } from '../lib/router'
+import { DateTimePicker, Stepper } from '../components/pickers'
+import { LinkActions } from '../components/LinkActions'
 
 interface Sample { id: string; role: string; company: string; candidate: string; duration: number; jd: string; resume: string; questions: string }
 interface Question { id: string; type: string; ask: string; competency_id?: string; scored: boolean; good_answer_covers?: string[]; max_followups: number; time_budget_sec: number }
@@ -138,7 +140,7 @@ export default function NewInterview() {
       <Steps step={step} />
       {health && (
         <div className="mb-4 flex flex-wrap gap-2">
-          {health.mock ? <Badge tone="warning">Demo mode: simulated AI</Badge> : <Badge tone="neutral">Interviewer: {health.fast_model} · Plan and scoring: {health.smart_model}</Badge>}
+          {health.mock ? <Badge tone="warning">Demo mode: simulated AI</Badge> : health.detail && <Badge tone="neutral">Interviewer: {health.fast_model} · Plan and scoring: {health.smart_model}</Badge>}
           {health.free_models && <Badge tone="warning">Free AI models: slower, rate-limited, may train on data</Badge>}
           {health.model_note && <Badge tone="warning">{health.model_note}</Badge>}
         </div>
@@ -161,7 +163,7 @@ export default function NewInterview() {
             <Field label="Role" htmlFor="role"><Input id="role" placeholder="Java Backend Developer" value={f.role} onChange={set('role')} /></Field>
             <Field label="Candidate name" htmlFor="cand"><Input id="cand" placeholder="Full name" value={f.cand} onChange={set('cand')} /></Field>
             <Field label="Candidate email" htmlFor="email"><Input id="email" type="email" placeholder="name@example.com" value={f.email} onChange={set('email')} onBlur={() => checkHistory()} /></Field>
-            <Field label="Interview length" htmlFor="dur"><Select id="dur" value={f.dur} onChange={set('dur')}>{[10, 15, 20, 30].map(m => <option key={m} value={m}>{m} min</option>)}</Select></Field>
+            <Field label="Interview length" htmlFor="dur"><Stepper id="dur" aria-label="Interview length" max={60} value={+f.dur} onChange={v => setF(x => ({ ...x, dur: String(v) }))} presets={[10, 15, 20, 30, 45, 60]} /></Field>
           </div>
           {hist.map(w => <Alert key={w} tone="danger" icon={<TriangleAlert />}>{w}</Alert>)}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -226,7 +228,7 @@ export default function NewInterview() {
               <Group title="Link" icon={<Link2 />}>
                 <div className="grid gap-4 py-3">
                   <Field label="Rejoin window after a dropped call" htmlFor="rejoin" hint="Seconds (10 to 900)."><Input id="rejoin" type="number" min={10} max={900} value={st.rejoin} onChange={e => setSt(s => ({ ...s, rejoin: e.target.value }))} /></Field>
-                  <Field label="Link opens at (optional)" htmlFor="openAt"><Input id="openAt" type="datetime-local" value={st.openAt} onChange={e => setSt(s => ({ ...s, openAt: e.target.value }))} /></Field>
+                  <Field label="Link opens at (optional)" htmlFor="openAt"><DateTimePicker id="openAt" aria-label="Link opens" value={st.openAt} onChange={v => setSt(s => ({ ...s, openAt: v }))} /></Field>
                   <Field label="Link valid for" htmlFor="validH" hint="Hours."><Input id="validH" type="number" min={1} max={720} value={st.validH} onChange={e => setSt(s => ({ ...s, validH: e.target.value }))} /></Field>
                 </div>
               </Group>
@@ -246,7 +248,8 @@ export default function NewInterview() {
               description="Send this link to the candidate. You'll find the interview on the Interviews page." />
             <CardBody className="space-y-4">
               {link.warnings.map(w => <Alert key={w} tone="danger" icon={<TriangleAlert />}>{w}</Alert>)}
-              <div className="flex gap-2"><Input id="candLink" readOnly value={link.url} onFocus={e => e.target.select()} /><Button id="copyBtn" variant="primary" icon={<Copy />} onClick={() => copyText(link.url, 'Candidate link copied')}>Copy</Button></div>
+              <div className="flex gap-2"><Input id="candLink" readOnly value={link.url} onFocus={e => e.target.select()} /><LinkActions size="md" url={link.url} label="Copy" copied="Candidate link copied" to={{ email: f.email, name: f.cand }} subject={`Your interview for ${f.role}`}
+                message={`Hi ${f.cand.split(' ')[0] || 'there'}, here is the link to your AI interview for ${f.role} at ${f.company}. Use a laptop with a camera and a quiet room:`} /></div>
               <div className="flex flex-wrap gap-2">
                 <Button href={link.report} icon={<FileText />}>Open report page</Button>
                 <Button href={link.path} target="_blank" icon={<ExternalLink />}>Preview candidate page</Button>

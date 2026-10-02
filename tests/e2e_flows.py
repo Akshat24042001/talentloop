@@ -23,7 +23,7 @@ SHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 
 def main():
     data = tempfile.mkdtemp()
-    env = dict(os.environ, LLM_MOCK="1", PUBLIC_URL=BASE, APP_URL=BASE, VAPI_PUBLIC_KEY="pk_test", ADMIN_KEY="", DATA_DIR=data, LOG_LEVEL="WARNING",
+    env = dict(os.environ, ALLOW_SAMPLE_DATA="1", LLM_MOCK="1", PUBLIC_URL=BASE, APP_URL=BASE, VAPI_PUBLIC_KEY="pk_test", ADMIN_KEY="", DATA_DIR=data, LOG_LEVEL="WARNING",
                PLATFORM_ADMIN_EMAILS="", DATABASE_URL=os.getenv("TEST_DATABASE_URL", ""), PYTHONUNBUFFERED="1")
     log = Path(data) / "server.log"
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.main:app", "--port", str(PORT)], cwd=ROOT, env=env,
@@ -60,8 +60,8 @@ def main():
             hr.fill("#name", "Hema HR"); hr.fill("#email", "hema@flows.test"); hr.fill("#company", "Flow Co"); hr.fill("#password", "correct-horse-1")
             hr.get_by_role("button", name="Create workspace").click()
             expect(hr.get_by_text("Welcome to TalentLoop")).to_be_visible()
-            hr.get_by_role("button", name="Load samples").click()
-            expect(hr.get_by_text("Added 6 sample jobs")).to_be_visible(timeout=30000)
+            assert hr.request.post(BASE + "/api/demo/seed").ok      # sample data: platform-admin tool, loaded via the API here
+            hr.reload()
             hr.get_by_role("link", name="Question bank").click()
             hr.get_by_role("button", name="Load about 60 starter questions").click()
             expect(hr.get_by_text("Quantitative aptitude").first).to_be_visible(timeout=15000)

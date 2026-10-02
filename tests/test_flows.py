@@ -8,7 +8,7 @@ import os
 import tempfile
 import time
 
-os.environ.update({"LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com", "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "",
+os.environ.update({"ALLOW_SAMPLE_DATA": "1", "LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com", "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "",
                    "DATA_DIR": tempfile.mkdtemp(), "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""), "FINISH_DELAY_SEC": "0",
                    "PLATFORM_ADMIN_EMAILS": "", "APP_URL": "https://hire.example.com", "SWEEP_EVERY_SEC": "0"})
 

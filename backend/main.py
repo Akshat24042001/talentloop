@@ -52,6 +52,8 @@ refs.key()      # load (or create once) the key that encrypts ids in URLs, outsi
 store.ON_SAVE.append(ivindex.sync)
 store.ON_DELETE.append(ivindex.remove)
 app = FastAPI(title="TalentLoop")
+from .compress import Gzip  # noqa: E402
+app.add_middleware(Gzip)
 app.include_router(api_accounts.router)
 _presence: dict[str, float] = {}     # interview id -> last heartbeat from a live call (memory only)
 _sweeping: set[str] = set()
@@ -175,20 +177,27 @@ def reconnect_window(rec: dict) -> int:
 # HR side
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
-def health():
-    return {"ok": True, "mock": llm.MOCK, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
+def health(req: Request):
+    """Liveness for the host's health check, plus what pages need (demo mode, public link base). Server
+    configuration (models, storage, keys, errors) is only shown to platform admins."""
+    base = {"ok": True, "mock": llm.MOCK, "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"),
+            "reconnect_window_sec": RECONNECT_WINDOW_SEC}
+    with db.session() as s:
+        ctx = auth.current(req, s, required=False)
+        if not (ctx and ctx.platform_admin):
+            return base
+    return {**base, "detail": True, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
             "llm_provider": "openrouter" if llm.OPENROUTER else ("custom" if llm.BASE_URL else "openai"),
             "llm_key_set": bool(llm.API_KEY), "fast_chain": llm.FAST_CHAIN, "smart_chain": llm.SMART_CHAIN,
             "free_models": any(m.endswith(":free") or m == "openrouter/free" for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
             "model_note": llm.MODEL_CHECK["note"],
             "messages": messages.status(), "phone": __import__("backend.phone", fromlist=["enabled"]).enabled(),
             "transcription": bool(os.getenv("DEEPGRAM_API_KEY")),
-            "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"), "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")),
-            "vapi_private_key_set": bool(os.getenv("VAPI_PRIVATE_KEY")),
+            "vapi_key_set": bool(os.getenv("VAPI_PUBLIC_KEY")), "vapi_private_key_set": bool(os.getenv("VAPI_PRIVATE_KEY")),
             "admin_protected": True, "admin_weak": WEAK_ADMIN, "platform": api_accounts.platform_status(),
             "storage": {"s3": store.S3_ENABLED, "s3_error": store.S3_STATUS["last_error"],
                         "persistent_disk": os.getenv("PERSISTENT_DISK", "") == "1"},
-            "ffmpeg": bool(media.ffmpeg_exe()), "reconnect_window_sec": RECONNECT_WINDOW_SEC}
+            "ffmpeg": bool(media.ffmpeg_exe())}
 
 
 @app.post("/api/extract")

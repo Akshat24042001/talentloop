@@ -1,7 +1,7 @@
 import { Briefcase, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, toast } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, useApi } from '../components/kit'
+import { Empty, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
 import { JOB_STATUS, VERDICT } from './labels'
@@ -26,7 +26,7 @@ export default function MatchCenter() {
     <>
       <PageHeader title="Match center" description="The shortlist for every open job, side by side. Ranking is free and instant; AI reports are written only for each shortlist."
         actions={me.can.manage_jobs && data && data.ai_pending > 0 && <Button variant="primary" icon={<Sparkles />} loading={busy} onClick={runAll}>Write {Math.min(data.ai_pending, data.ai_budget)} AI reports</Button>} />
-      {error ? <ErrorBox error={error} retry={reload} /> : !data ? <Loading /> : (
+      {error ? <ErrorBox error={error} retry={reload} /> : !data ? <ListSkeleton rows={4} avatar={false} /> : (
         <>
           <Card className="mb-4 grid grid-cols-2 divide-x divide-slate-100 text-center dark:divide-ink-800 sm:grid-cols-4">
             {[['Candidates ranked', data.pool], ['Open jobs', data.jobs.length], ['AI reports pending', data.ai_pending], ['Per-run AI limit', data.ai_budget]].map(([k, v]) => (

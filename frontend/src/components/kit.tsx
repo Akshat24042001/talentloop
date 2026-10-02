@@ -43,6 +43,34 @@ export function Empty({ icon, title, children, action }: { icon?: ReactNode; tit
 export function Loading({ className }: { className?: string }) {
   return <div className={cn('grid place-items-center p-16', className)}><Spinner className="size-6 text-brand-500" /></div>
 }
+// Skeletons: the page's shape while data loads, so the layout doesn't jump when it arrives.
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden className={cn('animate-pulse rounded-lg bg-slate-200/70 dark:bg-ink-800', className)} />
+}
+export function ListSkeleton({ rows = 6, avatar = true }: { rows?: number; avatar?: boolean }) {
+  return (
+    <div role="status" aria-label="Loading" className="divide-y divide-slate-100 rounded-2xl bg-white ring-1 ring-slate-200/70 dark:divide-ink-800 dark:bg-ink-900 dark:ring-ink-800">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-5 py-4">
+          {avatar && <Skeleton className="size-9 shrink-0 rounded-full" />}
+          <div className="min-w-0 flex-1 space-y-2"><Skeleton className="h-3.5 w-2/5" /><Skeleton className="h-3 w-3/5" /></div>
+          <Skeleton className="hidden h-6 w-20 rounded-full sm:block" />
+        </div>))}
+    </div>
+  )
+}
+export function CardsSkeleton({ n = 4, className }: { n?: number; className?: string }) {
+  return <div role="status" aria-label="Loading" className={cn('grid grid-cols-2 gap-3 lg:grid-cols-4', className)}>{Array.from({ length: n }, (_, i) => (
+    <div key={i} className="space-y-3 rounded-2xl bg-white p-5 ring-1 ring-slate-200/70 dark:bg-ink-900 dark:ring-ink-800"><Skeleton className="h-3 w-1/2" /><Skeleton className="h-7 w-1/3" /><Skeleton className="h-3 w-2/3" /></div>))}</div>
+}
+export function BoardSkeleton({ cols = 4 }: { cols?: number }) {
+  return <div role="status" aria-label="Loading" className="flex gap-3 overflow-hidden">{Array.from({ length: cols }, (_, i) => (
+    <div key={i} className="w-72 shrink-0 space-y-2.5 rounded-2xl bg-slate-100/70 p-3 dark:bg-ink-900"><Skeleton className="h-4 w-1/2" />
+      {Array.from({ length: 3 - (i % 2) }, (_, j) => <div key={j} className="space-y-2 rounded-xl bg-white p-3 dark:bg-ink-850"><Skeleton className="h-3.5 w-3/4" /><Skeleton className="h-3 w-1/2" /></div>)}</div>))}</div>
+}
+export function PageSkeleton() {
+  return <div role="status" aria-label="Loading" className="space-y-5"><div className="space-y-2"><Skeleton className="h-7 w-56" /><Skeleton className="h-4 w-80 max-w-full" /></div><CardsSkeleton /><ListSkeleton rows={5} /></div>
+}
 export function ErrorBox({ error, retry }: { error: string; retry?: () => void }) {
   return <Alert tone="danger" icon={<TriangleAlert />} title="Something went wrong">{error}{retry && <> <button className="font-semibold underline" onClick={retry}>Try again</button></>}</Alert>
 }

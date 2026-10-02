@@ -3,9 +3,11 @@ import { Copy, Download, GraduationCap, Plus, QrCode, Trash2 } from 'lucide-reac
 import QRCode from 'qrcode'
 import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, Field, Input, Modal, Select, Switch, copyText, toast } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, useApi } from '../components/kit'
+import { Empty, ErrorBox, ListSkeleton, Loading, PageHeader, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
+import { DateTimePicker } from '../components/pickers'
+import { LinkActions } from '../components/LinkActions'
 
 interface Drive {
   id: string; job_id: string; college: string; code: string; share_code: string; opens_at: number | null; closes_at: number | null; status: 'open' | 'closed'
@@ -24,7 +26,7 @@ export default function Drives() {
       <PageHeader title="Campus drives" description="One registration link and QR code per college. Students register with a live photo and take the job's flow (usually a proctored test) in your test window."
         actions={jobs && jobs.length > 0 && <div className="flex gap-2"><Select aria-label="Job" value={jobId} onChange={e => setJobId(e.target.value)}><option value="">Choose a job…</option>{jobs.map(j => <option key={j.id} value={j.id}>{j.title}</option>)}</Select>
           <Button variant="primary" icon={<Plus />} disabled={!jobId} onClick={() => setEdit({ job_id: jobId })}>New drive</Button></div>} />
-      {!data ? <Loading /> : !data.length ? <Card><Empty icon={<GraduationCap />} title="No campus drives yet">Pick a job above (a campus template flow works well), then add a drive per college.</Empty></Card>
+      {!data ? <ListSkeleton rows={3} avatar={false} /> : !data.length ? <Card><Empty icon={<GraduationCap />} title="No campus drives yet">Pick a job above (a campus template flow works well), then add a drive per college.</Empty></Card>
         : <DriveList drives={data} onEdit={setEdit} reload={reload} showJob />}
       {edit && <DriveEditor d={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload() }} />}
     </>
@@ -61,8 +63,10 @@ function DriveList({ drives, onEdit, reload, showJob }: { drives: Drive[]; onEdi
             <Button size="sm" icon={<QrCode />} onClick={() => setQr(d)}>QR code</Button>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" icon={<Copy />} onClick={() => copyText(d.link, 'Registration link copied')}>Registration link</Button>
-            <Button size="sm" icon={<Copy />} onClick={() => copyText(d.results_link, 'Results link copied')}>Results link (placement officer)</Button>
+            <LinkActions url={d.link} label="Registration link" copied="Registration link copied" to={{ email: d.settings?.officer_email, name: d.settings?.placement_officer }}
+              subject={`Campus hiring at ${d.college}: registration`} message={`Students of ${d.college} can register for our campus hiring drive here:`} />
+            <LinkActions url={d.results_link} label="Results link (placement officer)" copied="Results link copied" to={{ email: d.settings?.officer_email, name: d.settings?.placement_officer }}
+              subject={`Campus hiring at ${d.college}: results`} message={`Live results of our campus drive at ${d.college}:`} />
             {onEdit && <><Button size="sm" variant="ghost" onClick={() => onEdit(d)}>Edit</Button>
               <Button size="sm" variant="ghost" onClick={() => setStatus(d, d.status === 'open' ? 'closed' : 'open')}>{d.status === 'open' ? 'Close' : 'Reopen'}</Button>
               {!d.registered && <Button size="sm" variant="ghost" aria-label="Delete drive" icon={<Trash2 />} onClick={() => del(d)} />}</>}
@@ -104,8 +108,8 @@ function DriveEditor({ d, onClose, onSaved }: { d: Partial<Drive>; onClose: () =
       <div className="mt-4 space-y-3">
         <Field label="College" htmlFor="dr-c"><Input id="dr-c" value={f.college} onChange={e => setF({ ...f, college: e.target.value })} placeholder="e.g. PSG College of Technology" /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Test opens" htmlFor="dr-o"><Input id="dr-o" type="datetime-local" value={f.opens_at} onChange={e => setF({ ...f, opens_at: e.target.value })} /></Field>
-          <Field label="Test closes" htmlFor="dr-e"><Input id="dr-e" type="datetime-local" value={f.closes_at} onChange={e => setF({ ...f, closes_at: e.target.value })} /></Field>
+          <Field label="Test opens" htmlFor="dr-o"><DateTimePicker id="dr-o" aria-label="Test opens" value={f.opens_at} onChange={v => setF({ ...f, opens_at: v })} /></Field>
+          <Field label="Test closes" htmlFor="dr-e"><DateTimePicker id="dr-e" aria-label="Test closes" value={f.closes_at} onChange={v => setF({ ...f, closes_at: v })} /></Field>
           <Field label="Placement officer" htmlFor="dr-po"><Input id="dr-po" value={f.placement_officer} onChange={e => setF({ ...f, placement_officer: e.target.value })} /></Field>
           <Field label="Their email" htmlFor="dr-pe"><Input id="dr-pe" type="email" value={f.officer_email} onChange={e => setF({ ...f, officer_email: e.target.value })} /></Field>
         </div>

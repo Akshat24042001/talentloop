@@ -2,7 +2,7 @@
 import { CalendarClock, ClipboardCheck, ExternalLink, HandHelping, Inbox, Mail, MessageCircle, RefreshCw, Video } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, Input, Select, toast } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, Pager, useApi } from '../components/kit'
+import { Empty, ErrorBox, ListSkeleton, PageHeader, Pager, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { ago, when } from '../lib/format'
 import { MSG_LABEL, MSG_TONE } from './flow/AppDrawer'
@@ -23,7 +23,7 @@ export function Requests() {
   return (
     <>
       <PageHeader title="Candidate requests" description="Accommodations (for example extra time) and requests for an interview with a person instead of the AI interviewer." />
-      {!data ? <Loading /> : !data.length ? <Card><Empty icon={<HandHelping />} title="No requests">Candidates can ask from their application status page.</Empty></Card> : <>
+      {!data ? <ListSkeleton rows={4} /> : !data.length ? <Card><Empty icon={<HandHelping />} title="No requests">Candidates can ask from their application status page.</Empty></Card> : <>
         <div className="space-y-3">{open.map(r => (
           <Card key={`${r.kind}-${r.application_id}`}><CardBody className="space-y-2">
             <div className="flex flex-wrap items-center gap-2"><Badge tone="warning">{r.kind === 'human' ? 'Human interview' : 'Accommodation'}</Badge>
@@ -54,7 +54,7 @@ export function Outbox() {
       {data && (!data.channels.email || !data.channels.whatsapp) && <Alert className="mb-4" tone="info" title="Channels">
         Email is {data.channels.email ? 'set up' : 'not set up (SMTP_HOST and related settings on the server)'}. WhatsApp is {data.channels.whatsapp ? 'set up' : 'not set up (WHATSAPP_TOKEN and related settings)'}. Messages on a channel that isn't set up are kept here and can be retried later.</Alert>}
       <div className="mb-3"><Select aria-label="Status" className="w-48" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}><option value="">All messages</option>{Object.entries(MSG_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></div>
-      {!data ? <Loading /> : !data.items.length ? <Card><Empty icon={<Inbox />} title="No messages">Messages appear here when candidates move through a flow.</Empty></Card> : <>
+      {!data ? <ListSkeleton rows={4} /> : !data.items.length ? <Card><Empty icon={<Inbox />} title="No messages">Messages appear here when candidates move through a flow.</Empty></Card> : <>
         <Card><ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.items.map(m => (
           <li key={m.id} className="px-5 py-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">{m.channel === 'whatsapp' ? <MessageCircle className="size-4 text-emerald-600" /> : <Mail className="size-4 text-slate-400" />}
@@ -88,7 +88,7 @@ export function MyInterviews() {
   return (
     <>
       <PageHeader title="My interviews" description="Interviews candidates booked with you. Open the prep kit before, and give one-click feedback after." />
-      {!data ? <Loading /> : !data.length ? <Card><Empty icon={<CalendarClock />} title="No interviews booked with you">When a candidate books one of your slots it shows here, and you get an email with a calendar invite.</Empty></Card> : <>
+      {!data ? <ListSkeleton rows={4} /> : !data.length ? <Card><Empty icon={<CalendarClock />} title="No interviews booked with you">When a candidate books one of your slots it shows here, and you get an email with a calendar invite.</Empty></Card> : <>
         {upcoming.length > 0 && <Card className="mb-4"><div className="px-5 pt-4 text-sm font-semibold">Upcoming</div><ul className="divide-y divide-slate-100 dark:divide-ink-800">{upcoming.map(row)}</ul></Card>}
         {past.length > 0 && <Card><div className="px-5 pt-4 text-sm font-semibold">Past two weeks</div><ul className="divide-y divide-slate-100 dark:divide-ink-800">{past.map(row)}</ul></Card>}
       </>}

@@ -7,6 +7,7 @@ import { api } from '../../lib/api'
 import { setLeaveGuard } from '../../lib/router'
 import { when } from '../../lib/format'
 import { LANGUAGES, PASS_LABEL, SHORT_LABEL, newRound, type FlowMeta, type Round, type RoundType, type TeamMember } from './types'
+import { DatePicker, MINUTE_PRESETS, Stepper, TimePicker } from '../../components/pickers'
 
 export const ROUND_ICON: Record<RoundType, typeof Bot> = {
   application: ClipboardList, cv_screening: FileCheck2, test: ListChecks, video_intro: Video, role_task: Mic, practical_task: FileUp,
@@ -182,7 +183,7 @@ function RoundEditor({ r, meta, team, jobId, canEdit, saved, onChange }: { r: Ro
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Language" htmlFor="r-lang"><Select id="r-lang" value={c.language || 'en'} onChange={e => cfg('language', e.target.value)}>{LANGUAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
               <Field label="Channel" htmlFor="r-ch"><Select id="r-ch" value={c.channel || 'web'} onChange={e => cfg('channel', e.target.value)}><option value="web">Browser (video)</option><option value="phone">Phone call</option><option value="both">Candidate chooses</option></Select></Field>
-              <Field label="Length (minutes)" htmlFor="r-dur"><Input id="r-dur" type="number" min={5} max={60} value={c.duration_min ?? 15} onChange={e => cfg('duration_min', num(e.target.value))} /></Field>
+              <Field label="Length (minutes)" htmlFor="r-dur"><Stepper id="r-dur" aria-label="Length" max={60} value={c.duration_min ?? 15} onChange={v => cfg('duration_min', v)} /></Field>
               <Field label="Warnings before it ends" htmlFor="r-warn"><Input id="r-warn" type="number" min={0} max={10} value={c.max_warnings ?? 2} onChange={e => cfg('max_warnings', num(e.target.value))} /></Field>
             </div>
             <Switch id="r-rp" checked={!!c.role_play} onChange={v => cfg('role_play', v)} label="Role-play" description="The AI plays a customer or stakeholder for part of the interview." />
@@ -276,7 +277,7 @@ function HumanConfig({ c, cfg, team, jobId, roundId, saved }: { c: Record<string
   return (
     <Section title="Interview">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Length (minutes)" htmlFor="h-dur"><Input id="h-dur" type="number" min={10} max={240} value={c.duration_min ?? 45} onChange={e => cfg('duration_min', +e.target.value)} /></Field>
+        <Field label="Length (minutes)" htmlFor="h-dur"><Stepper id="h-dur" aria-label="Length" value={c.duration_min ?? 45} onChange={v => cfg('duration_min', v)} presets={MINUTE_PRESETS} /></Field>
         <Field label="Mode" htmlFor="h-mode"><Select id="h-mode" value={c.mode || 'video'} onChange={e => cfg('mode', e.target.value)}><option value="video">Video call</option><option value="in_person">In person</option><option value="phone">Phone</option></Select></Field>
         <Field label="Reschedules allowed" htmlFor="h-res"><Input id="h-res" type="number" min={0} max={5} value={c.reschedules_allowed ?? 1} onChange={e => cfg('reschedules_allowed', +e.target.value)} /></Field>
       </div>
@@ -324,12 +325,12 @@ function Slots({ jobId, roundId, team, interviewers, minutes }: { jobId: string;
       <Modal open={open} onOpenChange={setOpen} title="Add interview slots" description="Candidates pick one of these times themselves (at least an hour ahead)."
         footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" loading={busy} onClick={create}>Add slots</Button></>}>
         <div className="mt-4 grid grid-cols-2 gap-3">
-          <Field label="First day" htmlFor="sl-d"><Input id="sl-d" type="date" min={today} value={f.date} onChange={e => setF({ ...f, date: e.target.value })} /></Field>
+          <Field label="First day" htmlFor="sl-d"><DatePicker id="sl-d" min={today} value={f.date} onChange={v => setF({ ...f, date: v })} /></Field>
           <Field label="Working days" htmlFor="sl-n" hint="Skips weekends"><Input id="sl-n" type="number" min={1} max={14} value={f.days} onChange={e => setF({ ...f, days: +e.target.value })} /></Field>
-          <Field label="From" htmlFor="sl-f"><Input id="sl-f" type="time" value={f.from} onChange={e => setF({ ...f, from: e.target.value })} /></Field>
-          <Field label="To" htmlFor="sl-t"><Input id="sl-t" type="time" value={f.to} onChange={e => setF({ ...f, to: e.target.value })} /></Field>
-          <Field label="Minutes each" htmlFor="sl-m"><Input id="sl-m" type="number" min={10} max={240} value={f.minutes} onChange={e => setF({ ...f, minutes: +e.target.value })} /></Field>
-          <Field label="Gap (minutes)" htmlFor="sl-g"><Input id="sl-g" type="number" min={0} max={120} value={f.gap} onChange={e => setF({ ...f, gap: +e.target.value })} /></Field>
+          <Field label="From" htmlFor="sl-f"><TimePicker id="sl-f" value={f.from} onChange={v => setF({ ...f, from: v })} /></Field>
+          <Field label="To" htmlFor="sl-t"><TimePicker id="sl-t" value={f.to} onChange={v => setF({ ...f, to: v })} /></Field>
+          <Field className="col-span-2" label="Interview length" htmlFor="sl-m"><Stepper id="sl-m" aria-label="Interview length" value={f.minutes} onChange={v => setF({ ...f, minutes: v })} presets={MINUTE_PRESETS} /></Field>
+          <Field className="col-span-2" label="Break between interviews" htmlFor="sl-g"><Stepper id="sl-g" aria-label="Break between interviews" min={0} max={60} value={f.gap} onChange={v => setF({ ...f, gap: v })} presets={[0, 5, 10, 15, 30]} /></Field>
           <Field className="col-span-2" label="Interviewer" htmlFor="sl-i"><Select id="sl-i" value={f.interviewer} onChange={e => setF({ ...f, interviewer: e.target.value })}><option value="">Me</option>
             {team.map(t => <option key={t.id} value={t.id}>{t.name || t.email}</option>)}</Select></Field>
         </div>

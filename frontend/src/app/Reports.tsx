@@ -2,7 +2,7 @@
 import { Download, ScrollText } from 'lucide-react'
 import { useState } from 'react'
 import { Card, CardBody, CardHeader, Input, Select } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, Pager, useApi } from '../components/kit'
+import { CardsSkeleton, Empty, ErrorBox, ListSkeleton, PageHeader, Pager, useApi } from '../components/kit'
 import { HBarChart } from '../components/charts'
 import { when } from '../lib/format'
 import { ACTION_LABEL, actor } from './labels'
@@ -27,7 +27,7 @@ export function Reports() {
       <PageHeader title="Reports" description="Where candidates come from, where they drop off and how long hiring takes."
         actions={<><Select aria-label="Job" value={job} onChange={e => setJob(e.target.value)}><option value="">All jobs</option>{jobs?.map(j => <option key={j.id} value={j.id}>{j.title}</option>)}</Select>
           <Select aria-label="Period" value={days} onChange={e => setDays(e.target.value)}><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option><option value="0">All time</option></Select></>} />
-      {!data ? <Loading /> : !data.total ? <Card><Empty title="No applications in this period">Reports fill in as candidates apply and move through your flows.</Empty></Card> : (
+      {!data ? <CardsSkeleton /> : !data.total ? <Card><Empty title="No applications in this period">Reports fill in as candidates apply and move through your flows.</Empty></Card> : (
         <div className="grid gap-5 lg:grid-cols-2">
           <Card><CardHeader title="Funnel" description={`${data.total} applications`} /><CardBody>
             <HBarChart valueLabel="Candidates" max={top} rows={data.funnel.map(f => ({ key: f.key, label: f.label, value: f.n, display: String(f.n), sub: top ? `${Math.round((f.n / top) * 100)}% of applicants` : undefined }))} />
@@ -83,7 +83,7 @@ export function AuditLog() {
         <Select aria-label="Action" className="w-48" value={f.action} onChange={e => { setF({ ...f, action: e.target.value }); setPage(1) }}><option value="">All actions</option>{data?.actions.map(a => <option key={a} value={a}>{ACTION_LABEL[a] || a}</option>)}</Select>
         <Select aria-label="Person" className="w-48" value={f.user} onChange={e => { setF({ ...f, user: e.target.value }); setPage(1) }}><option value="">Everyone</option><option value="system">System / candidates</option>{data?.users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}</Select>
       </Card>
-      {!data ? <Loading /> : !data.items.length ? <Card><Empty icon={<ScrollText />} title="Nothing recorded">Try other filters.</Empty></Card> : <>
+      {!data ? <ListSkeleton avatar={false} /> : !data.items.length ? <Card><Empty icon={<ScrollText />} title="Nothing recorded">Try other filters.</Empty></Card> : <>
         <Card className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm"><thead className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-ink-800"><tr><th className="px-4 py-2.5">When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
           <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{data.items.map(a => (
             <tr key={a.id} className="align-top"><td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{when(a.at)}</td><td className="py-2.5 pr-3">{actor(a)}</td><td className="py-2.5 pr-3 font-medium">{ACTION_LABEL[a.action] || a.action}</td>

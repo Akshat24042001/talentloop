@@ -5,6 +5,7 @@ import { BackLink, ErrorBox, ListInput, Loading, PageHeader, TagInput } from '..
 import { api } from '../lib/api'
 import { navigate } from '../lib/router'
 import { useMe, useSession } from '../lib/session'
+import { DatePicker } from '../components/pickers'
 
 interface FieldDef {
   key: string; label: string; type: string; required?: boolean; required_unless?: Record<string, unknown>; show_if?: Record<string, unknown>
@@ -161,7 +162,7 @@ function FieldInput({ f, value, onChange, req, invalid, skills }: { f: FieldDef;
     case 'number':
       input = <Input id={id} className={ring} type="number" inputMode="decimal" min={f.min} max={f.max} placeholder={f.placeholder} value={value ?? ''} onChange={e => onChange(e.target.value === '' ? '' : +e.target.value)} />; break
     case 'date':
-      input = <Input id={id} type="date" value={value ?? ''} onChange={e => onChange(e.target.value)} />; break
+      input = <DatePicker id={id} value={value ?? ''} onChange={v => onChange(v)} />; break
     case 'textarea':
       input = <Textarea id={id} rows={f.rows || 3} className={cn('min-h-0', ring)} placeholder={f.placeholder} value={value ?? ''} onChange={e => onChange(e.target.value)} />; break
     case 'toggle':

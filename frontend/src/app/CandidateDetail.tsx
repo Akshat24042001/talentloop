@@ -1,7 +1,7 @@
 import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Pencil, Phone, Trash2, UserPlus, Video } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Textarea, toast } from '../components/ui'
-import { Avatar, BackLink, ErrorBox, KV, Loading, PageHeader, ScoreRing, Tabs, TagInput, useApi, Ago } from '../components/kit'
+import { Ago, Avatar, BackLink, ErrorBox, KV, PageHeader, PageSkeleton, ScoreRing, Tabs, TagInput, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { navigate } from '../lib/router'
@@ -25,7 +25,7 @@ export default function CandidateDetail({ id }: { id: string }) {
   const [editing, setEditing] = useState(false)
   const [addTo, setAddTo] = useState('')
   if (error) return <ErrorBox error={error} retry={reload} />
-  if (!c) return <Loading />
+  if (!c) return <PageSkeleton />
   const p = c.profile
   async function add() {
     try { await api(`/api/jobs/${addTo}/applications`, { json: { candidate_id: c!.id } }); toast('Added to the job'); setAddTo(''); reload() } catch (e: any) { toast(e.message) }

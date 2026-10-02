@@ -2,7 +2,7 @@
 import { Download, FileUp, Library, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Switch, Textarea, toast } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, Pager, useApi } from '../components/kit'
+import { Empty, ErrorBox, ListSkeleton, PageHeader, Pager, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
 
@@ -40,7 +40,7 @@ export default function QuestionBank() {
         <Select aria-label="Section" className="w-48" value={f.section} onChange={e => { setF({ ...f, section: e.target.value }); setPage(1) }}><option value="">All sections</option>{sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
         <Select aria-label="Difficulty" className="w-36" value={f.difficulty} onChange={e => { setF({ ...f, difficulty: e.target.value }); setPage(1) }}><option value="">Any level</option>{['easy', 'medium', 'hard'].map(d => <option key={d}>{d}</option>)}</Select>
       </Card>
-      {!data ? <Loading /> : !data.items.length ? (
+      {!data ? <ListSkeleton avatar={false} /> : !data.items.length ? (
         <Card><Empty icon={<Library />} title={data.total || f.q || f.section || f.difficulty ? 'No questions match' : 'Your question bank is empty'}
           action={canEdit && !f.q && !f.section && !f.difficulty && <Button variant="primary" onClick={sample}>Load about 60 starter questions</Button>}>
           Import your own from Excel, draft some with AI, or start with the starter set (quantitative, logical, English, IT hardware, sales awareness).</Empty></Card>

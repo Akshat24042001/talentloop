@@ -2,7 +2,7 @@
 import { CheckCheck, Columns3, Flag, Hand, List, MessageSquare, Search, Send, SlidersHorizontal, Trophy, Users, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge, Button, Card, Field, Input, Modal, Select, Textarea, cn, toast } from '../../components/ui'
-import { Avatar, Empty, ErrorBox, Loading, ScoreBar, useApi } from '../../components/kit'
+import { Avatar, BoardSkeleton, Empty, ErrorBox, ScoreBar, useApi } from '../../components/kit'
 import { api } from '../../lib/api'
 import { ago } from '../../lib/format'
 import { navigate, useLocation } from '../../lib/router'
@@ -42,7 +42,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
     return true
   }), [data, f])
   if (error) return <ErrorBox error={error} retry={reload} />
-  if (!data) return <Loading />
+  if (!data) return <BoardSkeleton />
   const canEdit = data.permission !== 'view'
   const colleges = [...new Set(data.items.map(a => a.college).filter(Boolean))].sort()
   const cols: Col[] = [

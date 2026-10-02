@@ -1,32 +1,38 @@
-import { useEffect, type ReactNode } from 'react'
-import Admin from './admin/Admin'
-import CandidateDetail from './app/CandidateDetail'
-import Candidates from './app/Candidates'
-import Dashboard from './app/Dashboard'
-import Drives from './app/Drives'
-import { MyInterviews, Outbox, Requests } from './app/Inbox'
-import QuestionBank from './app/QuestionBank'
-import { AuditLog, Reports } from './app/Reports'
-import InterviewReport from './app/InterviewReport'
-import Interviews from './app/Interviews'
-import JobDetail from './app/JobDetail'
-import JobEditor from './app/JobEditor'
-import Jobs from './app/Jobs'
-import MatchCenter from './app/MatchCenter'
-import NewInterview from './app/NewInterview'
-import Settings from './app/Settings'
+import { Suspense, lazy, useEffect, type ComponentType, type ReactNode } from 'react'
 import { Shell } from './app/Shell'
-import Team from './app/Team'
 import { Button, Logo, Toaster, TooltipProvider } from './components/ui'
-import { Loading } from './components/kit'
+import { Loading, PageSkeleton } from './components/kit'
 import { setUnauthorizedHandler } from './lib/api'
 import { match, navigate, useLocation } from './lib/router'
 import { SessionProvider, useSession } from './lib/session'
 import { Invite, Login, Signup } from './site/Auth'
-import { CareersPage, PublicJobPage } from './site/Careers'
-import Landing from './site/Landing'
-import RoundPage from './portal/RoundPage'
-import { DecidePage, DrivePage, FeedbackPage, ResultsPage, StatusPage } from './portal/Pages'
+
+// Every page is its own chunk: the careers page or a candidate link never downloads the HR workspace.
+function named<T extends Record<string, unknown>>(load: () => Promise<T>, key: keyof T) {
+  return lazy(() => load().then(m => ({ default: m[key] as ComponentType<any> })))
+}
+const Admin = lazy(() => import('./admin/Admin'))
+const CandidateDetail = lazy(() => import('./app/CandidateDetail'))
+const Candidates = lazy(() => import('./app/Candidates'))
+const Dashboard = lazy(() => import('./app/Dashboard'))
+const Drives = lazy(() => import('./app/Drives'))
+const MyInterviews = named(() => import('./app/Inbox'), 'MyInterviews'), Outbox = named(() => import('./app/Inbox'), 'Outbox'), Requests = named(() => import('./app/Inbox'), 'Requests')
+const QuestionBank = lazy(() => import('./app/QuestionBank'))
+const AuditLog = named(() => import('./app/Reports'), 'AuditLog'), Reports = named(() => import('./app/Reports'), 'Reports')
+const InterviewReport = lazy(() => import('./app/InterviewReport'))
+const Interviews = lazy(() => import('./app/Interviews'))
+const JobDetail = lazy(() => import('./app/JobDetail'))
+const JobEditor = lazy(() => import('./app/JobEditor'))
+const Jobs = lazy(() => import('./app/Jobs'))
+const MatchCenter = lazy(() => import('./app/MatchCenter'))
+const NewInterview = lazy(() => import('./app/NewInterview'))
+const Settings = lazy(() => import('./app/Settings'))
+const Account = lazy(() => import('./app/Account'))
+const Team = lazy(() => import('./app/Team'))
+const CareersPage = named(() => import('./site/Careers'), 'CareersPage'), PublicJobPage = named(() => import('./site/Careers'), 'PublicJobPage')
+const Landing = lazy(() => import('./site/Landing'))
+const RoundPage = lazy(() => import('./portal/RoundPage'))
+const DecidePage = named(() => import('./portal/Pages'), 'DecidePage'), DrivePage = named(() => import('./portal/Pages'), 'DrivePage'), FeedbackPage = named(() => import('./portal/Pages'), 'FeedbackPage'), ResultsPage = named(() => import('./portal/Pages'), 'ResultsPage'), StatusPage = named(() => import('./portal/Pages'), 'StatusPage')
 
 type Need = 'manage_jobs' | 'manage_team'
 type Route = [string, (p: Record<string, string>) => ReactNode, string?, Need?]
@@ -50,7 +56,8 @@ const APP: Route[] = [
   ['/app/reports', () => <Reports />, 'Reports', 'manage_jobs'],
   ['/app/audit', () => <AuditLog />, 'Audit log', 'manage_team'],
   ['/app/team', () => <Team />, 'Team'],
-  ['/app/settings', () => <Settings />, 'Settings'],
+  ['/app/settings', () => <Settings />, 'Settings', 'manage_team'],
+  ['/app/account', () => <Account />, 'Your account'],
   ['/admin', () => <Admin />, 'Platform admin'],
 ]
 
@@ -70,7 +77,7 @@ function Workspace({ path }: { path: string }) {
   if (!me.org && !(me.platform_admin && path === '/admin')) return <NoCompany />
   if (path === '/admin' && !me.platform_admin) return <Shell><NotFound /></Shell>
   if (hit?.need && !me.can[hit.need]) return <Shell><NoAccess /></Shell>
-  return <Shell>{hit ? hit.node : <NotFound />}</Shell>
+  return <Shell><Suspense fallback={<PageSkeleton />}>{hit ? hit.node : <NotFound />}</Suspense></Shell>
 }
 
 function NoCompany() {
@@ -110,5 +117,5 @@ function Routes() {
 }
 
 export default function App() {
-  return <SessionProvider><TooltipProvider><Routes /><Toaster /></TooltipProvider></SessionProvider>
+  return <SessionProvider><TooltipProvider><Suspense fallback={<Loading className="min-h-screen" />}><Routes /></Suspense><Toaster /></TooltipProvider></SessionProvider>
 }

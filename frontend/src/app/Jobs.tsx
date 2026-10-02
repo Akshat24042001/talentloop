@@ -1,7 +1,7 @@
 import { Briefcase, Copy, MapPin, Plus, Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge, Button, Card, Input, Select } from '../components/ui'
-import { Empty, ErrorBox, Loading, PageHeader, useApi, Ago } from '../components/kit'
+import { Ago, Empty, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
 import { useMe } from '../lib/session'
 import { JOB_STATUS } from './labels'
 
@@ -28,7 +28,7 @@ export default function Jobs() {
           <Select aria-label="Status" value={st} onChange={e => setSt(e.target.value)}><option value="">All statuses</option>{Object.entries(JOB_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</Select>
           <Select aria-label="Department" value={dep} onChange={e => setDep(e.target.value)}><option value="">All departments</option>{deps.map(d => <option key={d}>{d}</option>)}</Select>
         </div>
-        {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <Loading /> : !rows.length ? (
+        {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <ListSkeleton avatar={false} /> : !rows.length ? (
           data.length ? <p className="p-10 text-center text-sm text-slate-500">No jobs match the filters.</p>
             : <Empty icon={<Briefcase />} title={me.can.manage_jobs ? 'No jobs yet' : 'No jobs assigned to you yet'} action={me.can.manage_jobs && <Button variant="primary" href="/app/jobs/new" icon={<Plus />}>Create your first job</Button>}>
               {me.can.manage_jobs ? 'Create a job, or load sample data from the dashboard.' : 'HR will give you access to the roles you are hiring for.'}</Empty>

@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 
-os.environ.update({"LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com",
+os.environ.update({"ALLOW_SAMPLE_DATA": "1", "LLM_MOCK": "1", "PUBLIC_URL": "https://example.trycloudflare.com",
                    "VAPI_PUBLIC_KEY": "pk_test", "ADMIN_KEY": "test-admin-key-123456", "FINISH_DELAY_SEC": "0", "DATA_DIR": tempfile.mkdtemp()})
 
 from pathlib import Path  # noqa: E402

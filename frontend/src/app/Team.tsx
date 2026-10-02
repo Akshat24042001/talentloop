@@ -1,21 +1,16 @@
-import { Check, Copy, Mail, Pencil, RefreshCw, Trash2, UserPlus, X } from 'lucide-react'
+import { ROLE_HELP } from '../lib/roles'
+import { Check, Mail, Pencil, RefreshCw, Trash2, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, copyText, toast } from '../components/ui'
-import { Avatar, ErrorBox, Loading, PageHeader, useApi, Ago } from '../components/kit'
+import { Ago, Avatar, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
+import { LinkActions } from '../components/LinkActions'
 
 interface TeamData {
   members: { id: string; user_id: string; name: string; email: string; role: string; role_label: string; title: string; last_login_at?: number; you: boolean; active: boolean }[]
   invites: { id: string; email: string; role_label: string; title: string; expires_at: number; expired: boolean }[]
   roles: { id: string; label: string }[]
-}
-const ROLE_HELP: Record<string, string> = {
-  owner: 'Everything, including billing-level settings and other owners.',
-  admin: 'Manages the team, settings and every job.',
-  recruiter: 'HR: creates and publishes jobs, manages candidates, runs matching and interviews.',
-  hiring_manager: 'Sees only the jobs HR assigns, as JD editor or reviewer. E.g. a sales or tech manager.',
-  viewer: 'Read-only access to all jobs and candidates.',
 }
 
 export default function Team() {
@@ -39,7 +34,7 @@ export default function Team() {
   }
   async function saveTitle(mid: string, title: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { title } }); toast('Saved'); reload() } catch (e: any) { toast(e.message) } }
   if (error) return <ErrorBox error={error} retry={reload} />
-  if (!data) return <Loading />
+  if (!data) return <ListSkeleton rows={4} />
   return (
     <>
       <PageHeader title="Team" description="Several people can share a role. Hiring managers only see the jobs you assign them." />
@@ -80,7 +75,7 @@ export default function Team() {
               <Field label="Role" htmlFor="inv-role" hint={ROLE_HELP[role]}><Select id="inv-role" value={role} onChange={e => setRole(e.target.value)}>{data.roles.filter(r => r.id !== 'owner' || me.role === 'owner').map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</Select></Field>
               <Field label="Job title (optional)" htmlFor="inv-title"><Input id="inv-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="Sales Manager" /></Field>
               <Button variant="primary" className="w-full" disabled={!email} loading={busy} onClick={invite} icon={<UserPlus />}>Create invite link</Button>
-              {link && <Alert tone="success" title="Invite link (copied)"><span className="break-all text-xs">{link}</span> <button className="ml-1 inline-flex items-center gap-1 text-xs font-semibold underline" onClick={() => copyText(link)}><Copy className="size-3" />Copy</button></Alert>}
+              {link && <Alert tone="success" title="Invite link (copied)"><span className="break-all text-xs">{link}</span> <div className="mt-2"><LinkActions url={link} label="Copy" copied="Invite link copied" subject="Join our team on TalentLoop" message="You're invited to join our hiring workspace on TalentLoop. Accept here:" /></div></Alert>}
             </CardBody></Card>
           ) : <Alert tone="info">Only owners and admins can invite people or change roles.</Alert>}
           <Card><CardHeader title="Roles" /><CardBody className="space-y-2 pt-3 text-sm">{data.roles.map(r => <div key={r.id}><b>{r.label}</b><p className="text-xs text-slate-500 dark:text-slate-400">{ROLE_HELP[r.id]}</p></div>)}</CardBody></Card>

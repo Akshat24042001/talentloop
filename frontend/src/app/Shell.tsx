@@ -79,12 +79,12 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
       </>}
       <div className="mx-3 my-4 h-px bg-slate-100 dark:bg-ink-800" />
       <nav className="space-y-0.5">
-        {NAV2.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}
+        {NAV2.filter(n => n.href !== '/app/settings' || me?.can.manage_team).map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}
         {me?.platform_admin && <NavLink href="/admin" label="Platform admin" icon={Shield} path={path} onClick={onNav} />}
       </nav>
       <div className="mt-auto space-y-3 pt-6">
-        {h && (h.mock || problems.length > 0) && (
-          <a href="/app/settings?tab=system" onClick={onNav} className="block rounded-xl bg-slate-50 p-3 text-xs ring-1 ring-slate-200/70 hover:bg-slate-100 dark:bg-ink-850 dark:ring-ink-700 dark:hover:bg-ink-800">
+        {h?.detail && me?.platform_admin && (h.mock || problems.length > 0) && (
+          <a href="/admin" onClick={onNav} className="block rounded-xl bg-slate-50 p-3 text-xs ring-1 ring-slate-200/70 hover:bg-slate-100 dark:bg-ink-850 dark:ring-ink-700 dark:hover:bg-ink-800">
             <div className="flex items-center justify-between"><span className="font-semibold text-slate-700 dark:text-slate-200">Server</span>
               {problems.length ? <Badge tone="danger">Needs setup</Badge> : <Badge tone="warning">Demo AI</Badge>}</div>
             <p className="mt-1 leading-relaxed text-slate-500 dark:text-slate-400">{problems.length ? `${problems.length} setting${problems.length > 1 ? 's' : ''} to fix` : 'AI is simulated (LLM_MOCK=1).'}</p>
@@ -93,7 +93,7 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
         {me && (
           <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
             <Avatar name={me.user.name || me.user.email} size="sm" />
-            <a href="/app/settings?tab=account" onClick={onNav} className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{me.user.name || me.user.email}</span><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{me.user.email}</span></a>
+            <a href="/app/account" onClick={onNav} className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{me.user.name || me.user.email}</span><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{me.user.email}</span></a>
             <button onClick={signOut} aria-label="Sign out" title="Sign out" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white"><LogOut className="size-4" /></button>
           </div>
         )}

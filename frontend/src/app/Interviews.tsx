@@ -1,11 +1,12 @@
 import { CircleCheck, Download, Gauge, Link2, Plus, Search, Send, ShieldAlert, Sparkles, ThumbsUp, TriangleAlert, UserX } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SplitBar } from '../components/charts'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Input, Select, Spinner, Stat, Tip, copyText, useInterval } from '../components/ui'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Input, Select, Spinner, Stat, useInterval } from '../components/ui'
 import { api, withKey } from '../lib/api'
 import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, ago, initials, when } from '../lib/format'
 import { PageHeader, Ago } from '../components/kit'
 import { useHealth } from '../lib/health'
+import { LinkActions } from '../components/LinkActions'
 
 interface Row {
   id: string; ref: string; created_at: number; status: string; candidate?: string; role?: string; company?: string; email?: string
@@ -143,8 +144,9 @@ export default function Interviews() {
                       <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-slate-500 dark:text-slate-400 lg:table-cell" title={when(r.created_at)}>{ago(r.created_at)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <Button size="sm" href={`/app/interviews/${encodeURIComponent(r.ref)}`}>Report</Button>
-                        <Tip label="Copy candidate link"><button className="ml-1 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white" aria-label="Copy candidate link"
-                          onClick={() => copyText(`${base}/interview.html?id=${r.id}`, 'Candidate link copied')}><Link2 className="size-4" /></button></Tip>
+                        {!['completed', 'scored', 'incomplete'].includes(r.status) && <LinkActions className="ml-1.5 align-middle" url={`${base}/interview.html?id=${r.id}`} icon={<Link2 className="size-3.5" />} label="Link"
+                          copied="Candidate link copied" to={{ email: r.email, name: r.candidate }} subject={`Your interview${r.role ? ` for ${r.role}` : ''}`}
+                          message={`Hi ${(r.candidate || '').split(' ')[0] || 'there'}, here is the link to your AI interview${r.role ? ` for ${r.role}` : ''}:`} />}
                       </td>
                     </tr>
                   ))}

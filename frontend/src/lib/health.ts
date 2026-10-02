@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 
+// Everyone gets mock + link bases; `detail` (models, storage, keys) only comes back for platform admins.
 export interface Health {
-  mock: boolean; fast_model: string; smart_model: string; free_models: boolean; model_note: string; llm_key_set: boolean
-  public_url: string; app_url?: string; vapi_key_set: boolean; admin_weak: boolean; ffmpeg: boolean
-  storage: { s3: boolean; s3_error: string | null; persistent_disk: boolean }
+  mock: boolean; public_url: string; app_url?: string; detail?: boolean
+  fast_model?: string; smart_model?: string; free_models?: boolean; model_note?: string; llm_key_set?: boolean
+  vapi_key_set?: boolean; admin_weak?: boolean; ffmpeg?: boolean
+  storage?: { s3: boolean; s3_error: string | null; persistent_disk: boolean }
   platform?: { database: string; persistent_db: boolean; platform_admins_configured: boolean }
 }
 let healthP: Promise<Health> | null = null
@@ -15,6 +17,7 @@ export function useHealth(): Health | null {
 }
 export function healthProblems(h: Health): string[] {
   const bad: string[] = []
+  if (!h.detail || !h.storage) return bad
   if (!h.mock && !h.llm_key_set) bad.push('LLM_API_KEY is missing')
   if (!h.public_url) bad.push('PUBLIC_URL is not set, so Vapi cannot reach this server')
   if (!h.vapi_key_set) bad.push('VAPI_PUBLIC_KEY is missing')

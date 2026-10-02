@@ -1,7 +1,7 @@
 // One application in a job's flow: every round's result, test sections, recordings, practical work, integrity
 // evidence, HR actions (pass, hold, reject, move, resend, reset, override) and the messages sent.
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, Copy, Download, ExternalLink, Flag, Hand, Link2, Mail, MessageCircle, Play, RefreshCw, RotateCcw, Star, Trash2, X } from 'lucide-react'
+import { Check, Download, ExternalLink, Flag, Hand, Link2, Mail, MessageCircle, Play, RefreshCw, RotateCcw, Star, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Field, Input, Modal, Select, Spinner, Textarea, copyText, toast } from '../../components/ui'
 import { ErrorBox, Loading, useApi } from '../../components/kit'
@@ -11,6 +11,7 @@ import { useMe } from '../../lib/session'
 import { ROUND_ICON } from './FlowBuilder'
 import { ReasonModal } from './Board'
 import { REC_TONE, STATUS_TONE, type Round, type RoundSummary } from './types'
+import { LinkActions } from '../../components/LinkActions'
 
 interface Msg { id: string; channel: string; to: string; subject: string; body: string; template: string; status: string; error: string; created_at: number; sent_at: number | null }
 interface Detail {
@@ -69,7 +70,8 @@ export default function AppDrawer({ id, onClose, onChanged }: { id: string; onCl
             </div>
             <footer className="flex flex-wrap gap-2 border-t border-slate-100 px-5 py-3 dark:border-ink-800">
               <Button size="sm" href={`/app/candidates/${data.candidate.ref}`} icon={<ExternalLink />}>Full profile</Button>
-              {data.status_link && <Button size="sm" icon={<Link2 />} onClick={() => copyText(data.status_link, 'Status page link copied')}>Candidate status link</Button>}
+              {data.status_link && <LinkActions url={data.status_link} label="Status link" copied="Status page link copied" to={data.candidate}
+                subject={`Your application for ${data.job.title}`} message={`Hi ${data.candidate.name.split(' ')[0]}, you can follow your application for ${data.job.title} here:`} />}
               {data.permission === 'manage' && <Button size="sm" variant="ghost" className="ml-auto text-red-600" icon={<Trash2 />} onClick={async () => {
                 if (!confirm(`Remove ${data.candidate.name} from ${data.job.title}? They stay in your talent pool.`)) return
                 try { await api(`/api/applications/${data.id}`, { method: 'DELETE' }); toast('Removed from the job'); onChanged(); onClose() } catch (e: any) { toast(e.message) }
@@ -116,13 +118,15 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
           {data.score_overridden && <p className="text-xs text-slate-500">Score changed from {data.score_overridden.from ?? 'none'} {ago(data.score_overridden.at)}.</p>}
           {canEdit && (
             <div className="flex flex-wrap gap-2 pt-1">
-              {res.candidate_link && ['invited', 'in_progress', 'booked', 'expired', 'pending'].includes(res.status) && <Button size="sm" icon={<Copy />} onClick={() => copyText(res.candidate_link, 'Candidate link copied')}>Copy link</Button>}
+              {res.candidate_link && ['invited', 'in_progress', 'booked', 'expired', 'pending'].includes(res.status) && <LinkActions url={res.candidate_link} label="Candidate link" copied="Candidate link copied" to={d.candidate}
+                subject={`${r.round.name}: ${d.job.title}`} message={`Hi ${d.candidate.name.split(' ')[0]}, here is your link for the ${r.round.name} step of your application for ${d.job.title}:`} />}
               {['test', 'video_intro', 'role_task', 'practical_task', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
                 <Button size="sm" icon={<RefreshCw />} onClick={() => act('resend', r.round.type === 'manager_approval' ? 'Approval request sent again' : 'Link sent again')}>Resend</Button>}
               {['test', 'video_intro', 'role_task', 'practical_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={() => confirm('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
               {res.score != null || ['submitted', 'on_hold', 'passed', 'failed'].includes(res.status) ? (score == null ? <Button size="sm" variant="ghost" onClick={() => setScore(String(res.score ?? ''))}>Change score</Button>
                 : <span className="flex items-center gap-1.5"><Input aria-label="New score" type="number" min={0} max={100} className="h-8 w-20" value={score} onChange={e => setScore(e.target.value)} /><Button size="sm" variant="primary" onClick={saveScore}>Save</Button><Button size="sm" variant="ghost" onClick={() => setScore(null)}>Cancel</Button></span>) : null}
-              {res.manager_link && <Button size="sm" variant="ghost" icon={<Link2 />} onClick={() => copyText(res.manager_link, 'Link copied')}>{r.round.type === 'human_interview' ? 'Interviewer feedback link' : 'Decision link'}</Button>}
+              {res.manager_link && <LinkActions url={res.manager_link} icon={<Link2 className="size-3.5" />} label={r.round.type === 'human_interview' ? 'Interviewer feedback link' : 'Decision link'}
+                subject={`${d.candidate.name} for ${d.job.title}`} message={r.round.type === 'human_interview' ? `Please share your interview feedback on ${d.candidate.name} (${d.job.title}):` : `Please review ${d.candidate.name} for ${d.job.title} and record your decision:`} />}
             </div>)}
         </div>)}
     </li>

@@ -1,7 +1,7 @@
 import { Copy, Download, ExternalLink, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, Users, Video, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Select, Tip, copyText, toast } from '../components/ui'
-import { Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, ScoreRing, Tabs, useApi, Ago } from '../components/kit'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Select, Tip, toast } from '../components/ui'
+import { Ago, Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, PageSkeleton, ScoreRing, Tabs, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { canLeave, navigate, setLeaveGuard, useLocation } from '../lib/router'
@@ -11,6 +11,7 @@ import Board from './flow/Board'
 import FlowBuilder from './flow/FlowBuilder'
 import { JobDrives } from './Drives'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
+import { LinkActions } from '../components/LinkActions'
 
 interface Job {
   id: string; ref: string; title: string; department: string; status: string; top_n: number; location: string; employment_type: string; experience: string; salary: string
@@ -30,7 +31,7 @@ export default function JobDetail({ id }: { id: string }) {
   const me = useMe()
   const switchTab = (t: Tab) => { if (t === tab || !canLeave()) return; setLeaveGuard(null); setTab(t); navigate(`/app/jobs/${id}?tab=${t}`, { replace: true, keepScroll: true, force: true }) }
   if (error) return <ErrorBox error={error} retry={reload} />
-  if (!job) return <Loading />
+  if (!job) return <PageSkeleton />
   const st = JOB_STATUS[job.status]!
   async function setStatus(s: string) {
     try { await api(`/api/jobs/${id}`, { method: 'PATCH', json: { status: s } }); toast(s === 'open' ? 'Job is live' : `Job ${JOB_STATUS[s]!.label.toLowerCase()}`); reload() } catch (e: any) { toast(e.message) }
@@ -50,7 +51,7 @@ export default function JobDetail({ id }: { id: string }) {
       {job.status === 'open' && !job.fields.internal_only && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700">
           <span className="text-slate-500">Public job post:</span><a href={job.careers_url} target="_blank" rel="noopener" className="truncate font-medium text-brand-600 hover:underline dark:text-brand-300">{careers}</a>
-          <Button size="sm" variant="ghost" icon={<Copy />} onClick={() => copyText(careers, 'Job link copied')}>Copy</Button>
+          <LinkActions className="ml-auto" url={careers} label="Copy" copied="Job link copied" subject={`We're hiring: ${job.title}`} message={`We're hiring a ${job.title}. Details and apply:`} />
         </div>
       )}
       <Tabs className="mb-5" value={tab} onChange={switchTab} tabs={[

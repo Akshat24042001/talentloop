@@ -3,9 +3,10 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { HBarChart, TimelineChart, type BarRow } from '../components/charts'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Select, Spinner, Textarea, cn, copyText, toast } from '../components/ui'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Select, Spinner, Textarea, cn, toast } from '../components/ui'
 import { api, mediaUrl, withKey } from '../lib/api'
 import { REC_DETAIL, REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, TYPE_LABEL, initials, mb, mmss, norm, short, when } from '../lib/format'
+import { LinkActions } from '../components/LinkActions'
 
 let iid = ''
 const REASON_LABEL: Record<string, string> = { reference: 'Start of interview', periodic: 'Routine', tab_hidden: 'Left the interview tab', window_blur: 'Switched to another window',
@@ -165,7 +166,9 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
           <Button size="sm" variant="ghost" icon={<Printer />} onClick={() => print()}>Print</Button>
           <Button size="sm" variant="ghost" icon={<Sparkles />} disabled={!rec.state} loading={busy === 'score'} onClick={() => act('score')}>{rep ? 'Re-score with AI' : 'Score now'}</Button>
           {['in_progress', 'created'].includes(rec.status) && <Button size="sm" variant="ghost" icon={<XCircle />} onClick={() => act('close')}>Close interview</Button>}
-          <Button size="sm" variant="ghost" icon={<Link2 />} onClick={() => copyText(`${location.origin}/interview.html?id=${iid}`, 'Candidate link copied')}>Copy candidate link</Button>
+          <LinkActions url={`${location.origin}/interview.html?id=${iid}`} icon={<Link2 className="size-3.5" />} label="Candidate link" copied="Candidate link copied"
+            to={{ email: rec.settings?.candidate_email, name: rec.plan?.candidate_name }} subject={`Your interview${rec.plan?.role ? ` for ${rec.plan.role}` : ''}`}
+            message={`Hi ${(rec.plan?.candidate_name || '').split(' ')[0] || 'there'}, here is the link to your AI interview${rec.plan?.role ? ` for ${rec.plan.role}` : ''}. Use a laptop with a camera and a quiet room:`} />
           <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-500/10" icon={<Trash2 />} onClick={() => act('delete')}>Delete all data</Button>
         </div>
         {sc.state === 'running' && <p className="mt-3 flex items-center gap-2 text-sm text-slate-500"><Spinner className="size-4" />AI scoring in progress. This page updates by itself.</p>}

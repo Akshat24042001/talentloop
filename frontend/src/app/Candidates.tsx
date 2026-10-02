@@ -1,7 +1,7 @@
 import { FileUp, Plus, Search, Upload, Users } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Textarea, toast } from '../components/ui'
-import { Avatar, Empty, ErrorBox, Loading, PageHeader, Pager, TagInput, useApi, Ago } from '../components/kit'
+import { Ago, Avatar, Empty, ErrorBox, ListSkeleton, PageHeader, Pager, TagInput, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
 import { useMe } from '../lib/session'
@@ -30,7 +30,7 @@ export default function Candidates() {
           <Select aria-label="Experience" value={minY} onChange={e => { setMinY(e.target.value); setPage(1) }}><option value="">Any experience</option>{[1, 2, 3, 5, 8, 10].map(n => <option key={n} value={n}>{n}+ years</option>)}</Select>
           <Select aria-label="Source" value={src} onChange={e => { setSrc(e.target.value); setPage(1) }}><option value="">All sources</option>{Object.entries(SOURCE_LABEL).filter(([k]) => k !== 'sourced').map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
         </div>
-        {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <Loading /> : !data.items.length ? (
+        {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <ListSkeleton rows={8} /> : !data.items.length ? (
           dq || skill || minY || src ? <p className="p-10 text-center text-sm text-slate-500">No candidates match.</p>
             : <Empty icon={<Users />} title="No candidates yet" action={me.can.manage_jobs && <Button variant="primary" icon={<Upload />} onClick={() => setUpload(true)}>Upload resumes</Button>}>Upload resumes in bulk (PDF, DOCX or TXT), or share your careers page.</Empty>
         ) : (

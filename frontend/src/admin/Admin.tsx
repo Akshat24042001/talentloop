@@ -1,9 +1,10 @@
 import { Ban, Briefcase, Building2, CircleCheck, FileText, Search, Sparkles, Users, Video } from 'lucide-react'
 import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Input, Stat, toast } from '../components/ui'
-import { ErrorBox, Loading, PageHeader, Tabs, useApi, Ago } from '../components/kit'
+import { Ago, CardsSkeleton, ErrorBox, Loading, PageHeader, Tabs, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
+import { SampleData, SystemStatus } from './System'
 
 interface Overview { orgs: number; users: number; active_users_7d: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; ai_calls_30d: number; signups_30d: number[]; storage: { s3: boolean; database: string } }
 interface OrgRow { id: string; name: string; slug: string; created_at: number; disabled: boolean; owner: string; members: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; last_activity?: number }
@@ -27,7 +28,8 @@ export default function Admin() {
   return (
     <>
       <PageHeader title="Platform admin" description="Every company and user on this TalentLoop installation." />
-      {!d ? <Loading /> : <>
+      <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"><SystemStatus /><SampleData /></div>
+      {!d ? <CardsSkeleton n={6} /> : <>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
           <Stat label="Companies" value={d.orgs} icon={<Building2 />} />
           <Stat label="Users" value={d.users} sub={`${d.active_users_7d} active this week`} icon={<Users />} />

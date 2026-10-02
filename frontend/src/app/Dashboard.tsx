@@ -1,8 +1,6 @@
-import { ArrowRight, Briefcase, CircleAlert, Database, Plus, Sparkles, Upload, UserPlus, Users, Video } from 'lucide-react'
-import { useState } from 'react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Stat, toast } from '../components/ui'
-import { ErrorBox, Loading, PageHeader, useApi, Ago } from '../components/kit'
-import { api } from '../lib/api'
+import { ArrowRight, Briefcase, CircleAlert, Plus, Upload, UserPlus, Users, Video } from 'lucide-react'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Stat } from '../components/ui'
+import { Ago, CardsSkeleton, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
 import { healthProblems, useHealth } from '../lib/health'
 import { useMe } from '../lib/session'
 import { ACTION_LABEL, actor } from './labels'
@@ -19,14 +17,7 @@ export default function Dashboard() {
   const me = useMe()
   const { data: d, error, reload } = useApi<Dash>('/api/dashboard')
   const h = useHealth()
-  const [seeding, setSeeding] = useState(false)
   const first = d && d.jobs.open + d.jobs.draft + d.jobs.paused + d.jobs.closed === 0 && d.candidates === 0
-  async function seed() {
-    setSeeding(true)
-    try { const r = await api<{ jobs: number; candidates: number }>('/api/demo/seed', { method: 'POST' }); toast(`Added ${r.jobs} sample jobs and ${r.candidates} candidates`); reload() }
-    catch (e: any) { toast(e.message) }
-    setSeeding(false)
-  }
   const problems = h ? healthProblems(h) : []
   const max14 = Math.max(1, ...(d?.applications_14d || [0]))
   const maxPipe = Math.max(1, ...(d?.pipeline.map(p => p.count) || [0]))
@@ -35,26 +26,20 @@ export default function Dashboard() {
       <PageHeader title={`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, ${(me.user.name || '').split(' ')[0] || 'there'}`}
         description={`${me.org?.name} · ${me.role_label}`}
         actions={me.can.manage_jobs && <><Button href="/app/candidates?upload=1" icon={<Upload />}>Upload resumes</Button><Button variant="primary" href="/app/jobs/new" icon={<Plus />}>New job</Button></>} />
-      {problems.length > 0 && me.can.manage_team && <div className="mb-5 space-y-2">{problems.map(p => <Alert key={p} tone="warning" icon={<CircleAlert />}>{p}</Alert>)}</div>}
-      {error ? <ErrorBox error={error} retry={reload} /> : !d ? <Loading /> : (
+      {problems.length > 0 && me.platform_admin && <div className="mb-5 space-y-2">{problems.map(p => <Alert key={p} tone="warning" icon={<CircleAlert />}>{p}</Alert>)}</div>}
+      {error ? <ErrorBox error={error} retry={reload} /> : !d ? <><CardsSkeleton /><div className="mt-5"><ListSkeleton rows={4} avatar={false} /></div></> : (
         <>
           {first && me.can.manage_jobs && (
             <Card className="mb-5 overflow-hidden">
-              <div className="grid gap-6 bg-gradient-to-br from-brand-50 to-violet-50 p-6 dark:from-brand-500/10 dark:to-violet-500/10 md:grid-cols-[1.4fr_1fr]">
+              <div className="grid gap-6 bg-gradient-to-br from-brand-50 to-violet-50 p-6 dark:from-brand-500/10 dark:to-violet-500/10 ">
                 <div>
                   <h2 className="text-lg font-semibold">Welcome to TalentLoop</h2>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Three steps to your first shortlist. Or load sample data to explore a full pipeline right now.</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Three steps to your first shortlist.</p>
                   <ol className="mt-4 space-y-2 text-sm">
                     <li className="flex items-center gap-2"><Briefcase className="size-4 text-brand-600 dark:text-brand-400" /><a className="font-medium hover:underline" href="/app/jobs/new">Create a job</a> <span className="text-slate-500">(only 7 fields are required)</span></li>
                     <li className="flex items-center gap-2"><Users className="size-4 text-brand-600 dark:text-brand-400" /><a className="font-medium hover:underline" href="/app/candidates?upload=1">Upload resumes</a> <span className="text-slate-500">or share your careers page</span></li>
                     <li className="flex items-center gap-2"><UserPlus className="size-4 text-brand-600 dark:text-brand-400" /><a className="font-medium hover:underline" href="/app/team">Invite your team</a> <span className="text-slate-500">HR and hiring managers</span></li>
                   </ol>
-                </div>
-                <div className="flex flex-col justify-center gap-2 rounded-xl bg-white/70 p-5 ring-1 ring-white dark:bg-ink-900/60 dark:ring-ink-700">
-                  <Database className="size-5 text-brand-600 dark:text-brand-400" />
-                  <div className="font-semibold">Load sample data</div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">6 jobs across tech, sales, support and HR, and 40 realistic resumes. Remove them any time from Settings.</p>
-                  <Button variant="primary" size="sm" className="mt-1 self-start" loading={seeding} onClick={seed} icon={<Sparkles />}>Load samples</Button>
                 </div>
               </div>
             </Card>
