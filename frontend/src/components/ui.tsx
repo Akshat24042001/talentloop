@@ -204,14 +204,14 @@ export function Alert({ tone = 'warning', icon, title, children, className }: { 
   )
 }
 
-export function Modal({ open, onOpenChange, title, description, children, footer, dark, dismissable = true, id, icon }: {
-  open: boolean; onOpenChange?: (o: boolean) => void; title: ReactNode; description?: ReactNode; children?: ReactNode; footer?: ReactNode; dark?: boolean; dismissable?: boolean; id?: string; icon?: ReactNode }) {
+export function Modal({ open, onOpenChange, title, description, children, footer, dark, dismissable = true, id, icon, wide }: {
+  open: boolean; onOpenChange?: (o: boolean) => void; title: ReactNode; description?: ReactNode; children?: ReactNode; footer?: ReactNode; dark?: boolean; dismissable?: boolean; id?: string; icon?: ReactNode; wide?: boolean }) {
   return (
     <Dialog.Root open={open} onOpenChange={o => (dismissable || o) && onOpenChange?.(o)}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-ink-950/70 backdrop-blur-sm" />
         <Dialog.Content id={id} onEscapeKeyDown={e => !dismissable && e.preventDefault()} onPointerDownOutside={e => !dismissable && e.preventDefault()}
-          className={cn('fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6 shadow-2xl focus:outline-none animate-rise',
+          className={cn('fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6 shadow-2xl focus:outline-none animate-rise', wide ? 'max-h-[90vh] max-w-5xl overflow-y-auto' : 'max-w-md',
             dark ? 'bg-ink-850 text-slate-100 ring-1 ring-white/10' : 'bg-white text-slate-900 dark:bg-ink-850 dark:text-slate-100 dark:ring-1 dark:ring-white/10')}>
           {icon && <div className="mb-4 grid size-11 place-items-center rounded-xl bg-red-500/15 text-red-500 [&_svg]:size-5">{icon}</div>}
           <Dialog.Title className="text-lg font-semibold tracking-tight">{title}</Dialog.Title>

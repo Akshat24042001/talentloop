@@ -1,5 +1,5 @@
 // Pipeline board for one job: a column per round (kanban) or a list, filters, bulk actions and the application drawer.
-import { Check, CheckCheck, Columns3, Flag, Hand, List, MessageSquare, Search, Send, SlidersHorizontal, Trophy, Users, X } from 'lucide-react'
+import { Check, CheckCheck, Columns3, GitCompareArrows, Flag, Hand, List, MessageSquare, Search, Send, SlidersHorizontal, Trophy, Users, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge, Button, Card, Field, Input, Modal, Select, Spinner, Textarea, cn, toast } from '../../components/ui'
 import { Avatar, BoardSkeleton, Empty, ErrorBox, ScoreBar, useApi } from '../../components/kit'
@@ -7,6 +7,7 @@ import { api } from '../../lib/api'
 import { ago } from '../../lib/format'
 import { navigate, useLocation } from '../../lib/router'
 import AppDrawer from './AppDrawer'
+import Compare from './Compare'
 import { STATUS_TONE, type Round, type RoundSummary } from './types'
 import { ask } from '../../components/dialogs'
 import { Stepper } from '../../components/pickers'
@@ -33,7 +34,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(query.get('app'))
   const [dragId, setDragId] = useState<string | null>(null), [overCol, setOverCol] = useState<string | null>(null)
-  const [bulk, setBulk] = useState<null | 'reject' | 'message' | 'move'>(null)
+  const [bulk, setBulk] = useState<null | 'reject' | 'message' | 'move' | 'compare'>(null)
   const items = useMemo(() => (data?.items || []).filter(a => {
     const c = a.candidate, sc = a.current?.score ?? a.match_score
     if (f.q && !`${c.name} ${c.email} ${c.headline || ''}`.toLowerCase().includes(f.q.toLowerCase())) return false
@@ -119,6 +120,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
       {sel.size > 0 && canEdit && (
         <div className="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm text-white shadow-lg dark:bg-white dark:text-ink-900">
           <span className="font-semibold">{sel.size} selected</span>
+          {sel.size >= 2 && sel.size <= 5 && <Button size="sm" variant="ghost" className="text-inherit" icon={<GitCompareArrows />} onClick={() => setBulk('compare')}>Compare</Button>}
           <Button size="sm" variant="ghost" className="text-inherit" icon={<CheckCheck />} onClick={() => runBulk('pass')}>Pass round</Button>
           <Button size="sm" variant="ghost" className="text-inherit" icon={<Hand />} onClick={() => runBulk('hold')}>Hold</Button>
           <Button size="sm" variant="ghost" className="text-inherit" onClick={() => setBulk('move')}>Move to…</Button>
@@ -169,6 +171,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
       {open && <AppDrawer id={open} onClose={() => openApp(null)} onChanged={reload} onMoving={(id, roundId) => optimistic(id, roundId ? { round_id: roundId } : {})} />}
       {topRound && <TopNDialog jobId={jobId} round={topRound} items={data.items.filter(a => a.round_id === topRound.id && !CLOSED.includes(a.stage) && !DONE.includes(a.stage))}
         next={data.rounds[data.rounds.findIndex(r => r.id === topRound.id) + 1]?.name} onClose={() => setTopRound(null)} onDone={() => { setTopRound(null); reload() }} />}
+      {bulk === 'compare' && <Compare jobId={jobId} ids={[...sel]} onClose={() => setBulk(null)} onOpen={id => { setBulk(null); openApp(id) }} />}
       {bulk === 'reject' && <ReasonModal title={`Reject ${sel.size} candidate(s)`} cta="Reject" onClose={() => setBulk(null)} onSubmit={(reason, notify) => runBulk('reject', { reason, notify })} />}
       {bulk === 'message' && <MessageModal n={sel.size} onClose={() => setBulk(null)} onSubmit={(subject, text) => runBulk('message', { subject, text })} />}
       {bulk === 'move' && (

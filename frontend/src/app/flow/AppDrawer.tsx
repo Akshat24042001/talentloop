@@ -1,7 +1,7 @@
 // One application in a job's flow: every round's result, test sections, recordings, practical work, integrity
 // evidence, HR actions (pass, hold, reject, move, resend, reset, override) and the messages sent.
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, Download, ExternalLink, Flag, Hand, Link2, Mail, MessageCircle, Play, RefreshCw, RotateCcw, Star, Trash2, X } from 'lucide-react'
+import { Check, Download, ExternalLink, Flag, Hand, Link2, Mail, MessageCircle, MessageSquareHeart, Play, RefreshCw, RotateCcw, Star, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Field, Input, Modal, Select, Spinner, Textarea, copyText, toast } from '../../components/ui'
 import { ErrorBox, Loading, useApi } from '../../components/kit'
@@ -28,7 +28,7 @@ export default function AppDrawer({ id, onClose, onChanged, onMoving }: { id: st
   const { data, error, reload } = useApi<Detail>(`/api/applications/${id}`)
   const [reject, setReject] = useState(false)
   const refresh = () => { reload(); onChanged() }
-  const [busy, setBusy] = useState('')
+  const [busy, setBusy] = useState(''), [fb, setFb] = useState(false)
   const LABEL: Record<string, string> = { pass: 'Passed', hold: 'On hold', select: 'Selected', start: 'Started', move: 'Moved' }
   async function decide(action: string, extra: Record<string, unknown> = {}) {
     if (busy) return                               // one action at a time: no double moves
@@ -78,6 +78,7 @@ export default function AppDrawer({ id, onClose, onChanged, onMoving }: { id: st
             </div>
             <footer className="flex flex-wrap gap-2 border-t border-slate-100 px-5 py-3 dark:border-ink-800">
               <Button size="sm" href={`/app/candidates/${data.candidate.ref}`} icon={<ExternalLink />}>Full profile</Button>
+              {canEdit && <Button size="sm" icon={<MessageSquareHeart />} onClick={() => setFb(true)}>Feedback for {data.candidate.name.split(' ')[0]}</Button>}
               {data.status_link && <LinkActions url={data.status_link} label="Status link" copied="Status page link copied" to={data.candidate}
                 subject={`Your application for ${data.job.title}`} message={`Hi ${data.candidate.name.split(' ')[0]}, you can follow your application for ${data.job.title} here:`} />}
               {data.permission === 'manage' && <Button size="sm" variant="ghost" className="ml-auto text-red-600" icon={<Trash2 />} onClick={async () => {
@@ -86,10 +87,38 @@ export default function AppDrawer({ id, onClose, onChanged, onMoving }: { id: st
               }}>Remove from job</Button>}
             </footer>
           </>}
+          {fb && data && <FeedbackModal id={data.id} name={data.candidate.name} onClose={() => setFb(false)} onSent={reload} />}
           {reject && <ReasonModal title={`Reject ${data?.candidate.name}`} cta="Reject" onClose={() => setReject(false)} onSubmit={(reason, notify) => { setReject(false); decide('reject', { reason, notify }) }} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+/** AI drafts feedback from the candidate's completed rounds; a person edits it and sends it. */
+function FeedbackModal({ id, name, onClose, onSent }: { id: string; name: string; onClose: () => void; onSent: () => void }) {
+  const [text, setText] = useState(''), [basis, setBasis] = useState<string[]>([]), [note, setNote] = useState(''), [busy, setBusy] = useState<'' | 'draft' | 'send'>('')
+  async function draft() {
+    setBusy('draft')
+    try { const r = await api(`/api/applications/${id}/feedback/draft`, { method: 'POST' }); setText(r.text); setBasis(r.basis || []); setNote(r.note || '') } catch (e: any) { toast(e.message) }
+    setBusy('')
+  }
+  async function sendIt() {
+    setBusy('send')
+    try { await api(`/api/applications/${id}/feedback/send`, { json: { text } }); toast(`Feedback sent to ${name}`); onSent(); onClose() } catch (e: any) { toast(e.message) }
+    setBusy('')
+  }
+  return (
+    <Modal open onOpenChange={o => !o && onClose()} title={`Feedback for ${name}`} description="Specific feedback is rare and candidates remember it. Draft it from their completed rounds, edit, then send by email (and WhatsApp if set up)."
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy === 'send'} disabled={text.trim().length < 20 || !!busy} onClick={sendIt}>Send</Button></>}>
+      <div className="mt-4 space-y-3">
+        <Button size="sm" loading={busy === 'draft'} disabled={!!busy} onClick={draft}>{text ? 'Draft again' : 'Draft with AI'}</Button>
+        {note && <Alert tone="warning">{note}</Alert>}
+        <Textarea aria-label="Feedback" rows={8} value={text} onChange={e => setText(e.target.value)} placeholder="Write it yourself, or let AI draft it from the rounds they completed." />
+        <p className="text-xs text-slate-500 dark:text-slate-400">The AI uses only completed rounds; it never sees integrity flags or interviewers' private notes. "Hi {name.split(' ')[0]}" and your company's sign-off are added.</p>
+        {basis.length > 0 && <details><summary className="cursor-pointer text-xs font-medium">Where each point came from</summary><ul className="mt-1 list-disc pl-5 text-xs text-slate-600 dark:text-slate-300">{basis.map((b, i) => <li key={i}>{b}</li>)}</ul></details>}
+      </div>
+    </Modal>
   )
 }
 

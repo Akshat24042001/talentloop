@@ -247,3 +247,47 @@ def record_feedback(s, rr: db.RoundResult, by: str, decision: str, rating: int |
     if rating:
         rr.score = max(1, min(5, int(rating))) * 20
     flows.decide(s, rr, decision, by, reason=(summary or {}).get("summary") or notes[:300])
+
+
+# ---------------------------------------------------------------------------
+# Feedback for the candidate (drafted from the evidence; a person edits and sends it)
+# ---------------------------------------------------------------------------
+FEEDBACK_SYSTEM = """You draft short, kind and useful feedback for a job candidate, for the hiring team to review before
+sending. Use ONLY the evidence given; never invent results, quotes or numbers. Never mention: integrity or proctoring
+flags, other candidates, ranks, interviewer names, salary, or anything about age, gender, religion, caste, health or
+family. Do not promise future roles. Give 1-2 genuine strengths and 2-3 specific, actionable areas to grow, each tied to
+a round. Plain words, second person, under 170 words, no greeting and no sign-off (they are added for you).
+Output ONLY JSON: {"text": str, "basis": [str] (for the hiring team: which piece of evidence each point came from)}"""
+
+FEEDBACK_BLOCK = ("integrity", "proctor", "cheat", "flagged", "suspicious", "other candidates", "ranked")
+
+
+def feedback_evidence(s, app: db.Application) -> list[dict]:
+    """Rounds the candidate actually did, without integrity flags or interviewers' private notes."""
+    out = []
+    for item in evidence(s, app)["rounds"]:
+        if item["round"] in ("application", "manager_approval") or item.get("status") in ("pending", "invited", "skipped", "setting_up"):
+            continue
+        item = {k: v for k, v in item.items() if k not in ("integrity", "feedback", "stability")}
+        out.append(item)
+    return out
+
+
+async def feedback_draft(app_id: str) -> dict:
+    with db.session() as s:
+        app = s.get(db.Application, app_id)
+        job = s.get(db.Job, app.job_id)
+        ev = feedback_evidence(s, app)
+        role = job.title
+    if not ev:
+        return {"text": "", "basis": [], "note": "No completed rounds to base feedback on yet."}
+    if llm.MOCK:
+        r = {"text": f"Thank you for the time you put into the {role} process. You did well where it counted most for you. "
+                     "To grow: practise explaining your approach step by step.", "basis": [f"{x['round']}: {x.get('summary') or x.get('score')}" for x in ev][:3]}
+    else:
+        r = await llm.complete_json(FEEDBACK_SYSTEM, json.dumps({"role": role, "rounds": ev}, ensure_ascii=False), llm.SMART_MODEL,
+                                    temperature=0.3, max_tokens=700, timeout=60)
+    text = str(r.get("text") or "").strip()[:1500]
+    warn = [w for w in FEEDBACK_BLOCK if w in text.lower()]
+    return {"text": text, "basis": [str(x)[:200] for x in r.get("basis") or []][:5],
+            "note": f"Please check before sending: the draft mentions '{warn[0]}'." if warn else ""}

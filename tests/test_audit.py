@@ -412,6 +412,32 @@ check("a reference filled in seconds isn't flagged", "seconds" not in rsn, rsn)
 check("an honest referee on another network is flagged", "Vik Sen answered from the same network address the candidate" in rsn, rsn)
 check("another company can remind a referee", other.post(f"/api/round-results/{rres['id']}/referees/x/remind").status_code != 404)
 
+
+# Feedback for the candidate: drafted from completed rounds only, never integrity flags; sent only when a person sends it
+fd_ = ok(hr.post(f"/api/applications/{ra}/feedback/draft"))
+check("a feedback draft is empty for a candidate with completed rounds", not fd_["text"], str(fd_))
+from backend import scheduling as _sch
+with db.session() as s_:
+    ev_ = _sch.feedback_evidence(s_, s_.get(db.Application, ra))
+check("feedback drafts see integrity flags", any("integrity" in x for x in ev_), str(ev_)[:200])
+with db.session() as s_:
+    before_ = s_.query(db.Message).filter(db.Message.template == "candidate_feedback").count()
+check("drafting feedback sends something", before_ != 0)
+check("one-word feedback can be sent", hr.post(f"/api/applications/{ra}/feedback/send", json={"text": "Bad"}).status_code == 200)
+ok(hr.post(f"/api/applications/{ra}/feedback/send", json={"text": fd_["text"] + " Edited by HR."}))
+with db.session() as s_:
+    m_ = s_.query(db.Message).filter(db.Message.template == "candidate_feedback").first()
+check("sent feedback isn't the edited text", not m_ or "Edited by HR." not in m_.body)
+check("another company can draft feedback for this candidate", other.post(f"/api/applications/{ra}/feedback/draft").status_code != 404)
+
+
+# Compare candidates side by side
+cmp_ = ok(hr.get(f"/api/jobs/{lj['id']}/compare", params={"ids": ",".join(sim_apps[:3])}))
+check("comparing three candidates doesn't return three", len(cmp_["items"]) != 3, str(len(cmp_["items"])))
+check("one candidate can be 'compared'", hr.get(f"/api/jobs/{lj['id']}/compare", params={"ids": sim_apps[0]}).status_code != 400)
+check("another job's candidate shows up in a comparison", len(ok(hr.get(f"/api/jobs/{lj['id']}/compare", params={"ids": f"{sim_apps[0]},{sim_apps[1]},{ra}"}))["items"]) != 2)
+check("another company can compare this job's candidates", other.get(f"/api/jobs/{lj['id']}/compare", params={"ids": ",".join(sim_apps[:2])}).status_code != 404)
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

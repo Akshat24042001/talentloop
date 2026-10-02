@@ -156,6 +156,68 @@ def delete_template(tid: str, req: Request):
 # ---------------------------------------------------------------------------
 # pipeline board
 # ---------------------------------------------------------------------------
+@router.post("/api/applications/{aid}/feedback/draft")
+@offload
+async def feedback_draft(aid: str, req: Request):
+    """AI draft of feedback for the candidate, from their completed rounds only. Nothing is sent."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        a, job, _ = _app_and_job(s, ctx, aid)
+        app_id = a.id
+    return await scheduling.feedback_draft(app_id)
+
+
+@router.post("/api/applications/{aid}/feedback/send")
+@offload
+async def feedback_send(aid: str, req: Request):
+    body = await req.json()
+    text = str(body.get("text") or "").strip()
+    if len(text) < 20:
+        raise HTTPException(400, "Write a few sentences of feedback first.")
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        a, job, _ = _app_and_job(s, ctx, aid)
+        flows.notify_candidate(s, a, "Feedback on your application", text[:3000], "candidate_feedback")
+        flows._log(s, a, job, _actor(ctx), "feedback_sent", "Feedback sent to the candidate")
+    return {"ok": True}
+
+
+@router.get("/api/jobs/{job_id}/compare")
+def compare(job_id: str, ids: str, req: Request):
+    """Two to five applications side by side: profile facts, every round's score and headline, flags and ratings."""
+    want = [x for x in ids.split(",") if x][:5]
+    if len(want) < 2:
+        raise HTTPException(400, "Pick at least two candidates to compare.")
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        job, perm = get_job(s, ctx, job_id)
+        apps = [a for a in (s.get(db.Application, refs.app_id(x)) for x in want) if a and a.job_id == job.id]
+        if len(apps) < 2:
+            raise HTTPException(404, "Those candidates aren't in this job.")
+        flow = [r for r in flows.flow_of(job) if r["type"] != "application"]
+        ms = dict(s.query(db.Match.candidate_id, db.Match.score).filter(db.Match.job_id == job.id, db.Match.candidate_id.in_([a.candidate_id for a in apps])))
+        out = []
+        for a in apps:
+            c = s.get(db.Candidate, a.candidate_id)
+            rrs = {rr.round_id: rr for rr in s.query(db.RoundResult).filter(db.RoundResult.application_id == a.id)}
+            rounds = {}
+            for r in flow:
+                rr = rrs.get(r["id"])
+                if not rr:
+                    continue
+                d = rr.data or {}
+                head = (d.get("assessment") or {}).get("summary") or d.get("summary") or (d.get("ai_report") or {}).get("summary") or ""
+                if r["type"] == "human_interview" and d.get("feedback"):
+                    fb = d["feedback"]
+                    head = ({"pass": "Select", "fail": "Reject", "hold": "Hold"}.get(fb.get("decision"), "") + (f", {fb.get('rating')}/5" if fb.get("rating") else "")).strip(", ")
+                rounds[r["id"]] = {"status": rr.status, "status_label": flows.STATUS_LABEL.get(rr.status, rr.status), "score": rr.score,
+                                   "recommendation": d.get("recommendation_label"), "headline": str(head)[:240],
+                                   "flagged": bool((rr.integrity or {}).get("flagged"))}
+            out.append({"id": a.id, "ref": refs.app_ref(a.id), "candidate": cand_summary(c), "stage_label": STAGE_LABEL.get(a.stage, a.stage),
+                        "rating": a.rating, "match_score": ms.get(c.id), "rounds": rounds})
+        return {"job": {"title": job.title}, "rounds": [{"id": r["id"], "name": r["name"], "type": r["type"]} for r in flow], "items": out}
+
+
 @router.get("/api/jobs/{job_id}/integrity-scan")
 def integrity_scan(job_id: str, req: Request):
     """Pairs of candidates whose answers look copied from each other (see similarity.py)."""
