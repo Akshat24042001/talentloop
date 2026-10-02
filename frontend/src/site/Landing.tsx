@@ -1,4 +1,4 @@
-import { ArrowRight, BadgeCheck, Briefcase, FileText, Gauge, Globe, Lock, ScanSearch, ShieldCheck, Sparkles, Users, Video, Wand2 } from 'lucide-react'
+import { ArrowRight, BadgeCheck, BookUser, Briefcase, Copy, FileText, Gauge, Globe, Lock, MonitorPlay, Scale, ScanSearch, ShieldCheck, Sparkles, Users, Video, Wand2 } from 'lucide-react'
 import { Button, Logo } from '../components/ui'
 import { useSession } from '../lib/session'
 
@@ -8,6 +8,10 @@ const FEATURES = [
   { icon: ScanSearch, title: 'Find the best 5 in a sea of resumes', body: 'Every resume is scored against every open job in seconds with skills, experience, location and notice period. No AI tokens spent.' },
   { icon: Sparkles, title: 'AI reports only where they count', body: 'The AI writes a match report for each job’s shortlist only, cached, so thousands of resumes cost cents instead of dollars.' },
   { icon: Video, title: 'AI first-round interviews', body: 'Send a link. A voice interviewer asks your questions, probes the resume, and watches for tab switching and second screens.' },
+  { icon: MonitorPlay, title: 'Live tasks with screen sharing', body: 'Candidates code, design or build a sheet while sharing their screen. AI reviews the result and how they got there, against your rubric.' },
+  { icon: BookUser, title: 'Reference checks that catch fakes', body: 'Referees answer a 5-minute form, no sign-in. AI summarises with quotes; references from the candidate’s own network are flagged.' },
+  { icon: Copy, title: 'Spot copied answers across candidates', body: 'Shared wording in interviews and tasks, the same wrong test options, one phone on two records: found and shown with the evidence.' },
+  { icon: Scale, title: 'Check the AI against your team', body: 'See how often your interviewers agree with the AI on every round, and where they disagree most, before you trust a pass mark.' },
   { icon: Globe, title: 'A careers page in minutes', body: 'Candidates apply with a resume or build one in the form. Screening questions screen out the obvious mismatches automatically.' },
 ]
 
