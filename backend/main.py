@@ -37,7 +37,7 @@ WEB_DIR = Path(os.getenv("WEB_DIR") or Path(__file__).resolve().parent.parent / 
 MEDIA_CAP_BYTES = int(os.getenv("MEDIA_CAP_MB", "900")) * 1024 * 1024
 MAX_EVENTS = 5000
 MAX_IMAGES = 300
-RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "30"))
+RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "90"))
 RECONNECT_GRACE_SEC = 2          # network latency allowance on top of the window
 RETENTION_DAYS = float(os.getenv("RETENTION_DAYS", "0") or 0)   # 0 = keep forever
 SWEEP_EVERY_SEC = float(os.getenv("SWEEP_EVERY_SEC", "30"))
@@ -641,6 +641,7 @@ def progress(iid: str):
 
 VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor", "fullscreen_exit", "quick_switches", "left_camera", "multiple_people")
 VIOLATION_DEBOUNCE_SEC = 4
+SOFT_KINDS = ("left_camera", "multiple_people", "quick_switches")    # reminders, never a reason to stop
 
 
 @app.post("/api/interviews/{iid}/violation")
@@ -664,8 +665,20 @@ async def violation(iid: str, req: Request):
             return {"action": "terminate", "say": "", "warning": len(rec.get("warnings") or []), "already": True}
         if rec["status"] != "in_progress" or not st or st.get("ended") or not enforced:
             return {"action": "ignored", "say": "", "warning": len(rec.get("warnings") or [])}
-        warns = rec.setdefault("warnings", [])
         now = time.time()
+        if kind in SOFT_KINDS:
+            # Camera-based signals can misfire (bad light, a poster): a spoken reminder and a record for HR, but they
+            # never count towards stopping the interview.
+            rem = rec.setdefault("reminders", [])
+            if any(r["type"] == kind and now - r["at"] < 60 for r in rem):
+                return {"action": "ignored", "say": "", "warning": len(rec.get("warnings") or []), "debounced": True}
+            disp = st.get("display") or {}
+            say = brain.reminder_message(rec["plan"], kind, disp.get("text", "") if disp.get("kind") != "closing" else "")
+            rem.append({"type": kind, "at": now, "detail": detail, "q_id": disp.get("q_id"), "say": say})
+            server_event(rec, "integrity_reminder", f"{kind} {detail}".strip())
+            store.save(rec)
+            return {"action": "remind", "say": say, "warning": len(rec.get("warnings") or []), "max_warnings": int(s.get("max_warnings", 2))}
+        warns = rec.setdefault("warnings", [])
         if warns and now - warns[-1]["at"] < VIOLATION_DEBOUNCE_SEC:
             return {"action": "ignored", "say": "", "warning": len(warns), "debounced": True}
         max_w = int(s.get("max_warnings", 2))
@@ -1066,6 +1079,33 @@ def _token_ok(rec: dict, token: str, current_only: bool) -> bool:
 _page_seen: dict[str, float] = {}
 
 
+async def _turn(iid: str, token: str, messages: list[dict]) -> str:
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if not _token_ok(rec, token, current_only=True):
+            log.warning("[%s] rejected LLM request with stale or wrong token", iid)
+            raise HTTPException(403, "This call session is no longer active")
+        if rec.get("disqualified"):
+            prep = {"reply": f"The interview has been stopped, and {brain.END_PHRASE}."}
+        else:
+            prep = brain.prepare_turn(rec, messages)
+            _check_page_alive(rec)
+        rec["last_seen"] = time.time()
+        store.save(rec)
+        plan = rec["plan"]
+    _presence[iid] = time.time()
+    if "reply" in prep:
+        return prep["reply"]
+    d, ms, failed = await brain.judge_turn(prep, plan)
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if not _token_ok(rec, token, current_only=True):
+            raise HTTPException(403, "This call session is no longer active")
+        say = brain.apply_turn(rec, prep, d, ms, failed)
+        store.save(rec)
+    return say
+
+
 def _check_page_alive(rec: dict) -> None:
     """The interview page sends a heartbeat every 5 s. If the call keeps going but the page has gone quiet, the
     tab was hidden for long (browsers throttle hidden tabs), or the page was blocked or tampered with: flag it."""
@@ -1083,32 +1123,29 @@ async def custom_llm(iid: str, token: str, req: Request):
     """Vapi calls this on every candidate turn. The LLM call happens WITHOUT holding the
     interview lock, so when Vapi re-requests a turn (candidate kept talking) the new request
     is not stuck behind the old one."""
-    body = await req.json()
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
     messages = [m for m in (body.get("messages") or []) if isinstance(m, dict)]
-    async with store.lock(iid):
-        rec = get_rec(iid)
-        if not _token_ok(rec, token, current_only=True):
-            log.warning("[%s] rejected LLM request with stale or wrong token", iid)
-            raise HTTPException(403, "This call session is no longer active")
-        if rec.get("disqualified"):
-            prep = {"reply": f"The interview has been stopped, and {brain.END_PHRASE}."}
-        else:
-            prep = brain.prepare_turn(rec, messages)
-            _check_page_alive(rec)
-        rec["last_seen"] = time.time()
-        store.save(rec)
-        plan = rec["plan"]
-    _presence[iid] = time.time()
-    if "reply" in prep:
-        say = prep["reply"]
-    else:
-        d, ms, failed = await brain.judge_turn(prep, plan)
-        async with store.lock(iid):
+    try:
+        say = await asyncio.wait_for(_turn(iid, token, messages), timeout=brain.TURN_TIMEOUT + 6)
+    except HTTPException:
+        raise                                    # a stale or foreign call: Vapi must stop it
+    except Exception as e:
+        # Never let an error reach Vapi: a failed custom-LLM request ends the candidate's call on the spot.
+        # Say something safe that keeps the interview where it was, and log it for us.
+        log.exception("[%s] turn failed (%s); answering with a safe line", iid, type(e).__name__)
+        say = "Sorry, I missed that. Could you say it once more?"
+        try:
             rec = get_rec(iid)
-            if not _token_ok(rec, token, current_only=True):
-                raise HTTPException(403, "This call session is no longer active")
-            say = brain.apply_turn(rec, prep, d, ms, failed)
+            disp = ((rec.get("state") or {}).get("display") or {})
+            if disp.get("text") and disp.get("kind") != "closing":
+                say = f"Sorry, I missed that. {disp['text']}"
+            server_event(rec, "turn_error", f"{type(e).__name__}: {str(e)[:150]}")
             store.save(rec)
+        except Exception:
+            pass
     log.info("[%s] AI: %s", iid, say[:120])
 
     if not body.get("stream", True):

@@ -11,6 +11,11 @@ THINKING_REGEX = (r"(let me think|let me see|give me a (second|moment|minute)|on
                   r"hmm+|umm+|uhh+|how do i put|what i mean is|so basically|actually)\s*[.,]?\s*$")
 
 
+ACK_PHRASES = ["okay", "ok", "yeah", "yes", "yep", "right", "sure", "mm-hmm", "uh-huh", "hmm", "i see", "got it", "alright",
+               "haan", "theek hai", "ji"]
+INTERRUPT_PHRASES = ["wait", "sorry", "excuse me", "stop", "one second", "hold on", "can you repeat", "pardon"]
+
+
 def _env(k, d=""):
     return (os.getenv(k) or d).strip()       # an empty value means "use the default"
 
@@ -100,7 +105,10 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str, langua
         "voice": build_voice(language),
         "transcriber": transcriber,
         "startSpeakingPlan": start_plan,
-        "stopSpeakingPlan": {"numWords": 3, "voiceSeconds": 0.3, "backoffSeconds": 1},
+        # Backchannels ("okay", "mm-hmm") never cut the interviewer off mid-question; "wait" or "sorry" always do.
+        # Fields per Vapi's voice pipeline docs (stopSpeakingPlan.acknowledgementPhrases / interruptionPhrases).
+        "stopSpeakingPlan": {"numWords": 3, "voiceSeconds": 0.3, "backoffSeconds": 1,
+                             "acknowledgementPhrases": ACK_PHRASES, "interruptionPhrases": INTERRUPT_PHRASES},
         "backgroundSpeechDenoisingPlan": {"smartDenoisingPlan": {"enabled": True}},
         "endCallPhrases": [END_PHRASE],
         "maxDurationSeconds": int(plan["duration_min"]) * 60 + 300,

@@ -66,7 +66,7 @@ export default function NewInterview() {
   const [planWarn, setPlanWarn] = useState<string[]>([])
   const [json, setJson] = useState('')
   const [gen, setGen] = useState(false), [err1, setErr1] = useState('')
-  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, snap: true, rejoin: '30', openAt: '', validH: '72' })
+  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, snap: true, rejoin: '90', openAt: '', validH: '72' })
   const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
   const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
   const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
@@ -119,7 +119,7 @@ export default function NewInterview() {
   async function create() {
     setErr2(''); setCreating(true)
     try {
-      const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 30,
+      const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 90,
         available_from: st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap,
         enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
       const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })

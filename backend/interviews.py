@@ -7,7 +7,7 @@ import time
 from . import db, jd_schema, store
 from .api_accounts import org_settings
 
-RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "30"))
+RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "90"))
 
 
 def _intish(v, default: int) -> int:

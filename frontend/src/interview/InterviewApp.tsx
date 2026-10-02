@@ -66,7 +66,7 @@ function Consent({ s }: { s: State }) {
   const rules: { icon: ReactNode; strict?: boolean; text: ReactNode; show?: boolean }[] = [
     { icon: <MessageSquareText />, text: <>An <b>AI interviewer</b> talks with you, one question at a time. The question is always on your screen, and you can say <b>"please repeat"</b> any time.</> },
     { icon: <Sun />, text: <>Sit somewhere quiet and well lit, using the latest <b>Chrome or Edge</b>{P.require_screen_share ? <> on a <b>laptop or desktop</b></> : null}. Headphones help.</> },
-    { icon: <UserRound />, strict: P.enforce_focus, text: <>Keep your <b>camera on</b> and your face visible, <b>alone</b>. Stepping out of view or someone else appearing gets a warning, like switching screens.</> },
+    { icon: <UserRound />, strict: P.enforce_focus, text: <>Keep your <b>camera on</b> and your face visible, <b>alone</b>. If you step out of view or someone else appears, the interviewer reminds you and the hiring team sees it.</> },
     { icon: <Eye />, strict: P.enforce_focus, text: !P.enforce_focus ? <><b>Stay on this screen.</b> Leaving the page or switching windows is recorded for HR.</>
       : mw > 0 ? <><b>Stay on this screen, in full screen.</b> Switching tabs, windows or apps, even briefly and repeatedly, gets a spoken warning. After <b>{mw} warning{mw === 1 ? '' : 's'}</b>, the next time ends the interview.</>
       : <><b>Stay on this screen.</b> Switching tabs, windows or apps <b>ends the interview immediately</b>.</> },

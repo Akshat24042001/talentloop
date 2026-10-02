@@ -29,7 +29,8 @@ SILENCE_LINE = ("I haven't heard anything for a while, so I'll pause the intervi
                 "If this was a connection problem, please rejoin right away.")
 TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "8"))
 END_BUFFER_SEC = 40          # below this remaining time, wrap up
-MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "3")) + 1
+OVERTIME_SEC = 180           # HR-mandatory questions still get asked up to this long past the planned length
+MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "5")) + 1
 QUESTION_TYPES = ("warmup", "hr_mandatory", "resume_probe", "jd_skill", "behavioral")
 DEEP_TYPES = ("resume_probe", "jd_skill", "behavioral")     # questions that deserve a real answer before moving on
 GENERIC_PROBE = {
@@ -125,7 +126,7 @@ def normalize_plan(plan: dict, duration_min: int | None = None) -> dict:
 
 def plan_warnings(plan: dict, hr_questions: list[str] | None = None) -> list[str]:
     """Things HR must look at before sending the link. Shown on the HR page."""
-    w = []
+    w = list(plan.get("grounding_notes") or [])
     qs = plan["questions"]
     n_hr = len([x for x in (hr_questions or []) if str(x).strip()])
     n_mand = sum(1 for q in qs if q["type"] == "hr_mandatory")
@@ -149,7 +150,55 @@ PLAN_DEADLINE_SEC = float(os.getenv("PLAN_DEADLINE_SEC", "25"))     # HR always 
 PLAN_HEDGE_SEC = float(os.getenv("PLAN_HEDGE_SEC", "10"))           # start a second model if the first is slow
 
 
+GENERIC_RESUME_PROBE = "Walk me through one piece of work from your resume that you're proud of. What exactly was your part in it?"
+_STOP = {"you", "your", "the", "and", "what", "how", "when", "why", "tell", "walk", "me", "about", "did", "can", "could", "would"}
+
+
+def ground_plan(plan: dict, inp: dict) -> dict:
+    """Make the plan safe before any candidate hears it (flows send AI interviews without HR review):
+    - a resume question that quotes a number or a name the resume and JD don't contain is a made-up claim,
+      so it is replaced by an open question about their real work;
+    - near-duplicate questions are dropped;
+    - every question HR wrote is in the plan, as a must-ask question."""
+    src = f"{inp.get('resume', '')}\n{inp.get('jd', '')}".lower()
+    notes = list(plan.get("grounding_notes") or [])
+    kept, seen = [], []
+    for q in plan["questions"]:
+        if q["type"] == "resume_probe":
+            nums = [n.strip(".,%") for n in re.findall(r"\d[\d,.%]*", q["ask"])]
+            names = [w for w in re.findall(r"(?<![.?!]\s)(?<!^)\b[A-Z][a-zA-Z0-9&+.-]{2,}", q["ask"]) if w.lower() not in _STOP]
+            missing = [n for n in nums if n and n not in src] + [w for w in names if w.lower().strip(".") not in src]
+            if missing:
+                notes.append(f"Replaced a resume question that mentioned {', '.join(missing[:3])}, which isn't in the resume or JD.")
+                q = {**q, "ask": GENERIC_RESUME_PROBE, "grounding_fixed": True}
+        if q["type"] != "hr_mandatory" and any(_match_score(q["ask"], s) > 0.8 or _match_score(s, q["ask"]) > 0.8 for s in seen):
+            notes.append(f"Dropped a repeated question: {q['ask'][:80]}")
+            continue
+        if q.get("grounding_fixed") and GENERIC_RESUME_PROBE in seen:
+            continue
+        seen.append(q["ask"])
+        kept.append(q)
+    for hq in [str(x).strip() for x in inp.get("questions") or [] if str(x).strip()]:
+        if not any(_match_score(hq, q["ask"]) >= 0.6 or _match_score(q["ask"], hq) >= 0.6 or hq.lower() in q["ask"].lower() for q in kept):
+            kept.append({"id": f"hr{len(kept) + 1}", "type": "hr_mandatory", "ask": hq, "scored": True, "competency_id": plan["competencies"][0]["id"],
+                         "good_answer_covers": [], "red_flags": [], "max_followups": 1, "time_budget_sec": 90})
+            notes.append(f"Added your question the plan had left out: {hq[:80]}")
+    plan["questions"] = kept or plan["questions"]
+    if notes:
+        plan["grounding_notes"] = notes
+    return plan
+
+
 async def generate_plan(inp: dict) -> dict:
+    plan = await _generate_plan(inp)
+    try:
+        return normalize_plan(ground_plan(plan, inp))
+    except Exception:
+        log.exception("plan grounding failed; using the plan as generated")
+        return plan
+
+
+async def _generate_plan(inp: dict) -> dict:
     """inp: company, role, candidate_name, duration_min, jd, resume, questions (list[str]).
 
     Speed: the fast model with reasoning off and a compact output; if it hasn't answered after PLAN_HEDGE_SEC a
@@ -437,6 +486,16 @@ def integrity_message(plan: dict, kind: str, n: int, max_warnings: int, question
             f"This has been noted for the hiring team.{again}"), False
 
 
+def reminder_message(plan: dict, kind: str, question: str = "") -> str:
+    """A friendly spoken reminder for camera-based signals (never ends the interview)."""
+    name = _first_name(plan)
+    what = {"left_camera": "I can't see you on camera right now. Please stay in view",
+            "multiple_people": "It looks like someone else is in view. Please make sure you're on your own",
+            "quick_switches": "Please keep this interview screen in front of you"}.get(kind, "Please stay focused on the interview")
+    again = f" Let's continue. {question}" if question else ""
+    return f"{name}, quick reminder: {what}.{again}"
+
+
 def _snap(st: dict) -> dict:
     return {"seq": st["seq"], "state": copy.deepcopy(st)}
 
@@ -550,7 +609,7 @@ def _locate(rec: dict, messages: list[dict]) -> tuple[dict | None, str, bool]:
     builds on the committed state instead.
     Returns (base_state, candidate_text, matched)."""
     snaps = rec.get("snapshots") or []
-    others = list(IDLE_LINES) + [SILENCE_LINE] + [w.get("say", "") for w in rec.get("warnings") or []]
+    others = list(IDLE_LINES) + [SILENCE_LINE] + [w.get("say", "") for w in (rec.get("warnings") or []) + (rec.get("reminders") or [])]
     ai_pos = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and _content(m)]
     for rank in range(len(ai_pos) - 1, -1, -1):
         i = ai_pos[rank]
@@ -592,7 +651,11 @@ def _allowed_actions(st: dict, plan: dict, active: float) -> tuple[list[str], st
     q = qs[st["q_idx"]]
     remaining = plan["duration_min"] * 60 - active
     progress = "end" if st["q_idx"] >= len(qs) - 1 else "next_question"
+    mandatory_left = any(x["type"] == "hr_mandatory" for x in qs[st["q_idx"] + 1:])
     if remaining <= END_BUFFER_SEC:
+        # Out of time: HR's must-ask questions are still asked (up to OVERTIME_SEC past the end), never skipped.
+        if mandatory_left and remaining > -OVERTIME_SEC:
+            return ["next_question"], "next_question"
         return ["end"], "end"
     allowed = [progress]
     q_time = active - st["q_started_active"]
@@ -677,6 +740,17 @@ def prepare_turn(rec: dict, messages: list[dict]) -> dict:
         return {"reply": "Thank you, " + END_PHRASE + "."}
     if not said:
         return {"reply": base.get("last_say") or plan["questions"][base["q_idx"]]["ask"]}
+    cur_q = plan["questions"][base["q_idx"]]
+    cur_text = (base.get("display") or {}).get("text") or cur_q["ask"]
+    # The interviewer's own voice coming back through the speakers is not an answer.
+    if base.get("last_say") and _match_score(base["last_say"], said) >= 0.75:
+        rec["echo_hits"] = rec.get("echo_hits", 0) + 1
+        log.info("[%s] echo of our own line ignored", rec["id"])
+        return {"reply": "I think I'm hearing my own voice. Headphones help. Please go ahead whenever you're ready." if rec["echo_hits"] <= 2
+                else "Please go ahead."}
+    # "Okay", "hmm", "yeah sure" while listening is a backchannel, not an answer (unless the question is a yes/no one).
+    if BACKCHANNEL.match(said.strip()) and not YES_NO_START.match(cur_text.strip()) and cur_q.get("type") != "warmup":
+        return {"reply": f"Take your time. {cur_text}" if len(said.split()) <= 3 else "Please go on."}
     st = copy.deepcopy(base)
     active = st["active_before"] + (time.time() - st["session_started"])
     allowed, progress = _allowed_actions(st, plan, active)
@@ -728,6 +802,58 @@ def _fallback(prep: dict, plan: dict) -> dict:
     return {"action": prep["progress"], "ack": "Thank you, that's helpful."}
 
 
+# ---------------------------------------------------------------------------
+# Guard rails on every string the model writes. The model decides; these make sure what is spoken can't
+# derail the interview: an ack never asks something new, a follow-up is one real question on this topic,
+# answers about the company only use approved facts, and anything else returns to the current question.
+# ---------------------------------------------------------------------------
+PROTECTED = re.compile(r"\b(age|how old|married|marital|husband|wife|children|kids|pregnan|religio|caste|god|pray|"
+                       r"disabilit|health|illness|medical|nationality|politic|sexual|boyfriend|girlfriend)\b", re.I)
+BACKCHANNEL = re.compile(r"^(?:(?:ok(?:ay)?|yeah|yes|yep|yup|right|sure|hmm+|mm+|uh[- ]?huh|alright|all right|got it|i see|"
+                         r"cool|fine|great|go ahead|haan|ha|ji|theek hai|accha)[\s,.!]*){1,3}$", re.I)
+YES_NO_START = re.compile(r"^(?:do|does|did|are|is|was|were|can|could|will|would|have|has|had|should)\b", re.I)
+
+
+def _sentences(s: str) -> list[str]:
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+", s or "") if x.strip()]
+
+
+def safe_ack(s) -> str:
+    """At most two short statements, no questions (a question in an ack makes the candidate answer it instead)."""
+    out = [x for x in _sentences(_clean(s)) if "?" not in x][:2]
+    txt = " ".join(out)
+    return txt if txt and len(txt.split()) <= 30 else "Thank you."
+
+
+def safe_followup(s, q: dict) -> str:
+    """One question, on topic, not about protected traits, not a repeat of the original question."""
+    f = _clean(s)
+    qs = [x for x in _sentences(f) if x.endswith("?")]
+    if not qs:
+        return ""
+    f = qs[0] if len(qs[0].split()) >= 4 else " ".join(qs[:2])
+    if len(f.split()) > 40 or PROTECTED.search(f) or _match_score(q["ask"], f) > 0.85:
+        return ""
+    return f
+
+
+def grounded(text: str, sources: list[str]) -> bool:
+    """Every number in `text` (salary, dates, counts) must appear in the approved sources."""
+    src = " ".join(sources).lower()
+    nums = re.findall(r"\d[\d,.]*", text or "")
+    return all(n.strip(".,") in src for n in nums)
+
+
+def safe_reply(s, current: str, facts: list[str]) -> str:
+    """A short answer that only uses approved facts, then back to the current question."""
+    r = " ".join(_sentences(_clean(s))[:3])
+    if not r or len(r.split()) > 70 or not grounded(r, facts):
+        r = "That's a good question for the hiring team, and they'll follow up with you on it."
+    if "?" not in r[-200:]:
+        r = f"{r} Coming back to the interview: {current}"
+    return r
+
+
 def _gives_up(said: str) -> bool:
     return bool(re.search(r"\b(don'?t know|not sure|no idea|skip|pass|haven'?t (done|worked)|no experience|move on|next question)\b", said, re.I))
 
@@ -754,9 +880,18 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
         rec["state"] = st
         rec["status"] = "completed"
         return say
+    if d.get("action") not in allowed:            # a confused model must not move the interview on by accident
+        log.warning("[%s] judge chose %r (allowed %s); using the safe fallback", rec.get("id"), d.get("action"), allowed)
+        d = {**_fallback(prep, plan), "covered": d.get("covered"), "note": d.get("note")}
     action = d.get("action") if d.get("action") in allowed else progress
-    if action == "follow_up" and not _clean(d.get("followup")):
-        action = progress
+    if action == "follow_up":
+        fu = safe_followup(d.get("followup"), q)
+        if fu:
+            d = {**d, "followup": fu}
+        elif q["type"] in DEEP_TYPES and not _gives_up(said):
+            d = {**d, "followup": GENERIC_PROBE[q["type"]]}
+        else:
+            action = progress
     # Don't rush: a short answer to a substantive question, given in a fraction of its time, gets one probe
     # (or a nudge) before the interview moves on. This also covers a candidate cut off by end-of-speech detection.
     q_time = active - st.get("q_started_active", active)
@@ -767,14 +902,17 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
             action, d = "follow_up", {**d, "followup": _clean(d.get("followup")) or GENERIC_PROBE[q["type"]]}
         elif "invite_continue" in allowed and st["stall"] < 1 and words < 12:
             action, d = "invite_continue", {**d, "reply": "Take your time. Is there anything you'd like to add?"}
-    ack = _clean(d.get("ack")) or "Thank you."
+    ack = safe_ack(d.get("ack"))
+    current_q = (st.get("display") or {}).get("text") or q["ask"]
+    facts = [str(x) for x in plan.get("company_facts") or []] + [f"{x.get('q', '')} {x.get('a', '')}" for x in prep.get("faq") or []]
 
     if action == "next_question":
         nxt = _next_index(st, plan, active)
         if nxt is None:
             action = "end"
     if action == "invite_continue":
-        say = _clean(d.get("reply")) or "Please go on, I'm listening."
+        r = _clean(d.get("reply"))
+        say = r if r and len(r.split()) <= 20 else "Please go on, I'm listening."
         st["stall"] += 1
     elif action == "follow_up":
         say = _clean(d.get("followup"))
@@ -782,13 +920,18 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
         st["stall"] = 0
         st["display"] = _display(q, say, "follow_up")
     elif action == "clarify_repeat":
-        say = _clean(d.get("rephrase")) or ("Sure. " + q["ask"])
+        rp = _clean(d.get("rephrase"))
+        say = rp if rp and "?" in rp and len(rp.split()) <= 60 and not PROTECTED.search(rp) else "Sure. " + current_q
         st["stall"] += 1
         if (st.get("display") or {}).get("kind") != "follow_up":
             st["display"] = _display(q, re.sub(r"^(sure|okay|of course|no problem)[.,!]?\s+", "", say, flags=re.I),
                                      "rephrase")
-    elif action in ("answer_candidate_question", "redirect"):
-        say = _clean(d.get("reply")) or ("Let's stay with the interview. " + q["ask"])
+    elif action == "answer_candidate_question":
+        say = safe_reply(d.get("reply"), current_q, facts)
+        st["stall"] += 1
+    elif action == "redirect":
+        r = " ".join(_sentences(_clean(d.get("reply")))[:1])
+        say = f"{r if r and '?' not in r and len(r.split()) <= 25 else 'Let us stay with the interview.'} {current_q}"
         st["stall"] += 1
     elif action == "next_question":
         skipped_now = nxt > st["q_idx"] + 1
@@ -982,8 +1125,14 @@ async def score_interview(rec: dict) -> dict:
             if ev["verified"] != "unverified":
                 n_ok += 1
                 ok_any = True
-        if qr["score"] is not None and qr["score"] > 1 and not ok_any:
-            review.append(f"{question_label(plan, qr['q_id'])}: score {qr['score']} has no verifiable quote")
+        if not cand_lines and qr["score"] is not None:
+            # never asked or never answered: nothing to score, whatever the model says
+            review.append(f"{question_label(plan, qr['q_id'])}: not answered in the interview, so not scored")
+            qr["score"], qr["unscored_reason"] = None, "not answered"
+        elif qr["score"] is not None and qr["score"] > 1 and not ok_any:
+            # a score the transcript can't back is withheld, not counted: a person decides
+            review.append(f"{question_label(plan, qr['q_id'])}: the AI's score ({qr['score']}) had no quote found in the transcript; not counted")
+            qr["score"], qr["unscored_reason"] = None, "no verifiable evidence"
         qr["ask"] = q["ask"]
         qr["type"] = q["type"]
         qr["competency_id"] = q.get("competency_id")

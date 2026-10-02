@@ -719,6 +719,12 @@ export class InterviewEngine {
     try { r = await post(`/api/interviews/${this.iid}/violation`, { type: kind, detail }) }
     catch (e: any) { this.ev('violation_report_failed', e.message); return }
     if (!r || r.action === 'ignored') return
+    if (r.action === 'remind') {   // camera or focus reminder: spoken, recorded for HR, never counts as a warning
+      this.set({ warnBar: { title: 'Reminder', final: false, text: ({ left_camera: 'Please stay in view of your camera.', multiple_people: 'Please make sure you are alone.', quick_switches: 'Please keep the interview screen in front of you.' } as Record<string, string>)[kind] || 'Please stay focused on the interview.' } })
+      clearTimeout(this.warnTimer); this.warnTimer = window.setTimeout(() => this.set({ warnBar: null }), 7000)
+      this.lastWarnSay = norm(r.say); this.addLine('ai', r.say, true, true); this.speak(r.say, false)
+      return
+    }
     const max = r.max_warnings ?? this.P.max_warnings
     this.set({ warnings: r.warning, maxWarnings: max })
     if (r.action === 'terminate') return this.handleTermination(r.say)
