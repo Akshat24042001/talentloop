@@ -1,7 +1,7 @@
 import { Briefcase, Sparkles } from 'lucide-react'
 import { useState } from 'react'
-import { Alert, Badge, Button, Card, toast } from '../components/ui'
-import { Empty, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
+import { Alert, Badge, Button, Card, Input, toast } from '../components/ui'
+import { Empty, ErrorBox, ListSkeleton, PageHeader, useApi, usePaged } from '../components/kit'
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
 import { JOB_STATUS, VERDICT } from './labels'
@@ -16,6 +16,9 @@ export default function MatchCenter() {
   const me = useMe()
   const { data, error, reload } = useApi<Ov>('/api/match/overview')
   const [busy, setBusy] = useState(false), [jobBusy, setJobBusy] = useState('')
+  const [q, setQ] = useState('')
+  const jobs = (data?.jobs || []).filter(j => !q || `${j.title} ${j.department} ${j.location}`.toLowerCase().includes(q.toLowerCase()))
+  const { rows: jobRows, pager } = usePaged(jobs, 12, [q])
   const summary = (r: any) => r.error ? `${r.generated ? `${r.generated} written. ` : ''}${r.error}` : `${r.generated} AI report${r.generated === 1 ? '' : 's'} written`
   async function runJob(j: Ov['jobs'][number]) {
     setJobBusy(j.id)
@@ -41,8 +44,9 @@ export default function MatchCenter() {
           </Card>
           {data.mock && <Alert className="mb-4" tone="info" icon={<Sparkles />}>Demo AI is on: match reports are simulated. Set LLM_MOCK=0 and an LLM key for real reports ({data.model}).</Alert>}
           {!data.jobs.length ? <Card><Empty icon={<Briefcase />} title="No open jobs">Publish a job to see its shortlist here.</Empty></Card> : (
+            <>{data.jobs.length > 3 && <Input type="search" aria-label="Search jobs" className="mb-4 max-w-sm" placeholder="Search jobs" value={q} onChange={e => setQ(e.target.value)} />}
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {data.jobs.map(j => (
+              {jobRows.map(j => (
                 <Card key={j.id} className="flex flex-col">
                   <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-4 dark:border-ink-800">
                     <div className="min-w-0"><a href={`/app/jobs/${j.ref}`} className="font-semibold hover:underline">{j.title}</a><div className="truncate text-xs text-slate-500">{j.department}{j.location ? ` · ${j.location}` : ''}</div></div>
@@ -68,6 +72,7 @@ export default function MatchCenter() {
                 </Card>
               ))}
             </div>
+            {!jobs.length && <p className="text-sm text-slate-500 dark:text-slate-400">No jobs match.</p>}{pager}</>
           )}
         </>
       )}

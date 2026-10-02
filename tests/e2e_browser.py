@@ -282,6 +282,7 @@ def main():
             # HR report page: video plays with a real duration, jump-to-moment works, downloads work
             hr_ctx = browser.new_context()
             hr = hr_ctx.new_page()
+            hr.add_locator_handler(hr.get_by_role("button", name="Skip the tour"), lambda: hr.get_by_role("button", name="Skip the tour").click(), no_wait_after=True)
             hr_errs = []
             hr.on("pageerror", lambda e: hr_errs.append(str(e)))
             # interviews made with the API key belong to no company, so a platform admin sees them

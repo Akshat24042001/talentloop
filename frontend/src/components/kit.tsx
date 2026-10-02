@@ -185,13 +185,25 @@ export function ListInput({ value, onChange, placeholder }: { value: string[]; o
   )
 }
 
+/** Client-side paging for lists already in memory: `const { rows, pager } = usePaged(filtered, 25, [filters...])`. */
+export function usePaged<T>(items: T[], size = 25, resetOn: unknown[] = []) {
+  const [page, setPage] = useState(1)
+  useEffect(() => { setPage(1) }, resetOn)            // eslint-disable-line react-hooks/exhaustive-deps
+  const pages = Math.max(1, Math.ceil(items.length / size)), cur = Math.min(page, pages)
+  return { rows: items.slice((cur - 1) * size, cur * size), pager: <Pager page={cur} total={items.length} limit={size} onPage={p => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }} /> }
+}
 export function Pager({ page, total, limit, onPage }: { page: number; total: number; limit: number; onPage: (p: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / limit))
   if (pages <= 1) return null
   return (
     <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-500 dark:border-ink-800">
       <span>{(page - 1) * limit + 1}-{Math.min(total, page * limit)} of {total}</span>
-      <div className="flex gap-2"><Button size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</Button><Button size="sm" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</Button></div>
+      <div className="flex items-center gap-1"><Button size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</Button>
+        {Array.from({ length: pages }, (_, i) => i + 1).filter(n => n === 1 || n === pages || Math.abs(n - page) <= 1).map((n, i, a) => (
+          <span key={n} className="flex items-center">{i > 0 && n - a[i - 1]! > 1 && <span className="px-1 text-slate-400">…</span>}
+            <button type="button" aria-current={n === page ? 'page' : undefined} onClick={() => onPage(n)}
+              className={cn('tabular hidden size-8 rounded-lg text-sm font-medium sm:inline-block', n === page ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-ink-800')}>{n}</button></span>))}
+        <Button size="sm" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</Button></div>
     </div>
   )
 }

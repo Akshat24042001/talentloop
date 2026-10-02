@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { healthProblems, useHealth } from '../lib/health'
 import { useLocation } from '../lib/router'
 import { signOut, useSession } from '../lib/session'
+import { Tour, type TourStep } from '../components/Tour'
 
 const NAV = [
   { href: '/app', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -31,7 +32,7 @@ const NAV2 = [
 function NavLink({ href, label, icon: Icon, exact, path, onClick }: { href: string; label: string; icon: any; exact?: boolean; path: string; onClick?: () => void }) {
   const on = exact ? path === href : path === href || path.startsWith(href + '/')
   return (
-    <a href={href} onClick={onClick} aria-current={on ? 'page' : undefined} className={cn('flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors [&_svg]:size-[18px]',
+    <a href={href} data-tour={href.replace("/app/", "nav-").replace("/app", "nav-dashboard")} onClick={onClick} aria-current={on ? "page" : undefined} className={cn('flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors [&_svg]:size-[18px]',
       on ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-ink-800 dark:hover:text-white')}>
       <Icon />{label}
     </a>
@@ -102,11 +103,32 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
   )
 }
 
+function tourSteps(me: NonNullable<ReturnType<typeof useSession>['me']>): TourStep[] {
+  const hr = me.can.manage_jobs, first = (me.user.name || '').split(' ')[0]
+  const s: TourStep[] = [
+    { title: `Welcome${first ? `, ${first}` : ''}!`, body: hr ? 'TalentLoop takes you from a job post to a shortlist and interviews. This 1-minute tour shows where everything is. You can skip it and restart it any time from Your account.'
+      : `You're a ${me.role_label} at ${me.org?.name}. This short tour shows the parts you'll use.` },
+    { target: 'nav-dashboard', title: 'Your dashboard', body: 'Open jobs, new applicants, interviews to review and anything that needs you today.' },
+    { target: 'nav-jobs', title: 'Jobs', body: hr ? 'Create a job here: paste or import a JD, or let AI write it. Each job has its own applicants board, hiring flow and team.' : 'The jobs you have access to, with their applicants.' },
+    { target: 'nav-candidates', title: 'Candidates', body: hr ? 'Every resume in one place. Upload many at once; we read them and match each person to your jobs.' : 'Profiles, resumes and where each person applied.' },
+  ]
+  if (hr) s.push(
+    { target: 'nav-matches', title: 'Match center', body: 'The best candidates for every open job, ranked side by side, with AI reports and a full match report for each.' },
+    { target: 'nav-interviews', title: 'AI interviews', body: 'Send a voice interview the AI runs for you, with proctoring, a transcript, a recording and a scored report.' },
+    { target: 'nav-drives', title: 'Campus drives', body: 'One registration link and QR code per college, for one or more roles.' },
+    { target: 'nav-team', title: 'Your team', body: 'Invite HR colleagues and hiring managers. Managers only see the jobs you assign them.' })
+  else s.push({ target: 'nav-my-interviews', title: 'My interviews', body: 'Interviews booked with you, with the candidate details and a place for your feedback.' })
+  s.push({ title: "You're all set", body: hr ? 'Start with Jobs > New job. Tip: everything has a Back button and nothing is sent to candidates without you choosing to.' : 'Ask your HR team if you need access to more jobs.' })
+  return s
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const { path } = useLocation()
   const [open, setOpen] = useState(false)
+  const { me } = useSession()
   return (
     <>
+      {me?.user.id && me.org && <Tour uid={me.user.id} steps={tourSteps(me)} auto={path === '/app'} />}
       <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-64 overflow-y-auto border-r border-slate-200/80 bg-white px-4 py-5 dark:border-ink-700 dark:bg-ink-900 lg:block">
         <Sidebar path={path} />
       </aside>

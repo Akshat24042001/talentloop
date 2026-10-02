@@ -4,7 +4,7 @@ import { SplitBar } from '../components/charts'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Input, Select, Spinner, Stat, useInterval } from '../components/ui'
 import { api, withKey } from '../lib/api'
 import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, ago, initials, when } from '../lib/format'
-import { PageHeader, Ago } from '../components/kit'
+import { PageHeader, Ago, usePaged } from '../components/kit'
 import { useHealth } from '../lib/health'
 import { LinkActions } from '../components/LinkActions'
 
@@ -41,6 +41,7 @@ export default function Interviews() {
     if (sort === 'name') out.sort((a, b) => String(a.candidate || '').localeCompare(String(b.candidate || '')))
     return out
   }, [all, q, fs, fr, role, sort])
+  const { rows: shown, pager } = usePaged(filtered, 25, [all, q, fs, fr, role, sort])
 
   const n = (s: string) => all.filter(r => r.status === s).length
   const done = all.filter(r => ['completed', 'scored', 'incomplete'].includes(r.status)).length
@@ -97,7 +98,7 @@ export default function Interviews() {
           : !filtered.length ? (all.length ? <p className="p-10 text-center text-sm text-slate-500">No interviews match the filters.</p> : <Empty />)
           : (<>
             <ul className="divide-y divide-slate-100 dark:divide-ink-800 md:hidden">
-              {filtered.map(r => (
+              {shown.map(r => (
                 <li key={r.id}>
                   <a href={`/app/interviews/${encodeURIComponent(r.ref)}`} className="flex gap-3 px-4 py-3.5 active:bg-slate-50 dark:active:bg-ink-850">
                     <span className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-xs font-bold text-brand-700 dark:from-brand-500/25 dark:to-violet-500/25 dark:text-brand-200">{initials(r.candidate)}</span>
@@ -121,7 +122,7 @@ export default function Interviews() {
                     <th key={i} className={`whitespace-nowrap px-4 py-3 font-medium ${[1, 6, 7].includes(i) ? 'hidden lg:table-cell' : ''}`}>{h}</th>)}
                 </tr></thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-ink-800">
-                  {filtered.map(r => (
+                  {shown.map(r => (
                     <tr key={r.id} className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850" onClick={e => { if (!(e.target as HTMLElement).closest('a,button')) location.href = `/app/interviews/${encodeURIComponent(r.ref)}` }}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -153,6 +154,7 @@ export default function Interviews() {
                 </tbody>
               </table>
             </div>
+            {pager}
           </>)}
       </Card>
     </>

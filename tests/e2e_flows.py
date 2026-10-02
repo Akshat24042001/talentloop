@@ -41,6 +41,7 @@ def main():
                 pg = ctx.new_page()
                 # Our confirmations are styled dialogs now (not window.confirm): accept them like the native ones were.
                 pg.add_locator_handler(pg.locator("#ask-ok"), lambda: pg.locator("#ask-ok").click(), no_wait_after=True)
+                pg.add_locator_handler(pg.get_by_role("button", name="Skip the tour"), lambda: pg.get_by_role("button", name="Skip the tour").click(), no_wait_after=True)
                 pg.on("pageerror", lambda e: errors.append(f"{pg.url}: {e}"))
                 pg.on("console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(f"{pg.url}: console {m.text}"))
                 pg.on("dialog", lambda d: d.accept())

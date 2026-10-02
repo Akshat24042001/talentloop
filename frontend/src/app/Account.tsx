@@ -1,6 +1,6 @@
 // Your account: who you are in this company, how the app looks, your profile, password and companies.
 // Company-wide settings live in Settings (owners and admins only).
-import { Check, KeyRound, Monitor, Moon, Save, ShieldCheck, Sun } from 'lucide-react'
+import { Check, Compass, KeyRound, Monitor, Moon, Save, ShieldCheck, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Field, Input, cn, toast } from '../components/ui'
 import { Avatar, PageHeader } from '../components/kit'
@@ -8,6 +8,8 @@ import { api } from '../lib/api'
 import { ROLE_CAN, ROLE_HELP } from '../lib/roles'
 import { useMe, useSession } from '../lib/session'
 import { useTheme, type Theme } from '../lib/theme'
+import { startTour } from '../components/Tour'
+import { navigate } from '../lib/router'
 
 const THEMES: { id: Theme; label: string; icon: typeof Sun; hint: string }[] = [
   { id: 'system', label: 'System', icon: Monitor, hint: 'Follows your device' },
@@ -45,7 +47,7 @@ export default function Account() {
           </div>
         </CardBody></Card>
 
-        <Card><CardHeader title="Appearance" description="Saved in this browser." /><CardBody>
+        <Card><CardHeader title="Appearance" description="Saved in this browser." action={<Button size="sm" variant="ghost" icon={<Compass />} onClick={() => { navigate('/app'); setTimeout(startTour, 300) }}>Take the tour again</Button>} /><CardBody>
           <div role="radiogroup" aria-label="Theme" className="grid gap-2 sm:grid-cols-3">{THEMES.map(t => (
             <button key={t.id} type="button" role="radio" aria-checked={theme === t.id} onClick={() => setTheme(t.id)}
               className={cn('flex items-center gap-3 rounded-xl p-3 text-left ring-1 transition-colors',

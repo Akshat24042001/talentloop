@@ -2,8 +2,8 @@
 import { Check, Copy, Download, GraduationCap, Plus, QrCode, Trash2 } from 'lucide-react'
 import QRCode from 'qrcode'
 import { useEffect, useState } from 'react'
-import { Badge, Button, Card, CardBody, Field, Input, Modal, Switch, cn, copyText, toast } from '../components/ui'
-import { Empty, ErrorBox, ListSkeleton, Loading, PageHeader, useApi } from '../components/kit'
+import { Badge, Button, Card, CardBody, Field, Input, Modal, Select, Switch, cn, copyText, toast } from '../components/ui'
+import { Empty, ErrorBox, ListSkeleton, Loading, PageHeader, useApi, usePaged } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { DateTimePicker } from '../components/pickers'
@@ -22,13 +22,20 @@ export default function Drives() {
   const { data, error, reload } = useApi<Drive[]>('/api/drives')
   const { data: jobs } = useApi<JobOpt[]>('/api/jobs')
   const [edit, setEdit] = useState<Partial<Drive> | null>(null)
+  const [q, setQ] = useState(''), [st, setSt] = useState('')
+  const list = (data || []).filter(d => (!st || d.status === st) && (!q || `${d.college} ${(d.jobs || []).map(j => j.title).join(' ')}`.toLowerCase().includes(q.toLowerCase())))
+  const { rows, pager } = usePaged(list, 12, [q, st])
   if (error) return <ErrorBox error={error} retry={reload} />
   return (
     <>
       <PageHeader title="Campus drives" description="One registration link and QR code per college, for one or more roles. Students pick the roles they want, register with a live photo and take each role's flow (usually a proctored test) in your test window."
         actions={jobs && jobs.length > 0 && <Button variant="primary" icon={<Plus />} onClick={() => setEdit({ job_ids: [] })}>New drive</Button>} />
       {!data ? <ListSkeleton rows={3} avatar={false} /> : !data.length ? <Card><Empty icon={<GraduationCap />} title="No campus drives yet">Create a drive per college and pick the roles you're hiring for there (a campus template flow works well).</Empty></Card>
-        : <DriveList drives={data} onEdit={setEdit} reload={reload} showJob />}
+        : <>
+          <div className="mb-3 flex flex-wrap gap-2"><Input type="search" aria-label="Search drives" className="max-w-xs" placeholder="Search college or role" value={q} onChange={e => setQ(e.target.value)} />
+            <Select aria-label="Status" className="!w-40" value={st} onChange={e => setSt(e.target.value)}><option value="">All drives</option><option value="open">Open</option><option value="closed">Closed</option></Select></div>
+          {list.length ? <DriveList drives={rows} onEdit={setEdit} reload={reload} showJob /> : <Card><CardBody><p className="text-sm text-slate-500 dark:text-slate-400">No drives match.</p></CardBody></Card>}
+          {pager}</>}
       {edit && <DriveEditor d={edit} jobs={jobs || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload() }} />}
     </>
   )

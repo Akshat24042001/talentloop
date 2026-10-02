@@ -2,7 +2,7 @@ import { ROLE_HELP } from '../lib/roles'
 import { Check, Mail, Pencil, RefreshCw, Trash2, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, copyText, toast } from '../components/ui'
-import { Ago, Avatar, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
+import { Ago, Avatar, ErrorBox, ListSkeleton, PageHeader, useApi, usePaged } from '../components/kit'
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
 import { LinkActions } from '../components/LinkActions'
@@ -35,6 +35,9 @@ export default function Team() {
   }
   async function saveTitle(mid: string, title: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { title } }); toast('Saved'); reload() } catch (e: any) { toast(e.message) } }
   if (error) return <ErrorBox error={error} retry={reload} />
+  const [mq, setMq] = useState(''), [mr, setMr] = useState('')
+  const members = (data?.members || []).filter((m: any) => (!mr || m.role === mr) && (!mq || `${m.name} ${m.email} ${m.title || ''}`.toLowerCase().includes(mq.toLowerCase())))
+  const { rows: memberRows, pager } = usePaged(members, 25, [mq, mr])
   if (!data) return <ListSkeleton rows={4} />
   return (
     <>
@@ -42,9 +45,11 @@ export default function Team() {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
           <Card>
-            <CardHeader title={`Members (${data.members.length})`} />
+            <CardHeader title={`Members (${data.members.length})`} action={data.members.length > 5 && <div className="flex gap-2">
+              <Input type="search" aria-label="Search members" className="!h-9 w-44" placeholder="Search" value={mq} onChange={e => setMq(e.target.value)} />
+              <Select aria-label="Role" className="!h-9 !w-40" value={mr} onChange={e => setMr(e.target.value)}><option value="">All roles</option>{data.roles.map((r: any) => <option key={r.id} value={r.id}>{r.label}</option>)}</Select></div>} />
             <CardBody className="pt-3">
-              <ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.members.map(m => (
+              <ul className="divide-y divide-slate-100 dark:divide-ink-800">{memberRows.map((m: any) => (
                 <li key={m.id} className={`flex flex-wrap items-center gap-3 py-3 ${m.active ? '' : 'opacity-60'}`}>
                   <Avatar name={m.name || m.email} />
                   <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 truncate font-medium">{m.name} {m.you && <span className="text-xs text-slate-500 dark:text-slate-400">(you)</span>}{!m.active && <Badge tone="warning">Access paused</Badge>}</div>
@@ -60,7 +65,7 @@ export default function Team() {
                     <Select aria-label="Role" className="w-40 py-1.5 text-[13px]" value={m.role} onChange={e => changeRole(m.id, e.target.value)}>{data.roles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</Select>
                   ) : <Badge tone={m.role === 'owner' ? 'violet' : 'neutral'}>{m.role_label}</Badge>}
                   {me.can.manage_team && !m.you && <button aria-label={`Remove ${m.name}`} onClick={() => remove(m.id, m.name || m.email)} className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><Trash2 className="size-4" /></button>}
-                </li>))}</ul>
+                </li>))}</ul>{pager}
             </CardBody>
           </Card>
           {data.invites.length > 0 && <Card><CardHeader title="Pending invites" /><CardBody className="pt-3"><ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.invites.map(i => (

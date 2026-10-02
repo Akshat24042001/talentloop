@@ -1,7 +1,7 @@
 import { Briefcase, Copy, MapPin, Plus, Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge, Button, Card, Input, Select } from '../components/ui'
-import { Ago, Empty, ErrorBox, ListSkeleton, PageHeader, useApi } from '../components/kit'
+import { Ago, Empty, ErrorBox, ListSkeleton, PageHeader, useApi, usePaged } from '../components/kit'
 import { useMe } from '../lib/session'
 import { JOB_STATUS } from './labels'
 
@@ -17,6 +17,7 @@ export default function Jobs() {
   const [q, setQ] = useState(''), [st, setSt] = useState(''), [dep, setDep] = useState('')
   const deps = useMemo(() => [...new Set((data || []).map(j => j.department).filter(Boolean))].sort(), [data])
   const rows = (data || []).filter(j => (!st || j.status === st) && (!dep || j.department === dep) && (!q || `${j.title} ${j.department} ${j.location}`.toLowerCase().includes(q.toLowerCase())))
+  const { rows: pageRows, pager } = usePaged(rows, 20, [q, st, dep])
   return (
     <>
       <PageHeader title="Jobs" description={me.can.manage_jobs ? 'Every role you are hiring for. Assign hiring managers from a job’s Team tab.' : 'The jobs you have been given access to.'}
@@ -31,10 +32,10 @@ export default function Jobs() {
         {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <ListSkeleton avatar={false} /> : !rows.length ? (
           data.length ? <p className="p-10 text-center text-sm text-slate-500">No jobs match the filters.</p>
             : <Empty icon={<Briefcase />} title={me.can.manage_jobs ? 'No jobs yet' : 'No jobs assigned to you yet'} action={me.can.manage_jobs && <Button variant="primary" href="/app/jobs/new" icon={<Plus />}>Create your first job</Button>}>
-              {me.can.manage_jobs ? 'Create a job, or load sample data from the dashboard.' : 'HR will give you access to the roles you are hiring for.'}</Empty>
-        ) : (
+              {me.can.manage_jobs ? 'Create your first job: paste or import a JD, or let AI write it.' : 'HR will give you access to the roles you are hiring for.'}</Empty>
+        ) : (<>
           <ul className="divide-y divide-slate-100 dark:divide-ink-800">
-            {rows.map(j => (
+            {pageRows.map(j => (
               <li key={j.id}>
                 <a href={`/app/jobs/${j.ref}`} className="grid gap-3 px-5 py-4 transition-colors hover:bg-slate-50/80 dark:hover:bg-ink-850 md:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto] md:items-center">
                   <div className="min-w-0">
@@ -52,7 +53,8 @@ export default function Jobs() {
               </li>
             ))}
           </ul>
-        )}
+          {pager}
+        </>)}
       </Card>
     </>
   )
