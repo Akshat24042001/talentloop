@@ -43,7 +43,7 @@ export default function MatchCenter() {
                   </div>
                   <ol className="flex-1 divide-y divide-slate-100 dark:divide-ink-800">
                     {j.shortlist.length ? j.shortlist.map((s, i) => (
-                      <li key={s.candidate_id}><a href={`/app/candidates/${s.ref}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-ink-850">
+                      <li key={s.candidate_id}><a href={`/app/jobs/${j.ref}/match/${s.ref}`} title="Open the full match report" className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-ink-850">
                         <span className="tabular w-4 text-xs font-bold text-slate-400">{i + 1}</span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
                         {s.applied && <Badge tone="brand">Applied</Badge>}

@@ -23,6 +23,7 @@ const InterviewReport = lazy(() => import('./app/InterviewReport'))
 const Interviews = lazy(() => import('./app/Interviews'))
 const JobDetail = lazy(() => import('./app/JobDetail'))
 const JobEditor = lazy(() => import('./app/JobEditor'))
+const MatchReport = lazy(() => import('./app/MatchReport'))
 const Jobs = lazy(() => import('./app/Jobs'))
 const MatchCenter = lazy(() => import('./app/MatchCenter'))
 const NewInterview = lazy(() => import('./app/NewInterview'))
@@ -42,6 +43,7 @@ const APP: Route[] = [
   ['/app/jobs/new', () => <JobEditor />, 'New job', 'manage_jobs'],
   ['/app/jobs/:id', p => <JobDetail key={p.id} id={p.id!} />, 'Job'],
   ['/app/jobs/:id/edit', p => <JobEditor key={p.id} id={p.id} />, 'Edit job'],
+  ['/app/jobs/:id/match/:cid', p => <MatchReport key={p.id + p.cid} jobId={p.id!} candId={p.cid!} />, 'Match report'],
   ['/app/candidates', () => <Candidates />, 'Candidates'],
   ['/app/candidates/:id', p => <CandidateDetail key={p.id} id={p.id!} />, 'Candidate'],
   ['/app/matches', () => <MatchCenter />, 'Match center'],

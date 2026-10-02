@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -834,6 +835,24 @@ def job_matches(job_id: str, req: Request, limit: int = 30):
         pending = len(matching.pending_reports(s, job.org_id, [job.id]))
         return {"top_n": top_n, "matched_at": job.matched_at, "pool": s.query(func.count(db.Candidate.id)).filter(db.Candidate.org_id == job.org_id).scalar(),
                 "ai_pending": pending, "ai_budget": st["ai_reports_per_run"], "items": rows, "can_run_ai": perm == "manage"}
+
+
+@router.get("/api/jobs/{job_id}/match/{cid}")
+def match_report(job_id: str, cid: str, req: Request, format: str = "json"):
+    """The full fit report for one candidate and one job (also as a PDF with ?format=pdf)."""
+    from . import match_report as mr
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        job, _ = get_job(s, ctx, job_id)
+        cand = get_candidate(s, ctx, cid)
+        org = s.get(db.Org, job.org_id)
+        st = org_settings(org)
+        d = mr.build(s, job, cand, st["match_weights"], st["match_top_n"])
+        if format == "pdf":
+            name = re.sub(r"[^A-Za-z0-9]+", "-", f"{cand.name}-{job.title}-match").strip("-")[:80] or "match-report"
+            return Response(mr.pdf(d, org.name), media_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"', "Cache-Control": "no-store"})
+        return d
 
 
 @router.get("/api/match/overview")

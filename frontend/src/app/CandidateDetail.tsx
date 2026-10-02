@@ -1,4 +1,4 @@
-import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Pencil, Phone, Trash2, UserPlus, Video } from 'lucide-react'
+import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Pencil, Phone, Trash2, UserPlus, Video, FileBarChart } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Textarea, toast } from '../components/ui'
 import { Ago, Avatar, BackLink, ErrorBox, KV, PageHeader, PageSkeleton, ScoreRing, Tabs, TagInput, useApi } from '../components/kit'
@@ -84,6 +84,7 @@ export default function CandidateDetail({ id }: { id: string }) {
                       <div className="text-xs text-slate-500">{b.department}{b.knocked_out.length ? ` · screened out: ${b.knocked_out.join(', ')}` : ''}</div>
                       <div className="mt-2"><SkillChips b={b.breakdown} /></div>
                     </div>
+                    <Button size="sm" variant="ghost" icon={<FileBarChart />} href={`/app/jobs/${b.job_ref}/match/${c.ref}`}>Full report</Button>
                     {me.can.manage_jobs && <Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${b.job_ref}&candidate=${c.ref}`}>Interview</Button>}
                   </div>
                   <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,300px)_1fr]"><BreakdownBars b={b.breakdown} />{b.ai_report ? <ReportView r={b.ai_report} compact /> : <p className="self-center text-xs text-slate-500">AI reports are written for each job's shortlist only.</p>}</div>

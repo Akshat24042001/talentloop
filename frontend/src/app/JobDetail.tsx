@@ -1,4 +1,4 @@
-import { Copy, Download, ExternalLink, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, Users, Video, X } from 'lucide-react'
+import { Copy, Download, ExternalLink, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, Users, Video, X, FileBarChart } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Select, Tip, toast } from '../components/ui'
 import { Ago, Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, PageSkeleton, ScoreRing, Tabs, useApi } from '../components/kit'
@@ -168,6 +168,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
         </div>
         <div className="flex flex-wrap gap-2">
           {!compact || open ? null : <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>Details</Button>}
+          <Button size="sm" variant="ghost" icon={<FileBarChart />} href={`/app/jobs/${job.ref}/match/${c.ref}`}>Full report</Button>
           {canManage && !m.application && <Button size="sm" icon={<UserPlus />} onClick={() => onAdd(c)}>Shortlist</Button>}
           {canManage && <Tip label="Send an AI first-round interview"><Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${job.ref}&candidate=${c.ref}${m.application ? `&application=${m.application.ref || m.application.id}` : ''}`}>Interview</Button></Tip>}
         </div>

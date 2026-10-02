@@ -235,6 +235,14 @@ check("model failure on a full answer never moves on", brain._fallback(mk(long_)
 check("model failure when the candidate doesn't know keeps probing", brain._fallback(mk("Sorry, I don't know this one."), pl)["action"] == "follow_up")
 check("integrity warning numbering says 'second' for a third warning", "third" not in brain.integrity_message({"candidate_name": "A B", "questions": []}, "window_blur", 3, 3)[0])
 
+# detailed match report: JSON for the page, PDF download, scoped to the company
+mc = ok(hr.post("/api/candidates", json={"name": "Report Person", "email": "rp@m.test", "resume_text": "Excel reporting, customer support 3 years, Pune"}))
+rep_ = hr.get(f"/api/jobs/{job['id']}/match/{mc['id']}")
+check("the match report endpoint fails", rep_.status_code != 200 or not rep_.json().get("signals"), rep_.text[:200])
+pdf_ = hr.get(f"/api/jobs/{job['id']}/match/{mc['id']}?format=pdf")
+check("the match report PDF download fails", pdf_.status_code != 200 or not pdf_.content.startswith(b"%PDF"), str(pdf_.status_code))
+check("another company can read a match report", other.get(f"/api/jobs/{job['id']}/match/{mc['id']}").status_code != 404)
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")
