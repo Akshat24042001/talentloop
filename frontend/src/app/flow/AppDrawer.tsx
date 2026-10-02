@@ -12,6 +12,7 @@ import { ROUND_ICON } from './FlowBuilder'
 import { ReasonModal } from './Board'
 import { REC_TONE, STATUS_TONE, type Round, type RoundSummary } from './types'
 import { LinkActions } from '../../components/LinkActions'
+import { ask } from '../../components/dialogs'
 
 interface Msg { id: string; channel: string; to: string; subject: string; body: string; template: string; status: string; error: string; created_at: number; sent_at: number | null }
 interface Detail {
@@ -22,13 +23,19 @@ interface Detail {
   human_requested_at: number | null; human_request_note: string; accommodation: Record<string, any> | null; status_link: string; messages: Msg[]
 }
 
-export default function AppDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+export default function AppDrawer({ id, onClose, onChanged, onMoving }: { id: string; onClose: () => void; onChanged: () => void; onMoving?: (id: string, roundId?: string) => void }) {
   const me = useMe()
   const { data, error, reload } = useApi<Detail>(`/api/applications/${id}`)
   const [reject, setReject] = useState(false)
   const refresh = () => { reload(); onChanged() }
+  const [busy, setBusy] = useState('')
+  const LABEL: Record<string, string> = { pass: 'Passed', hold: 'On hold', select: 'Selected', start: 'Started', move: 'Moved' }
   async function decide(action: string, extra: Record<string, unknown> = {}) {
-    try { await api(`/api/applications/${id}/decide`, { json: { action, ...extra } }); toast('Done'); refresh() } catch (e: any) { toast(e.message) }
+    if (busy) return                               // one action at a time: no double moves
+    setBusy(action)
+    if (action === 'move' || action === 'pass' || action === 'start') onMoving?.(data?.id || id, extra.round_id as string | undefined)
+    try { await api(`/api/applications/${id}/decide`, { json: { action, ...extra } }); toast(`${data?.candidate.name || 'Candidate'}: ${LABEL[action] || 'Done'}`) } catch (e: any) { toast(e.message) }
+    await reload(); onChanged(); setBusy('')
   }
   const canEdit = data && data.permission !== 'view'
   const closed = data && ['rejected', 'withdrawn', 'offer', 'hired'].includes(data.stage)
@@ -51,14 +58,15 @@ export default function AppDrawer({ id, onClose, onChanged }: { id: string; onCl
             {canEdit && !closed && (
               <div className="flex flex-wrap gap-2 border-b border-slate-100 px-5 py-3 dark:border-ink-800">
                 {data.round_id && cur?.result?.status === 'pending' ? <>
-                  <Button size="sm" variant="primary" icon={<Play />} onClick={() => decide('move', { round_id: cur.round.id })}>Start {cur.round.name}</Button>
+                  <Button size="sm" variant="primary" icon={<Play />} loading={busy === 'move'} disabled={!!busy} onClick={() => decide('move', { round_id: cur.round.id })}>Start {cur.round.name}</Button>
                 </> : data.round_id ? <>
-                  <Button size="sm" variant="primary" icon={<Check />} onClick={() => decide('pass')}>Pass {cur?.round.name || 'round'}</Button>
-                  <Button size="sm" icon={<Hand />} onClick={() => decide('hold')}>Hold</Button>
-                </> : <Button size="sm" variant="primary" onClick={() => decide('start')}>Start the flow</Button>}
-                <Select aria-label="Move to round" className="!h-8 !w-48 !py-0 text-[13px]" value="" onChange={e => e.target.value && decide('move', { round_id: e.target.value })}>
+                  <Button size="sm" variant="primary" icon={<Check />} loading={busy === 'pass'} disabled={!!busy} onClick={() => decide('pass')}>Pass {cur?.round.name || 'round'}</Button>
+                  <Button size="sm" icon={<Hand />} loading={busy === 'hold'} disabled={!!busy} onClick={() => decide('hold')}>Hold</Button>
+                </> : <Button size="sm" variant="primary" loading={busy === 'start'} disabled={!!busy} onClick={() => decide('start')}>Start the flow</Button>}
+                <Select aria-label="Move to round" disabled={!!busy} className="!h-8 !w-48 !py-0 text-[13px]" value="" onChange={e => e.target.value && decide('move', { round_id: e.target.value })}>
                   <option value="">Move to round…</option>{data.rounds.slice(1).map(r => <option key={r.round.id} value={r.round.id}>{r.round.name}</option>)}</Select>
-                <Button size="sm" variant="subtle" onClick={() => confirm(`Select ${data.candidate.name} for ${data.job.title}?`) && decide('select')}>Select</Button>
+                <Button size="sm" variant="subtle" loading={busy === 'select'} disabled={!!busy} onClick={async () => await ask(`Select ${data.candidate.name} for ${data.job.title}?`) && decide('select')}>Select</Button>
+                {busy === 'move' && <span className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"><Spinner className="size-3.5" />Moving…</span>}
                 <Button size="sm" variant="ghost" className="text-red-600" onClick={() => setReject(true)}>Reject</Button>
               </div>)}
             <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
@@ -73,7 +81,7 @@ export default function AppDrawer({ id, onClose, onChanged }: { id: string; onCl
               {data.status_link && <LinkActions url={data.status_link} label="Status link" copied="Status page link copied" to={data.candidate}
                 subject={`Your application for ${data.job.title}`} message={`Hi ${data.candidate.name.split(' ')[0]}, you can follow your application for ${data.job.title} here:`} />}
               {data.permission === 'manage' && <Button size="sm" variant="ghost" className="ml-auto text-red-600" icon={<Trash2 />} onClick={async () => {
-                if (!confirm(`Remove ${data.candidate.name} from ${data.job.title}? They stay in your talent pool.`)) return
+                if (!await ask(`Remove ${data.candidate.name} from ${data.job.title}? They stay in your talent pool.`)) return
                 try { await api(`/api/applications/${data.id}`, { method: 'DELETE' }); toast('Removed from the job'); onChanged(); onClose() } catch (e: any) { toast(e.message) }
               }}>Remove from job</Button>}
             </footer>
@@ -122,7 +130,7 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
                 subject={`${r.round.name}: ${d.job.title}`} message={`Hi ${d.candidate.name.split(' ')[0]}, here is your link for the ${r.round.name} step of your application for ${d.job.title}:`} />}
               {['test', 'video_intro', 'role_task', 'practical_task', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
                 <Button size="sm" icon={<RefreshCw />} onClick={() => act('resend', r.round.type === 'manager_approval' ? 'Approval request sent again' : 'Link sent again')}>Resend</Button>}
-              {['test', 'video_intro', 'role_task', 'practical_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={() => confirm('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
+              {['test', 'video_intro', 'role_task', 'practical_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={async () => await ask('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
               {res.score != null || ['submitted', 'on_hold', 'passed', 'failed'].includes(res.status) ? (score == null ? <Button size="sm" variant="ghost" onClick={() => setScore(String(res.score ?? ''))}>Change score</Button>
                 : <span className="flex items-center gap-1.5"><Input aria-label="New score" type="number" min={0} max={100} className="h-8 w-20" value={score} onChange={e => setScore(e.target.value)} /><Button size="sm" variant="primary" onClick={saveScore}>Save</Button><Button size="sm" variant="ghost" onClick={() => setScore(null)}>Cancel</Button></span>) : null}
               {res.manager_link && <LinkActions url={res.manager_link} icon={<Link2 className="size-3.5" />} label={r.round.type === 'human_interview' ? 'Interviewer feedback link' : 'Decision link'}

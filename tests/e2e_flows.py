@@ -5,6 +5,7 @@ drive. A student registers with a live photo, takes the proctored test, records 
 decides from the no-login link; the student books a human interview; the interviewer gives feedback. HR uses the
 pipeline board and drawer, and every new page loads. Fails on any browser JS error or server traceback."""
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,8 @@ def main():
             def new(viewport=None):
                 ctx = browser.new_context(viewport=viewport or {"width": 1440, "height": 900}, permissions=["camera", "microphone"])
                 pg = ctx.new_page()
+                # Our confirmations are styled dialogs now (not window.confirm): accept them like the native ones were.
+                pg.add_locator_handler(pg.locator("#ask-ok"), lambda: pg.locator("#ask-ok").click(), no_wait_after=True)
                 pg.on("pageerror", lambda e: errors.append(f"{pg.url}: {e}"))
                 pg.on("console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(f"{pg.url}: console {m.text}"))
                 pg.on("dialog", lambda d: d.accept())
@@ -164,7 +167,7 @@ def main():
             expect(hr.get_by_alt_text("Registration photo")).to_be_visible()
             shot(hr, "f07-drawer-test")
             pick(hr, hr.get_by_role("combobox", name="Move to round"), "Video introduction")
-            expect(hr.get_by_text("Done", exact=True)).to_be_visible()
+            expect(hr.get_by_text(re.compile(r": (Passed|Moved|Selected|On hold|Started|Done)$"))).to_be_visible()
             hr.keyboard.press("Escape")
 
             # ------------------------------------------------ student: video introduction with the fake camera
@@ -187,7 +190,7 @@ def main():
             expect(hr.locator("video").first).to_be_visible()
             hr.get_by_role("button", name="2×").click()
             pick(hr, hr.get_by_role("combobox", name="Move to round"), "Manager approval")
-            expect(hr.get_by_text("Done", exact=True)).to_be_visible()
+            expect(hr.get_by_text(re.compile(r": (Passed|Moved|Selected|On hold|Started|Done)$"))).to_be_visible()
             hr.keyboard.press("Escape")
             det = api(hr, f"/api/applications/{app['id']}")
             mr = next(r for r in det["rounds"] if r["round"]["type"] == "manager_approval")

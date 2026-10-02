@@ -12,6 +12,7 @@ import FlowBuilder from './flow/FlowBuilder'
 import { JobDrives } from './Drives'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 import { LinkActions } from '../components/LinkActions'
+import { ask } from '../components/dialogs'
 
 interface Job {
   id: string; ref: string; title: string; department: string; status: string; top_n: number; location: string; employment_type: string; experience: string; salary: string
@@ -29,7 +30,7 @@ export default function JobDetail({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>((query.get('tab') as Tab) || 'matches')
   const { data: job, error, reload } = useApi<Job>(`/api/jobs/${id}`)
   const me = useMe()
-  const switchTab = (t: Tab) => { if (t === tab || !canLeave()) return; setLeaveGuard(null); setTab(t); navigate(`/app/jobs/${id}?tab=${t}`, { replace: true, keepScroll: true, force: true }) }
+  const switchTab = async (t: Tab) => { if (t === tab || !(await canLeave())) return; setLeaveGuard(null); setTab(t); navigate(`/app/jobs/${id}?tab=${t}`, { replace: true, keepScroll: true, force: true }) }
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!job) return <PageSkeleton />
   const st = JOB_STATUS[job.status]!
@@ -72,7 +73,7 @@ function Overview({ job }: { job: Job }) {
   const { data: jd } = useApi<JD>(`/api/jobs/${job.id}/jd`)
   const me = useMe()
   async function dup() { const r = await api(`/api/jobs/${job.id}/duplicate`, { method: 'POST' }); toast('Copied as a new draft'); navigate(`/app/jobs/${r.ref}/edit`) }
-  async function del() { if (!confirm(`Delete "${job.title}" with its applications and matches? Candidates stay in your pool.`)) return; await api(`/api/jobs/${job.id}`, { method: 'DELETE' }); toast('Job deleted'); navigate('/app/jobs') }
+  async function del() { if (!await ask(`Delete "${job.title}" with its applications and matches? Candidates stay in your pool.`)) return; await api(`/api/jobs/${job.id}`, { method: 'DELETE' }); toast('Job deleted'); navigate('/app/jobs') }
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <Card className="p-6 sm:p-8">

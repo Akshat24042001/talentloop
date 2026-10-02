@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
 import { useMe, useSession } from '../lib/session'
 import HiringSettings from './HiringSettings'
+import { ask } from '../components/dialogs'
 
 type Tab = 'company' | 'careers' | 'hiring' | 'matching' | 'data'
 const W_LABEL: Record<string, string> = { skills: 'Skills', experience: 'Experience', relevance: 'Keyword relevance', location: 'Location', logistics: 'Notice & salary' }
@@ -97,7 +98,7 @@ function OrgSettings({ tab }: { tab: string }) {
 function DataTab({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   async function clear() {
-    if (!confirm('Remove all sample jobs and sample candidates? Your own data is kept.')) return
+    if (!await ask('Remove all sample jobs and sample candidates? Your own data is kept.')) return
     setBusy(true)
     try { const r = await api('/api/demo/clear', { method: 'POST' }); toast(`Removed ${r.jobs} jobs and ${r.candidates} candidates`); onDone() } catch (e: any) { toast(e.message) }
     setBusy(false)

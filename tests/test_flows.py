@@ -27,6 +27,16 @@ def run(coro):
     return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
 
 
+def settle():
+    """Let a tick started by a request (worker.kick) finish, then run one more."""
+    import time as _t
+    for _ in range(200):
+        if not worker._running.locked():
+            break
+        _t.sleep(0.05)
+    run(worker.tick())
+
+
 def tok(link: str) -> str:
     return link.rstrip("/").rsplit("/", 1)[1]
 
@@ -86,7 +96,7 @@ def experienced(c, slug, me_id):
     assert any("must-have" in x for x in cv["reasons"]) and cv["stability"]["level"] in ("high", "medium", "unknown"), cv
     # HR passes CV screening -> AI interview round is prepared in the background
     ok(c.post(f"/api/applications/{item['id']}/decide", json={"action": "pass"}))
-    run(worker.tick())
+    settle()
     det = ok(c.get(f"/api/applications/{item['id']}"))
     ai = det["rounds"][2]
     assert ai["result"]["status"] == "invited" and ai["data"]["interview_id"], ai
@@ -210,7 +220,7 @@ def campus(c, slug):
                     data={"meta": json.dumps({"duration": 75, "transcript": "Hello, I am Kiran. I studied mechanical engineering and I enjoy talking to "
                                               "customers about technology products and solving their problems quickly.", "attempts": 2})}))
     assert student.post(f"/api/r/{vt}/recording", files={"video": ("v.webm", b"0" * 5000, "video/webm")}).status_code == 409
-    run(worker.tick())
+    settle()
     det = ok(c.get(f"/api/applications/{me['id']}"))
     a = det["rounds"][2]["data"]["assessment"]
     assert det["rounds"][2]["result"]["score"] == 70.0 and a["wpm"] and a["dimensions"]["fluency"] == 4, a
@@ -318,7 +328,7 @@ def live_edit_and_bulk(c, slug):
     assert TestClient(app).get(f"/api/r/{t}/attachment").status_code == 200
     assert TestClient(app).post(f"/api/r/{t}/upload", files={"file": ("a.exe", b"MZ", "application/octet-stream")}).status_code == 400
     ok(TestClient(app).post(f"/api/r/{t}/upload", files={"file": ("answer.xlsx", buf.getvalue(), "application/vnd.ms-excel")}))
-    run(worker.tick())
+    settle()
     det = ok(c.get(f"/api/applications/{items[0]['id']}"))
     assert det["rounds"][2]["result"]["score"] == 70.0 and det["rounds"][2]["data"]["assessment"]["criteria"][0]["criterion"] == "Correctness"
     # remove the practical task round while the other candidate sits in it

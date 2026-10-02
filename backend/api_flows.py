@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy import func
 
 from . import assessments, auth, db, flows, messages, refs, scheduling, store, worker
+from .offload import offload
 from .api_accounts import log_activity, org_settings
 from .api_hiring import STAGE_LABEL, cand_summary, ctx_of, get_job, LIST_COLS
 
@@ -60,6 +61,7 @@ def _team(s, ctx) -> list[dict]:
 
 
 @router.put("/api/jobs/{job_id}/flow")
+@offload
 async def put_flow(job_id: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -71,6 +73,7 @@ async def put_flow(job_id: str, req: Request):
 
 
 @router.post("/api/jobs/{job_id}/flow/template")
+@offload
 async def use_template(job_id: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -98,6 +101,7 @@ def list_templates(req: Request):
 
 
 @router.post("/api/flow-templates")
+@offload
 async def create_template(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -119,6 +123,7 @@ async def create_template(req: Request):
 
 
 @router.patch("/api/flow-templates/{tid}")
+@offload
 async def update_template(tid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -215,6 +220,7 @@ def _do(s, ctx, a, job, action: str, round_id: str = "", reason: str = "", notif
 
 
 @router.post("/api/applications/{aid}/decide")
+@offload
 async def decide_application(aid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -228,6 +234,7 @@ async def decide_application(aid: str, req: Request):
 
 
 @router.post("/api/applications/bulk")
+@offload
 async def bulk(req: Request):
     body = await req.json()
     ids = [str(x) for x in (body.get("ids") or [])][:500]
@@ -256,6 +263,7 @@ async def bulk(req: Request):
 
 
 @router.post("/api/jobs/{job_id}/rounds/{rid}/top-n")
+@offload
 async def apply_top_n(job_id: str, rid: str, req: Request):
     """Pass the best N results in a round (by score) and, if asked, reject the rest."""
     body = await req.json() if (await req.body()) else {}
@@ -368,6 +376,7 @@ def reset_attempt(rrid: str, req: Request):
 
 
 @router.post("/api/round-results/{rrid}/score")
+@offload
 async def override_score(rrid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -595,6 +604,7 @@ def list_questions(req: Request, section: str = "", difficulty: str = "", q: str
 
 
 @router.post("/api/questions")
+@offload
 async def create_question(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -615,6 +625,7 @@ async def create_question(req: Request):
 
 
 @router.patch("/api/questions/{qid}")
+@offload
 async def update_question(qid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -828,6 +839,7 @@ def _create_drive(req: Request, body: dict, keys: list) -> dict:
 
 
 @router.patch("/api/drives/{did}")
+@offload
 async def update_drive(did: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -889,6 +901,7 @@ def list_slots(job_id: str, rid: str, req: Request):
 
 
 @router.post("/api/jobs/{job_id}/rounds/{rid}/slots")
+@offload
 async def create_slots(job_id: str, rid: str, req: Request):
     """Add availability: either explicit slots, or a series (start, end, minutes per slot, days)."""
     body = await req.json()
@@ -988,6 +1001,7 @@ def candidate_requests(req: Request):
 
 
 @router.post("/api/applications/{aid}/accommodation")
+@offload
 async def decide_accommodation(aid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -1011,6 +1025,7 @@ async def decide_accommodation(aid: str, req: Request):
 
 
 @router.post("/api/applications/{aid}/human-request")
+@offload
 async def handle_human_request(aid: str, req: Request):
     """HR handles a request for a human interview: switch the AI round to a human round, or keep the AI round."""
     body = await req.json()

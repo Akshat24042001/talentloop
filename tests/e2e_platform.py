@@ -4,6 +4,7 @@ Sign-up, sample data, jobs, the JD editor, matches with AI reports, pipeline, ca
 invites with a hiring manager who edits only their job, settings, the careers page and applying, and the
 platform admin console. Fails on any browser JS error or server traceback. Desktop and phone sizes."""
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,8 @@ def main():
             def new(viewport=None):
                 ctx = browser.new_context(viewport=viewport or {"width": 1440, "height": 900})
                 pg = ctx.new_page()
+                # Our confirmations are styled dialogs now (not window.confirm): accept them like the native ones were.
+                pg.add_locator_handler(pg.locator("#ask-ok"), lambda: pg.locator("#ask-ok").click(), no_wait_after=True)
                 pg.on("pageerror", lambda e: errors.append(f"{pg.url}: {e}"))
                 pg.on("console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(f"{pg.url}: console {m.text}"))
                 return ctx, pg
@@ -78,7 +81,7 @@ def main():
             shot(pg, "06-job-pipeline")
             col.locator("article button").first.click()
             pg.get_by_role("button", name="Pass AI CV screening").click()
-            expect(pg.get_by_text("Done", exact=True)).to_be_visible()
+            expect(pg.get_by_text(re.compile(r": (Passed|Moved|Selected|On hold|Started|Done)$"))).to_be_visible()
             pg.keyboard.press("Escape")
             pg.get_by_role("tab", name="Job description").click()
             expect(pg.get_by_role("heading", name="Senior Backend Engineer", level=2)).to_be_visible()

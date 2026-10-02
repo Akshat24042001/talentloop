@@ -8,6 +8,7 @@ import { setLeaveGuard } from '../../lib/router'
 import { when } from '../../lib/format'
 import { LANGUAGES, PASS_LABEL, SHORT_LABEL, newRound, type FlowMeta, type Round, type RoundType, type TeamMember } from './types'
 import { DatePicker, MINUTE_PRESETS, Stepper, TimePicker } from '../../components/pickers'
+import { ask } from '../../components/dialogs'
 
 export const ROUND_ICON: Record<RoundType, typeof Bot> = {
   application: ClipboardList, cv_screening: FileCheck2, test: ListChecks, video_intro: Video, role_task: Mic, practical_task: FileUp,
@@ -27,7 +28,7 @@ export default function FlowBuilder({ jobId, canEdit, canManage = false }: { job
     if (!dirty) return
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
     window.addEventListener('beforeunload', warn)
-    setLeaveGuard(() => confirm('You have unsaved changes to the hiring flow. Leave without saving them?'))
+    setLeaveGuard(async () => await ask('You have unsaved changes to the hiring flow. Leave without saving them?'))
     return () => { window.removeEventListener('beforeunload', warn); setLeaveGuard(null) }
   }, [dirty])
   if (error || e1) return <ErrorBox error={error || e1} retry={reload} />
@@ -42,9 +43,9 @@ export default function FlowBuilder({ jobId, canEdit, canManage = false }: { job
     if (from === 0 || to < 1 || to > rounds.length - 1 || from === to) return
     const next = [...rounds]; const [r] = next.splice(from, 1); next.splice(to, 0, r!); change(next)
   }
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     const n = data.counts[id] || 0
-    if (n && !confirm(`${n} candidate(s) are in this round. They will continue to the round that follows it. Remove it?`)) return
+    if (n && !await ask(`${n} candidate(s) are in this round. They will continue to the round that follows it. Remove it?`)) return
     change(rounds.filter(r => r.id !== id)); if (sel === id) setSel(rounds[0]!.id)
   }
   function drop(at: number) {
@@ -343,7 +344,7 @@ function Templates({ canManage, meta, jobId, rounds, dirty, onClose, onApplied }
   const [name, setName] = useState(''), [desc, setDesc] = useState(''), [busy, setBusy] = useState('')
   const [list, setList] = useState(meta.templates)
   async function apply(id: string) {
-    if (!confirm('Replace this job\'s flow with the template? Candidates already in a round continue from their position.')) return
+    if (!await ask('Replace this job\'s flow with the template? Candidates already in a round continue from their position.')) return
     setBusy(id)
     try {
       const r = await api(`/api/jobs/${jobId}/flow/template`, { json: { template: id } })
@@ -357,7 +358,7 @@ function Templates({ canManage, meta, jobId, rounds, dirty, onClose, onApplied }
     setBusy('')
   }
   async function del(id: string) {
-    if (!confirm('Delete this template? Jobs that used it keep their flow.')) return
+    if (!await ask('Delete this template? Jobs that used it keep their flow.')) return
     try { await api(`/api/flow-templates/${id}`, { method: 'DELETE' }); setList(l => l.filter(t => t.id !== id)) } catch (e: any) { toast(e.message) }
   }
   return (

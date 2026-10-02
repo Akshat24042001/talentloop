@@ -5,6 +5,7 @@ import { Ago, CardsSkeleton, ErrorBox, Loading, PageHeader, Tabs, useApi } from 
 import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { SampleData, SystemStatus } from './System'
+import { ask } from '../components/dialogs'
 
 interface Overview { orgs: number; users: number; active_users_7d: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; ai_calls_30d: number; signups_30d: number[]; storage: { s3: boolean; database: string } }
 interface OrgRow { id: string; name: string; slug: string; created_at: number; disabled: boolean; owner: string; members: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; last_activity?: number }
@@ -19,9 +20,9 @@ export default function Admin() {
   if (ov.error) return <ErrorBox error={ov.error} />
   const d = ov.data
   const max = Math.max(1, ...(d?.signups_30d || [0]))
-  async function toggleOrg(o: OrgRow) { if (!confirm(`${o.disabled ? 'Enable' : 'Disable'} ${o.name}?`)) return; await api(`/api/admin/orgs/${o.id}`, { method: 'PATCH', json: { disabled: !o.disabled } }); toast('Updated'); orgs.reload() }
+  async function toggleOrg(o: OrgRow) { if (!await ask(`${o.disabled ? 'Enable' : 'Disable'} ${o.name}?`)) return; await api(`/api/admin/orgs/${o.id}`, { method: 'PATCH', json: { disabled: !o.disabled } }); toast('Updated'); orgs.reload() }
   async function toggleUser(u: UserRow) {
-    if (!confirm(`${u.disabled ? 'Enable' : 'Disable'} ${u.email}?${u.disabled ? '' : ' They are signed out everywhere.'}`)) return
+    if (!await ask(`${u.disabled ? 'Enable' : 'Disable'} ${u.email}?${u.disabled ? '' : ' They are signed out everywhere.'}`)) return
     try { await api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: { disabled: !u.disabled } }); toast('Updated'); users.reload() } catch (e: any) { toast(e.message) }
   }
   const qq = q.toLowerCase()

@@ -9,6 +9,7 @@ import { useMe } from '../lib/session'
 import type { Cand } from './JobDetail'
 import { ACTION_LABEL, SOURCE_LABEL, STAGE_TONE, actor } from './labels'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
+import { ask } from '../components/dialogs'
 
 interface Detail extends Cand {
   tags: string[]; resume_name?: string; resume_type?: string; resume_v?: string; college?: string; created_at: number; profile: Record<string, any>; parsed: Record<string, any>; resume_text: string
@@ -31,7 +32,7 @@ export default function CandidateDetail({ id }: { id: string }) {
   async function add() {
     try { await api(`/api/jobs/${addTo}/applications`, { json: { candidate_id: c!.id } }); toast('Added to the job'); setAddTo(''); reload() } catch (e: any) { toast(e.message) }
   }
-  async function del() { if (!confirm(`Delete ${c!.name} and their resume? This cannot be undone.`)) return; await api(`/api/candidates/${id}`, { method: 'DELETE' }); toast('Deleted'); navigate('/app/candidates') }
+  async function del() { if (!await ask(`Delete ${c!.name} and their resume? This cannot be undone.`)) return; await api(`/api/candidates/${id}`, { method: 'DELETE' }); toast('Deleted'); navigate('/app/candidates') }
   async function saveTags(tags: string[]) { try { await api(`/api/candidates/${id}`, { method: 'PATCH', json: { tags } }); reload() } catch (e: any) { toast(e.message) } }
   const notApplied = c.best_jobs.filter(b => !c.applications.some(a => a.job_id === b.job_id))
   return (

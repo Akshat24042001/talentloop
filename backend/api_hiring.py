@@ -13,6 +13,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import defer
 
 from . import auth, db, docs_pdf, jd_schema, llm, matching, refs, resumes, skills, store
+from .offload import offload
 from .api_accounts import log_activity, org_settings
 
 router = APIRouter()
@@ -117,6 +118,7 @@ def list_jobs(req: Request, status: str = "", q: str = ""):
 
 
 @router.post("/api/jobs")
+@offload
 async def create_job(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -162,6 +164,7 @@ def get_job_api(job_id: str, req: Request):
 
 
 @router.patch("/api/jobs/{job_id}")
+@offload
 async def update_job(job_id: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -300,6 +303,7 @@ async def ai_write(job_id: str, req: Request):
 # collaborators and activity
 # ---------------------------------------------------------------------------
 @router.post("/api/jobs/{job_id}/collaborators")
+@offload
 async def add_collaborator(job_id: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -522,6 +526,7 @@ async def upload_resumes(req: Request, files: list[UploadFile] = File(...)):
 
 
 @router.post("/api/candidates")
+@offload
 async def create_candidate(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -571,6 +576,7 @@ def candidate_detail(cid: str, req: Request):
 
 
 @router.patch("/api/candidates/{cid}")
+@offload
 async def update_candidate(cid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -700,6 +706,7 @@ def job_applications(job_id: str, req: Request):
 
 
 @router.post("/api/jobs/{job_id}/applications")
+@offload
 async def add_to_job(job_id: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -722,6 +729,7 @@ async def add_to_job(job_id: str, req: Request):
 
 
 @router.patch("/api/applications/{aid}")
+@offload
 async def update_application(aid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -795,6 +803,7 @@ def _stale(s, job: db.Job, latest: float | None = None) -> bool:
 
 
 @router.post("/api/match/run")
+@offload
 async def match_run(req: Request):
     body = await req.json() if (await req.body()) else {}
     with db.session() as s:

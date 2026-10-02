@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Switch, Textar
 import { Empty, ErrorBox, ListSkeleton, PageHeader, Pager, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
+import { ask } from '../components/dialogs'
 
 interface Q { id?: string; section: string; section_label?: string; difficulty: string; kind: 'single' | 'multiple' | 'numeric'; text: string; options: string[]; answer: number[]; marks: number; explanation: string; active?: boolean; tags?: string[] }
 interface List { total: number; items: Q[]; stats: Record<string, Record<string, number>>; sections: { id: string; label: string }[] }
@@ -20,7 +21,7 @@ export default function QuestionBank() {
   const canEdit = me.can.manage_jobs
   if (error) return <ErrorBox error={error} retry={reload} />
   async function toggle(q: Q) { try { await api(`/api/questions/${q.id}`, { method: 'PATCH', json: { active: !q.active } }); reload() } catch (e: any) { toast(e.message) } }
-  async function del(q: Q) { if (!confirm('Delete this question? Papers already given keep their copy of the score.')) return; try { await api(`/api/questions/${q.id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
+  async function del(q: Q) { if (!await ask('Delete this question? Papers already given keep their copy of the score.')) return; try { await api(`/api/questions/${q.id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
   async function sample() { try { const r = await api('/api/questions/sample', { method: 'POST' }); toast(`${r.created} starter questions added`); reload() } catch (e: any) { toast(e.message) } }
   const sections = data?.sections || []
   const totals = Object.entries(data?.stats || {})

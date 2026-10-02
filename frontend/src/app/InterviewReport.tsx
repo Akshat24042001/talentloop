@@ -7,6 +7,7 @@ import { Alert, Badge, Button, Card, CardBody, CardHeader, Select, Spinner, Text
 import { api, mediaUrl, withKey } from '../lib/api'
 import { REC_DETAIL, REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, TYPE_LABEL, initials, mb, mmss, norm, short, when } from '../lib/format'
 import { LinkActions } from '../components/LinkActions'
+import { ask } from '../components/dialogs'
 
 let iid = ''
 const REASON_LABEL: Record<string, string> = { reference: 'Start of interview', periodic: 'Routine', tab_hidden: 'Left the interview tab', window_blur: 'Switched to another window',
@@ -79,9 +80,9 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
   async function act(kind: 'score' | 'close' | 'delete' | 'save') {
     try {
       if (kind === 'score') { setBusy('score'); await api(`/api/interviews/${iid}/score`, { method: 'POST' }); toast('Scoring started'); setTimeout(reload, 1500) }
-      if (kind === 'close') { if (!confirm('Close this interview? The candidate will not be able to continue.')) return; await api(`/api/interviews/${iid}/close`, { method: 'POST' }); reload() }
+      if (kind === 'close') { if (!await ask('Close this interview? The candidate will not be able to continue.')) return; await api(`/api/interviews/${iid}/close`, { method: 'POST' }); reload() }
       if (kind === 'delete') {
-        if (!confirm('Permanently delete this interview, its transcript, report, snapshots and recordings from this server and its storage? Vapi and the AI provider keep their own copies under their retention policies.')) return
+        if (!await ask('Permanently delete this interview, its transcript, report, snapshots and recordings from this server and its storage? Vapi and the AI provider keep their own copies under their retention policies.')) return
         await api(`/api/interviews/${iid}`, { method: 'DELETE' }); location.href = '/app/interviews'
       }
       if (kind === 'save') {

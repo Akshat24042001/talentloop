@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { navigate } from '../lib/router'
 import { useMe, useSession } from '../lib/session'
 import { DatePicker } from '../components/pickers'
+import { ask } from '../components/dialogs'
 
 interface FieldDef {
   key: string; label: string; type: string; required?: boolean; required_unless?: Record<string, unknown>; show_if?: Record<string, unknown>
@@ -208,7 +209,7 @@ function Benefits({ value, onChange }: { value: string[]; onChange: (v: string[]
     setBusy(false)
   }
   async function remove(x: string) {
-    if (!confirm(`Remove "${x}" from your company's benefits list? Jobs that already list it keep it until you edit them.`)) return
+    if (!await ask(`Remove "${x}" from your company's benefits list? Jobs that already list it keep it until you edit them.`)) return
     try { const r = await api('/api/org/benefits', { json: { remove: x } }); setList(r.benefits); refresh() } catch (e: any) { toast(e.message) }
   }
   return (

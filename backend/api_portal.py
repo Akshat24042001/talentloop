@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from . import assessments, auth, db, flows, jd_schema, matching, refs, resumes, scheduling, store, worker
+from .offload import offload
 from .api_accounts import org_settings
 
 router = APIRouter()
@@ -250,6 +251,7 @@ def test_section(token: str, req: Request):
 
 
 @router.post("/api/r/{token}/test/answer")
+@offload
 async def test_answer(token: str, req: Request):
     _limit(req, "answer", 2000)
     body = await req.json()
@@ -304,6 +306,7 @@ def _candidate_result(rr, job, res) -> dict | None:
 
 
 @router.post("/api/r/{token}/event")
+@offload
 async def round_event(token: str, req: Request):
     _limit(req, "event", 600)
     body = await req.json()
@@ -423,6 +426,7 @@ async def task_upload(token: str, req: Request, file: UploadFile = File(...), no
 
 # ---- human interview booking
 @router.post("/api/r/{token}/book")
+@offload
 async def book_slot(token: str, req: Request):
     _limit(req, "book", 30)
     body = await req.json()
@@ -465,6 +469,7 @@ def booking_ics(token: str):
 
 # ---- transparency actions on a round
 @router.post("/api/r/{token}/request-human")
+@offload
 async def request_human(token: str, req: Request):
     _limit(req, "human", 10, 3600)
     body = await req.json() if (await req.body()) else {}
@@ -558,6 +563,7 @@ def ROUND_FACING(r: dict) -> bool:          # noqa: N802
 
 
 @router.post("/api/status/{token}/accommodation")
+@offload
 async def request_accommodation(token: str, req: Request):
     _limit(req, "acc", 10, 3600)
     body = await req.json()
@@ -576,6 +582,7 @@ async def request_accommodation(token: str, req: Request):
 
 
 @router.post("/api/status/{token}/human")
+@offload
 async def status_request_human(token: str, req: Request):
     body = await req.json() if (await req.body()) else {}
     with db.session() as s:
@@ -595,6 +602,7 @@ def withdraw(token: str, req: Request):
 
 
 @router.post("/api/status/{token}/delete")
+@offload
 async def delete_my_data(token: str, req: Request):
     """The candidate erases their data: profile, resume, applications, recordings and interview records."""
     _limit(req, "del", 5, 3600)
@@ -644,6 +652,7 @@ def manager_page(token: str, req: Request):
 
 
 @router.post("/api/decide/{token}")
+@offload
 async def manager_decide(token: str, req: Request):
     _limit(req, "decide-post", 30)
     body = await req.json()

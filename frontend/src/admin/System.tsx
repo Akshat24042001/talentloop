@@ -6,12 +6,13 @@ import { Loading } from '../components/kit'
 import { api } from '../lib/api'
 import { healthProblems, useHealth } from '../lib/health'
 import { useMe } from '../lib/session'
+import { ask } from '../components/dialogs'
 
 export function SampleData() {
   const me = useMe()
   const [busy, setBusy] = useState('')
   async function run(kind: 'seed' | 'clear') {
-    if (kind === 'clear' && !confirm(`Remove all sample jobs and candidates from ${me.org?.name}? Real data is kept.`)) return
+    if (kind === 'clear' && !await ask(`Remove all sample jobs and candidates from ${me.org?.name}? Real data is kept.`)) return
     setBusy(kind)
     try { const r = await api(kind === 'seed' ? '/api/demo/seed' : '/api/demo/clear', { method: 'POST' }); toast(kind === 'seed' ? `Added ${r.jobs} jobs and ${r.candidates} candidates to ${me.org?.name}` : `Removed ${r.jobs} jobs and ${r.candidates} candidates`) }
     catch (e: any) { toast(e.message) }

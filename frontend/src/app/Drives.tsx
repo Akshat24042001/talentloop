@@ -8,6 +8,7 @@ import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { DateTimePicker } from '../components/pickers'
 import { LinkActions } from '../components/LinkActions'
+import { ask } from '../components/dialogs'
 
 interface Drive {
   id: string; job_id: string; college: string; code: string; share_code: string; opens_at: number | null; closes_at: number | null; status: 'open' | 'closed'
@@ -52,7 +53,7 @@ export function JobDrives({ jobId, canManage }: { jobId: string; canManage: bool
 function DriveList({ drives, onEdit, reload }: { drives: Drive[]; onEdit?: (d: Drive) => void; reload: () => void; showJob?: boolean }) {
   const [qr, setQr] = useState<Drive | null>(null)
   async function setStatus(d: Drive, status: string) { try { await api(`/api/drives/${d.id}`, { method: 'PATCH', json: { status } }); reload() } catch (e: any) { toast(e.message) } }
-  async function del(d: Drive) { if (!confirm(`Delete the ${d.college} drive?`)) return; try { await api(`/api/drives/${d.id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
+  async function del(d: Drive) { if (!await ask(`Delete the ${d.college} drive?`)) return; try { await api(`/api/drives/${d.id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       {drives.map(d => (

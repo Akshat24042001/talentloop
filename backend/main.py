@@ -62,6 +62,7 @@ _tasks: set[asyncio.Task] = set()
 
 @app.on_event("startup")
 async def _startup():
+    worker.MAIN_LOOP = asyncio.get_running_loop()
     n = await asyncio.to_thread(store.restore_all)
     if n:
         log.info("restored %d interviews from S3", n)

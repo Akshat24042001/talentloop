@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, type ComponentType, type ReactNode } from 'r
 import { Shell } from './app/Shell'
 import { Button, Logo, Toaster, TooltipProvider } from './components/ui'
 import { Loading, PageSkeleton } from './components/kit'
+import { DialogHost } from './components/dialogs'
 import { setUnauthorizedHandler } from './lib/api'
 import { match, navigate, useLocation } from './lib/router'
 import { SessionProvider, useSession } from './lib/session'
@@ -119,5 +120,5 @@ function Routes() {
 }
 
 export default function App() {
-  return <SessionProvider><TooltipProvider><Suspense fallback={<Loading className="min-h-screen" />}><Routes /></Suspense><Toaster /></TooltipProvider></SessionProvider>
+  return <SessionProvider><TooltipProvider><Suspense fallback={<Loading className="min-h-screen" />}><Routes /></Suspense><Toaster /><DialogHost /></TooltipProvider></SessionProvider>
 }

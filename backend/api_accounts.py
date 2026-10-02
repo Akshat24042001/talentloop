@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func
 
 from . import auth, db, store
+from .offload import offload
 
 router = APIRouter()
 INVITE_DAYS = 14
@@ -83,6 +84,7 @@ def me_payload(s, ctx: auth.Ctx) -> dict:
 # auth
 # ---------------------------------------------------------------------------
 @router.post("/api/auth/signup")
+@offload
 async def signup(req: Request, resp: Response):
     body = await req.json()
     auth.rate_limit(f"signup:{auth.client_ip(req)}", 8, 3600)
@@ -108,6 +110,7 @@ async def signup(req: Request, resp: Response):
 
 
 @router.post("/api/auth/login")
+@offload
 async def login(req: Request, resp: Response):
     body = await req.json()
     email = (str(body.get("email") or "")).strip().lower()
@@ -146,6 +149,7 @@ def me(req: Request):
 
 
 @router.post("/api/auth/switch-org")
+@offload
 async def switch_org(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -161,6 +165,7 @@ async def switch_org(req: Request):
 
 
 @router.post("/api/auth/password")
+@offload
 async def change_password(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -176,6 +181,7 @@ async def change_password(req: Request):
 
 
 @router.patch("/api/auth/profile")
+@offload
 async def update_profile(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -203,6 +209,7 @@ def invite_info(token: str):
 
 
 @router.post("/api/invites/{token}/accept")
+@offload
 async def accept_invite(token: str, req: Request, resp: Response):
     body = await req.json()
     auth.rate_limit(f"invite:{auth.client_ip(req)}", 20, 3600)
@@ -252,6 +259,7 @@ def team(req: Request):
 
 
 @router.post("/api/team/invites")
+@offload
 async def create_invite(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -305,6 +313,7 @@ def _owners_left(s, org_id: str, excluding: str) -> int:
 
 
 @router.patch("/api/team/members/{mid}")
+@offload
 async def update_member(mid: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -376,6 +385,7 @@ def clean_benefits(v) -> list[str]:
 
 
 @router.post("/api/org/benefits")
+@offload
 async def org_benefits(req: Request):
     """HR adds a benefit to the company's list (from the JD editor) or removes one. Jobs keep what they already list."""
     body = await req.json()
@@ -407,6 +417,7 @@ def get_org(req: Request):
 
 
 @router.patch("/api/org")
+@offload
 async def update_org(req: Request):
     body = await req.json()
     with db.session() as s:
@@ -518,6 +529,7 @@ def admin_users(req: Request):
 
 
 @router.patch("/api/admin/orgs/{org_id}")
+@offload
 async def admin_update_org(org_id: str, req: Request):
     body = await req.json()
     with db.session() as s:
@@ -531,6 +543,7 @@ async def admin_update_org(org_id: str, req: Request):
 
 
 @router.patch("/api/admin/users/{user_id}")
+@offload
 async def admin_update_user(user_id: str, req: Request):
     body = await req.json()
     with db.session() as s:

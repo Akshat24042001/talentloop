@@ -66,25 +66,49 @@ async def setup_ai_interview(rr_id: str) -> None:
 
 
 async def screening_report(rr_id: str) -> None:
-    """Optional AI match report on a CV screening result (cached like job match reports)."""
+    """Optional AI match report on a CV screening result (cached like job match reports). Database work runs in a
+    thread, and no session is held open while the model writes the report."""
+    got = await asyncio.to_thread(_screening_load, rr_id)
+    if not got:
+        return
+    job, c, fake = got
+    rep, model, inp, outp = await matching._one_report(job, c, fake, asyncio.Semaphore(1))
+    await asyncio.to_thread(_screening_save, rr_id, rep, model, inp, outp)
+
+
+def _screening_load(rr_id: str):
     with db.session() as s:
         rr = s.get(db.RoundResult, rr_id)
         if not rr or not (rr.data or {}).get("ai_report_wanted") or (rr.data or {}).get("ai_report") or (rr.data or {}).get("ai_report_failed"):
-            return
+            return None
         job, c = s.get(db.Job, rr.job_id), s.get(db.Candidate, rr.candidate_id)
+        if not job or not c:
+            return None
         m = s.query(db.Match).filter_by(job_id=job.id, candidate_id=c.id).first()
         if m and m.ai_report and m.ai_hash == matching.report_hash(job, c.content_hash or matching.content_hash(c)):
             rr.data = {**rr.data, "ai_report": m.ai_report}
+            return None
+        fake = db.Match(job_id=job.id, candidate_id=c.id, breakdown=(m.breakdown if m else None) or (rr.data or {}).get("breakdown") or {},
+                        score=(m.score if m else None) or rr.score or 0)
+        _ = (job.fields, c.resume_text, c.profile, c.parsed)        # loaded before the session closes
+        s.expunge(job), s.expunge(c)
+        return job, c, fake
+
+
+def _screening_save(rr_id: str, rep, model, inp, outp) -> None:
+    with db.session() as s:
+        rr = s.get(db.RoundResult, rr_id)
+        if not rr:
             return
-        fake = m or db.Match(job_id=job.id, candidate_id=c.id, breakdown=(rr.data or {}).get("breakdown") or {}, score=rr.score or 0)
-        rep, model, inp, outp = await matching._one_report(job, c, fake, asyncio.Semaphore(1))
         if rep:
-            rr.data = {**rr.data, "ai_report": rep}
+            rr.data = {**(rr.data or {}), "ai_report": rep}
+            m = s.query(db.Match).filter_by(job_id=rr.job_id, candidate_id=rr.candidate_id).first()
             if m:
+                job, c = s.get(db.Job, rr.job_id), s.get(db.Candidate, rr.candidate_id)
                 m.ai_report, m.ai_score, m.ai_model, m.ai_at = rep, rep.get("score"), model, db.now()
                 m.ai_hash = matching.report_hash(job, c.content_hash or matching.content_hash(c))
         else:
-            rr.data = {**rr.data, "ai_report_failed": True}
+            rr.data = {**(rr.data or {}), "ai_report_failed": True}
         if model != "mock":
             s.add(db.AIUsage(org_id=rr.org_id, kind="cv_screening", model=model, input_chars=inp, output_chars=outp))
 
@@ -124,20 +148,25 @@ def on_interview_closed_unused(iid: str) -> None:
     """Hook point kept for symmetry (an unused link expiring is handled by deadlines)."""
 
 
+def _pending() -> tuple[list, list, list]:
+    now = time.time()
+    with db.session() as s:
+        setup_ids = [r.id for r in s.query(db.RoundResult.id).filter(db.RoundResult.status == "setting_up").limit(10)]
+        report_ids = [r.id for r in s.query(db.RoundResult).filter(db.RoundResult.round_type == "cv_screening",
+                                                                  db.RoundResult.updated_at > now - 7 * 86400).limit(200)
+                      if (r.data or {}).get("ai_report_wanted") and not (r.data or {}).get("ai_report") and not (r.data or {}).get("ai_report_failed")][:10]
+        scoring = [(r.id, r.round_type) for r in s.query(db.RoundResult).filter(db.RoundResult.status == "submitted",
+                                                                               db.RoundResult.round_type.in_(("video_intro", "role_task", "practical_task"))).limit(50)
+                   if (r.data or {}).get("scoring") == "queued"][:5]
+    return setup_ids, report_ids, scoring
+
+
 async def tick() -> None:
     """One pass over pending flow work."""
     if _running.locked():
         return
     async with _running:
-        now = time.time()
-        with db.session() as s:
-            setup_ids = [r.id for r in s.query(db.RoundResult.id).filter(db.RoundResult.status == "setting_up").limit(10)]
-            report_ids = [r.id for r in s.query(db.RoundResult).filter(db.RoundResult.round_type == "cv_screening",
-                                                                      db.RoundResult.updated_at > now - 7 * 86400).limit(200)
-                          if (r.data or {}).get("ai_report_wanted") and not (r.data or {}).get("ai_report") and not (r.data or {}).get("ai_report_failed")][:10]
-            scoring = [(r.id, r.round_type) for r in s.query(db.RoundResult).filter(db.RoundResult.status == "submitted",
-                                                                                   db.RoundResult.round_type.in_(("video_intro", "role_task", "practical_task"))).limit(50)
-                       if (r.data or {}).get("scoring") == "queued"][:5]
+        setup_ids, report_ids, scoring = await asyncio.to_thread(_pending)
         for rid in setup_ids:
             try:
                 await setup_ai_interview(rid)
@@ -209,9 +238,18 @@ def _deadline(s, rr: db.RoundResult, now: float) -> None:
                                f"{time.strftime('%d %b %Y, %H:%M', time.localtime(rr.deadline_at))}.", "reminder", link, "Continue here")
 
 
+MAIN_LOOP: asyncio.AbstractEventLoop | None = None    # set at startup: kick() may be called from worker threads
+
+
 def kick() -> None:
     try:
-        loop = asyncio.get_running_loop()
+        cur = asyncio.get_running_loop()
     except RuntimeError:
+        cur = None
+    loop = MAIN_LOOP if MAIN_LOOP is not None and not MAIN_LOOP.is_closed() else cur
+    if loop is None:
         return
-    loop.call_soon(lambda: asyncio.ensure_future(tick()))
+    if loop is cur:
+        loop.call_soon(lambda: asyncio.ensure_future(tick()))
+    else:
+        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(tick()))

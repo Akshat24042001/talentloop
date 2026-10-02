@@ -6,6 +6,7 @@ import { Ago, Avatar, ErrorBox, ListSkeleton, PageHeader, useApi } from '../comp
 import { api } from '../lib/api'
 import { useMe } from '../lib/session'
 import { LinkActions } from '../components/LinkActions'
+import { ask } from '../components/dialogs'
 
 interface TeamData {
   members: { id: string; user_id: string; name: string; email: string; role: string; role_label: string; title: string; last_login_at?: number; you: boolean; active: boolean }[]
@@ -25,11 +26,11 @@ export default function Team() {
     setBusy(false)
   }
   async function changeRole(mid: string, r: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { role: r } }); toast('Role updated'); reload() } catch (e: any) { toast(e.message) } }
-  async function remove(mid: string, name: string) { if (!confirm(`Remove ${name} from ${me.org?.name}?`)) return; try { await api(`/api/team/members/${mid}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
-  async function revoke(id: string) { if (!confirm('Revoke this invite? The link stops working.')) return; await api(`/api/team/invites/${id}`, { method: 'DELETE' }); toast('Invite revoked'); reload() }
+  async function remove(mid: string, name: string) { if (!await ask(`Remove ${name} from ${me.org?.name}?`)) return; try { await api(`/api/team/members/${mid}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
+  async function revoke(id: string) { if (!await ask('Revoke this invite? The link stops working.')) return; await api(`/api/team/invites/${id}`, { method: 'DELETE' }); toast('Invite revoked'); reload() }
   async function renew(id: string) { try { const r = await api(`/api/team/invites/${id}/renew`, { method: 'POST' }); const url = location.origin + r.path; setLink(url); copyText(url, 'New invite link copied'); reload() } catch (e: any) { toast(e.message) } }
   async function setActive(mid: string, name: string, active: boolean) {
-    if (!active && !confirm(`Pause ${name}'s access? They are signed out of ${me.org?.name} now and can't sign in until you turn it back on. Nothing is deleted.`)) return
+    if (!active && !await ask(`Pause ${name}'s access? They are signed out of ${me.org?.name} now and can't sign in until you turn it back on. Nothing is deleted.`)) return
     try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { active } }); toast(active ? `${name} can sign in again` : `${name}'s access paused`); reload() } catch (e: any) { toast(e.message) }
   }
   async function saveTitle(mid: string, title: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { title } }); toast('Saved'); reload() } catch (e: any) { toast(e.message) } }

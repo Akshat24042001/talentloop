@@ -1,13 +1,15 @@
 // Pipeline board for one job: a column per round (kanban) or a list, filters, bulk actions and the application drawer.
-import { CheckCheck, Columns3, Flag, Hand, List, MessageSquare, Search, Send, SlidersHorizontal, Trophy, Users, X } from 'lucide-react'
+import { Check, CheckCheck, Columns3, Flag, Hand, List, MessageSquare, Search, Send, SlidersHorizontal, Trophy, Users, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Badge, Button, Card, Field, Input, Modal, Select, Textarea, cn, toast } from '../../components/ui'
+import { Badge, Button, Card, Field, Input, Modal, Select, Spinner, Textarea, cn, toast } from '../../components/ui'
 import { Avatar, BoardSkeleton, Empty, ErrorBox, ScoreBar, useApi } from '../../components/kit'
 import { api } from '../../lib/api'
 import { ago } from '../../lib/format'
 import { navigate, useLocation } from '../../lib/router'
 import AppDrawer from './AppDrawer'
 import { STATUS_TONE, type Round, type RoundSummary } from './types'
+import { ask } from '../../components/dialogs'
+import { Stepper } from '../../components/pickers'
 
 export interface PipeItem {
   id: string; ref?: string; stage: string; stage_label: string; round_id: string | null; round_status: string | null; created_at: number; updated_at: number; rating: number | null
@@ -22,7 +24,9 @@ const CLOSED = ['rejected', 'withdrawn'], DONE = ['offer', 'hired']
 
 export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: string }) {
   const { query } = useLocation()
-  const { data, error, reload } = useApi<Pipe>(`/api/jobs/${jobId}/pipeline`)
+  const { data, error, reload, setData } = useApi<Pipe>(`/api/jobs/${jobId}/pipeline`)
+  const [moving, setMoving] = useState<Set<string>>(new Set())
+  const [topRound, setTopRound] = useState<Round | null>(null)
   const [view, setView] = useState<'board' | 'list'>((localStorage.getItem('tl.pipeView') as 'board' | 'list') || 'board')
   const [f, setF] = useState({ q: '', minScore: '', location: '', maxNotice: '', college: '', status: '', flagged: false, closed: false })
   const [showFilters, setShowFilters] = useState(false)
@@ -63,25 +67,32 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
       toast(`${r.done} updated${r.errors.length ? `, ${r.errors.length} skipped: ${r.errors[0]!.error}` : ''}`); setSel(new Set()); setBulk(null); reload()
     } catch (e: any) { toast(e.message) }
   }
+  // Show a move at once (the card jumps to its new column marked "Moving…"), then confirm it with the server;
+  // a refused move puts the card back. A card that is moving can't be moved again.
+  const optimistic = (id: string, patch: Partial<PipeItem>) =>
+    setData(d => d && { ...d, items: d.items.map(x => x.id === id ? { ...x, ...patch, round_status: 'moving', current: x.current ? { ...x.current, status: 'moving', status_label: 'Moving…' } : x.current } : x) })
   async function dropOn(col: Col) {
     const a = data!.items.find(x => x.id === dragId); setDragId(null); setOverCol(null)
-    if (!a || !canEdit) return
+    if (!a || !canEdit || moving.has(a.id)) return
     let action = 'move'
     if (col.id === '_selected') action = 'select'
     else if (col.id === '_closed') action = 'reject'
     else if (!col.round || col.round.id === a.round_id) return
-    try { await api(`/api/applications/${a.id}/decide`, { json: { action, round_id: col.round?.id } }); toast(`${a.candidate.name} → ${col.title}`); reload() } catch (e: any) { toast(e.message) }
+    if (action === 'select' && !await ask(`Select ${a.candidate.name} for the job?`)) return
+    if (action === 'reject') { setSel(new Set([a.id])); setBulk('reject'); return }
+    setMoving(m => new Set(m).add(a.id))
+    optimistic(a.id, action === 'select' ? { stage: 'selected' } : { round_id: col.round!.id })
+    try { await api(`/api/applications/${a.id}/decide`, { json: { action, round_id: col.round?.id } }); toast(`${a.candidate.name} → ${col.title}`) }
+    catch (e: any) { toast(e.message) }
+    await reload(); setMoving(m => { const n = new Set(m); n.delete(a.id); return n })
   }
   async function startWaiting(col: Col) {
     const ids = col.items.filter(a => a.current?.status === 'pending').map(a => a.id)
-    if (!confirm(`Start "${col.title}" for ${ids.length} candidate(s)? Their invitations go out now.`)) return
+    if (!await ask(`Start "${col.title}" for ${ids.length} candidate(s)? Their invitations go out now.`)) return
     try { const r = await api<{ done: number; errors: { error: string }[] }>('/api/applications/bulk', { json: { ids, action: 'move', round_id: col.round!.id } }); toast(`${r.done} started${r.errors.length ? `, ${r.errors.length} skipped` : ''}`); reload() } catch (e: any) { toast(e.message) }
   }
-  async function topN(r: Round) {
-    const n = prompt(`Pass the best N in "${r.name}" (by score). N =`, String(r.pass_rule.value || 10)); if (!n) return
-    const rest = confirm('Also mark everyone else who finished this round as not progressed? (Cancel keeps them waiting.)')
-    try { const x = await api(`/api/jobs/${jobId}/rounds/${r.id}/top-n`, { json: { n: +n, reject_rest: rest } }); toast(`${x.passed} passed${x.failed ? `, ${x.failed} not progressed` : ''}`); reload() } catch (e: any) { toast(e.message) }
-  }
+  const topN = (r: Round) => setTopRound(r)
+
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -111,7 +122,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
           <Button size="sm" variant="ghost" className="text-inherit" icon={<CheckCheck />} onClick={() => runBulk('pass')}>Pass round</Button>
           <Button size="sm" variant="ghost" className="text-inherit" icon={<Hand />} onClick={() => runBulk('hold')}>Hold</Button>
           <Button size="sm" variant="ghost" className="text-inherit" onClick={() => setBulk('move')}>Move to…</Button>
-          <Button size="sm" variant="ghost" className="text-inherit" icon={<Trophy />} onClick={() => confirm(`Select ${sel.size} candidate(s) for the job?`) && runBulk('select')}>Select</Button>
+          <Button size="sm" variant="ghost" className="text-inherit" icon={<Trophy />} onClick={async () => await ask(`Select ${sel.size} candidate(s) for the job?`) && runBulk('select')}>Select</Button>
           <Button size="sm" variant="ghost" className="text-inherit" icon={<MessageSquare />} onClick={() => setBulk('message')}>Message</Button>
           <Button size="sm" variant="ghost" className="text-red-300 dark:text-red-600" onClick={() => setBulk('reject')}>Reject</Button>
           <button aria-label="Clear selection" className="ml-auto rounded p-1 hover:bg-white/10" onClick={() => setSel(new Set())}><X className="size-4" /></button>
@@ -127,7 +138,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={col.title}>{col.title}</span>
                   <span className="tabular rounded-full bg-white px-1.5 text-xs font-semibold text-slate-600 dark:bg-ink-800 dark:text-slate-300">{col.items.length}</span>
                   {canEdit && col.round && col.items.some(a => a.current?.status === 'pending') && <Button size="sm" variant="subtle" onClick={() => startWaiting(col)}>Start {col.items.filter(a => a.current?.status === 'pending').length}</Button>}
-                  {data.permission === 'manage' && col.round?.pass_rule.mode === 'top_n' && col.items.some(a => a.round_status === 'submitted') && <Button size="sm" variant="subtle" onClick={() => topN(col.round!)}>Pass top {col.round.pass_rule.value}</Button>}
+                  {data.permission === 'manage' && col.round?.pass_rule.mode === 'top_n' && col.items.some(a => a.round_status === 'submitted') && <Button size="sm" variant="subtle" icon={<Trophy />} onClick={() => topN(col.round!)}>Choose the best…</Button>}
                 </header>
                 <div className="flex max-h-[65vh] flex-col gap-2 overflow-y-auto">
                   {col.items.map(a => <CardItem key={a.id} a={a} checked={sel.has(a.id)} onCheck={canEdit ? () => toggle(a.id) : undefined} onOpen={() => openApp(a.id)} draggable={canEdit} onDrag={() => setDragId(a.id)} />)}
@@ -155,7 +166,9 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
             {!listItems.length && <p className="p-8 text-center text-sm text-slate-500">Nobody matches these filters.</p>}
           </Card>
         )}
-      {open && <AppDrawer id={open} onClose={() => openApp(null)} onChanged={reload} />}
+      {open && <AppDrawer id={open} onClose={() => openApp(null)} onChanged={reload} onMoving={(id, roundId) => optimistic(id, roundId ? { round_id: roundId } : {})} />}
+      {topRound && <TopNDialog jobId={jobId} round={topRound} items={data.items.filter(a => a.round_id === topRound.id && !CLOSED.includes(a.stage) && !DONE.includes(a.stage))}
+        next={data.rounds[data.rounds.findIndex(r => r.id === topRound.id) + 1]?.name} onClose={() => setTopRound(null)} onDone={() => { setTopRound(null); reload() }} />}
       {bulk === 'reject' && <ReasonModal title={`Reject ${sel.size} candidate(s)`} cta="Reject" onClose={() => setBulk(null)} onSubmit={(reason, notify) => runBulk('reject', { reason, notify })} />}
       {bulk === 'message' && <MessageModal n={sel.size} onClose={() => setBulk(null)} onSubmit={(subject, text) => runBulk('message', { subject, text })} />}
       {bulk === 'move' && (
@@ -173,6 +186,7 @@ function roundName(rounds: Round[], a: PipeItem) {
 }
 
 export function StatusBadge({ a }: { a: PipeItem }) {
+  if (a.round_status === 'moving') return <Badge tone="brand" icon={<Spinner />}>Moving…</Badge>
   if (CLOSED.includes(a.stage) || DONE.includes(a.stage)) return <Badge tone={DONE.includes(a.stage) ? 'success' : 'danger'}>{a.stage_label}</Badge>
   if (!a.current) return <Badge>{a.stage_label}</Badge>
   return <Badge tone={STATUS_TONE[a.current.status] || 'neutral'}>{a.current.status_label}</Badge>
@@ -219,6 +233,41 @@ function MessageModal({ n, onClose, onSubmit }: { n: number; onClose: () => void
       footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon={<Send />} disabled={!text.trim()} onClick={() => onSubmit(subject, text)}>Send</Button></>}>
       <div className="mt-4 space-y-3"><Field label="Subject" htmlFor="mm-s"><Input id="mm-s" value={subject} onChange={e => setSubject(e.target.value)} /></Field>
         <Field label="Message" htmlFor="mm-t"><Textarea id="mm-t" rows={5} value={text} onChange={e => setText(e.target.value)} /></Field></div>
+    </Modal>
+  )
+}
+
+// "Pass the best N" as a real dialog: how many finished, who would pass (by score), and what happens to the rest.
+function TopNDialog({ jobId, round, items, next, onClose, onDone }: { jobId: string; round: Round; items: PipeItem[]; next?: string; onClose: () => void; onDone: () => void }) {
+  const done = items.filter(a => a.round_status === 'submitted').sort((x, y) => (y.current?.score ?? -1) - (x.current?.score ?? -1))
+  const [n, setN] = useState(Math.min(done.length, Math.max(1, Number(round.pass_rule.value) || 10)))
+  const [rest, setRest] = useState<'wait' | 'reject'>('wait')
+  const [busy, setBusy] = useState(false)
+  async function run() {
+    setBusy(true)
+    try { const x = await api(`/api/jobs/${jobId}/rounds/${round.id}/top-n`, { json: { n, reject_rest: rest === 'reject' } }); toast(`${x.passed} passed${x.failed ? `, ${x.failed} not progressed` : ''}`); onDone() }
+    catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  return (
+    <Modal open onOpenChange={o => !o && onClose()} title={`Pass the best in ${round.name}`}
+      description={`${done.length} candidate${done.length === 1 ? ' has' : 's have'} finished this round. The highest scores move on${next ? ` to ${next}` : ''}.`}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!done.length} onClick={run} icon={<Trophy />}>Pass {Math.min(n, done.length)}</Button></>}>
+      <div className="mt-4 space-y-4">
+        <Field label="How many pass" htmlFor="topn-n"><Stepper id="topn-n" aria-label="How many pass" min={1} max={Math.max(1, done.length)} step={1} unit={n === 1 ? 'candidate' : 'candidates'} value={n} onChange={setN}
+          presets={[5, 10, 25, 50].filter(x => x < done.length)} /></Field>
+        <div className="max-h-48 overflow-y-auto rounded-xl ring-1 ring-slate-200 dark:ring-ink-700">
+          <ol className="divide-y divide-slate-100 text-sm dark:divide-ink-800">{done.map((a, i) => (
+            <li key={a.id} className={cn('flex items-center gap-3 px-3 py-2', i < n ? 'bg-emerald-50/70 dark:bg-emerald-500/10' : 'text-slate-400 dark:text-slate-500')}>
+              <span className="tabular w-5 text-xs font-semibold">{i + 1}</span><span className="min-w-0 flex-1 truncate">{a.candidate.name}</span>
+              <span className="tabular font-semibold">{a.current?.score != null ? Math.round(a.current.score) : '-'}</span>
+              {i < n ? <Check className="size-4 text-emerald-600" /> : <span className="w-4" />}</li>))}</ol>
+        </div>
+        <fieldset className="space-y-1.5 text-sm"><legend className="mb-1 text-[13px] font-semibold">Everyone else who finished</legend>
+          <label className="flex items-center gap-2"><input type="radio" name="topn-rest" checked={rest === 'wait'} onChange={() => setRest('wait')} />Keep them waiting in this round</label>
+          <label className="flex items-center gap-2"><input type="radio" name="topn-rest" checked={rest === 'reject'} onChange={() => setRest('reject')} />Mark them as not progressed (they get a polite closure message)</label>
+        </fieldset>
+      </div>
     </Modal>
   )
 }

@@ -6,13 +6,13 @@ const emit = () => listeners.forEach(f => f())
 if (typeof window !== 'undefined') window.addEventListener('popstate', emit)
 
 /** A page with unsaved changes registers a guard; in-app navigation asks before leaving it. */
-let leaveGuard: (() => boolean) | null = null
-export function setLeaveGuard(fn: (() => boolean) | null) { leaveGuard = fn }
-export function canLeave(): boolean { return !leaveGuard || leaveGuard() }
+let leaveGuard: (() => boolean | Promise<boolean>) | null = null
+export function setLeaveGuard(fn: (() => boolean | Promise<boolean>) | null) { leaveGuard = fn }
+export async function canLeave(): Promise<boolean> { return !leaveGuard || await leaveGuard() }
 
 export function navigate(to: string, opts: { replace?: boolean; keepScroll?: boolean; force?: boolean } = {}) {
   if (to === location.pathname + location.search) return
-  if (!opts.force && !canLeave()) return
+  if (!opts.force && leaveGuard) { canLeave().then(ok => { if (ok) navigate(to, { ...opts, force: true }) }); return }
   leaveGuard = null
   history[opts.replace ? 'replaceState' : 'pushState'](null, '', to)
   emit()
