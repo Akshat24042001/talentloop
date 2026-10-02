@@ -138,7 +138,33 @@ async def draft_questions(section: str, topic: str, difficulty: str, count: int,
                                        "text": q.get("text"), "options": q.get("options"), "answer": [q.get("answer")], "explanation": q.get("explanation")}))
         except Exception:
             continue
+    await verify_answers(out)
     return out
+
+
+SOLVE_SYSTEM = """Solve each multiple-choice question independently. Work it out carefully; do not guess from wording.
+Output ONLY JSON: {"answers": [int index of the correct option, or -1 if no option is correct or more than one is]}"""
+
+
+async def verify_answers(items: list[dict]) -> None:
+    """A second, independent AI pass solves every drafted question without seeing the key. A disagreement (or
+    a question with no single right option) is marked for HR: a wrong answer key silently fails good candidates."""
+    if not items or llm.MOCK:
+        return
+    try:
+        res = await llm.complete_json(SOLVE_SYSTEM, json.dumps([{"text": q["text"], "options": q["options"]} for q in items], ensure_ascii=False),
+                                      llm.SMART_MODEL, temperature=0, max_tokens=60 + 12 * len(items), timeout=60)
+        got = res.get("answers") or []
+    except Exception:
+        for q in items:
+            q["check"] = "The answer key could not be double-checked. Please verify it."
+        return
+    for q, g in zip(items, got):
+        key = (q.get("answer") or [None])[0]
+        if not isinstance(g, int) or g != key:
+            q["check"] = ("A second check found no single correct option. Please verify." if g == -1
+                          else f"A second check chose option {chr(65 + g)} instead. Please verify the answer." if isinstance(g, int) and 0 <= g < len(q["options"])
+                          else "Please verify the answer.")
 
 
 # ---------------------------------------------------------------------------

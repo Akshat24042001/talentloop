@@ -114,13 +114,15 @@ function Editor({ q: init, sections, onClose, onSaved }: { q: Q; sections: { id:
 }
 
 function Drafter({ sections, onClose, onSaved }: { sections: { id: string; label: string }[]; onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ section: 'domain', topic: '', difficulty: 'medium', count: 5, role: '' })
+  const [f, setF] = useState({ section: 'domain', topic: '', difficulty: 'medium', count: 5, role: '', job_id: '' })
+  const { data: jobs } = useApi<{ id: string; title: string; status: string }[]>('/api/jobs')
   const [items, setItems] = useState<(Q & { keep: boolean })[] | null>(null), [busy, setBusy] = useState(false), [err, setErr] = useState('')
   async function run() {
     setBusy(true); setErr('')
     try {
       const r = await api<{ items: any[] }>('/api/questions/draft', { json: f })
       setItems(r.items.map(x => ({ ...blank(f.section), ...x, section: f.section, answer: Array.isArray(x.answer) ? x.answer : [x.answer], keep: true })))
+      if (!r.items.length) setErr('No usable questions came back. Try again, or change the topic.')
     } catch (e: any) { setErr(e.message) }
     setBusy(false)
   }
@@ -132,20 +134,24 @@ function Drafter({ sections, onClose, onSaved }: { sections: { id: string; label
   return (
     <Modal open onOpenChange={o => !o && onClose()} title="Draft questions with AI" description="Nothing is saved until you review the drafts. Check every answer: AI can be wrong."
       footer={items ? <><Button onClick={() => setItems(null)}>Back</Button><Button variant="primary" loading={busy} disabled={!items.some(x => x.keep)} onClick={save}>Save {items.filter(x => x.keep).length} question(s)</Button></>
-        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon={<Sparkles />} loading={busy} onClick={run}>Draft</Button></>}>
+        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon={<Sparkles />} loading={busy} disabled={!f.job_id && !f.topic.trim()} onClick={run}>{busy ? 'Drafting and double-checking…' : 'Draft'}</Button></>}>
       <div className="mt-4 max-h-[65vh] space-y-3 overflow-y-auto pr-1">
         {err && <Alert tone="danger">{err}</Alert>}
         {!items ? <>
+          <Field label="Suggest from a job (optional)" htmlFor="dq-j" hint="Uses the job's must-have skills, tools and responsibilities.">
+            <Select id="dq-j" value={f.job_id} onChange={e => { const j = jobs?.find(x => x.id === e.target.value); setF({ ...f, job_id: e.target.value, role: j?.title || f.role }) }}>
+              <option value="">No job: use the topic below</option>{(jobs || []).filter(j => j.status !== 'closed').map(j => <option key={j.id} value={j.id}>{j.title}</option>)}</Select></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Section" htmlFor="dq-s"><Select id="dq-s" value={f.section} onChange={e => setF({ ...f, section: e.target.value })}>{sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select></Field>
             <Field label="Level" htmlFor="dq-d"><Select id="dq-d" value={f.difficulty} onChange={e => setF({ ...f, difficulty: e.target.value })}>{['easy', 'medium', 'hard'].map(d => <option key={d}>{d}</option>)}</Select></Field>
             <Field label="How many" htmlFor="dq-n"><Input id="dq-n" type="number" min={1} max={15} value={f.count} onChange={e => setF({ ...f, count: +e.target.value })} /></Field>
             <Field label="For the role (optional)" htmlFor="dq-r"><Input id="dq-r" value={f.role} onChange={e => setF({ ...f, role: e.target.value })} /></Field>
           </div>
-          <Field label="Topic" htmlFor="dq-t"><Input id="dq-t" value={f.topic} onChange={e => setF({ ...f, topic: e.target.value })} placeholder="e.g. percentages and profit & loss, or basic networking" /></Field>
+          <Field label={f.job_id ? 'Focus (optional)' : 'Topic'} htmlFor="dq-t"><Input id="dq-t" value={f.topic} onChange={e => setF({ ...f, topic: e.target.value })} placeholder={f.job_id ? 'e.g. only SQL, or customer escalations' : 'e.g. percentages and profit & loss, or basic networking'} /></Field>
         </> : items.map((q, i) => (
           <div key={i} className="rounded-xl p-3 ring-1 ring-slate-200 dark:ring-ink-700">
             <label className="mb-2 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={q.keep} onChange={e => setItems(items.map((x, j) => j === i ? { ...x, keep: e.target.checked } : x))} />Keep draft {i + 1}</label>
+            {(q as any).check && <Alert className="mb-2" tone="warning">{(q as any).check}</Alert>}
             {q.keep && <QuestionFields q={q} set={nq => setItems(items.map((x, j) => j === i ? { ...x, ...nq } : x))} sections={sections} />}
           </div>))}
       </div>

@@ -265,6 +265,19 @@ check("the drives list doesn't show the role count", next(x for x in lst if x["i
 ok(hr.delete(f"/api/jobs/{j2['id']}"))
 check("deleting one role deletes the whole multi-role drive", not any(x["id"] == dr["id"] for x in ok(hr.get("/api/drives"))))
 
+# AI-drafted test questions: a wrong answer key is caught by an independent second pass
+from backend import assessments, llm as _llm
+async def _solver(*a, **k): return {"answers": [1, 0]}
+_m, _c = _llm.MOCK, _llm.complete_json
+_llm.MOCK, _llm.complete_json = False, _solver
+_qs = [{"text": "2+2?", "options": ["3", "4", "5", "6"], "answer": [0]}, {"text": "3+3?", "options": ["6", "7", "8", "9"], "answer": [0]}]
+asyncio.run(assessments.verify_answers(_qs))
+_llm.MOCK, _llm.complete_json = _m, _c
+check("a drafted question with a wrong answer key is saved without a warning", "check" not in _qs[0], str(_qs[0]))
+check("a drafted question the second pass agrees with is flagged anyway", "check" in _qs[1], str(_qs[1]))
+jq = ok(hr.post("/api/questions/draft", json={"job_id": job["id"], "count": 3}))
+check("suggesting questions from a job's JD fails", len(jq.get("items") or []) != 3, str(jq)[:200])
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

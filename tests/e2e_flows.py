@@ -71,6 +71,7 @@ def main():
             expect(hr.get_by_text("Quantitative aptitude").first).to_be_visible(timeout=15000)
             shot(hr, "f01-question-bank")
             hr.get_by_role("button", name="Draft with AI").click()
+            pick(hr, "#dq-j", "Customer Support Specialist")                      # suggest from a job's JD
             hr.get_by_role("button", name="Draft", exact=True).click()
             expect(hr.get_by_text("Keep draft 1")).to_be_visible()
             hr.get_by_role("button", name="Save 5 question(s)").click()

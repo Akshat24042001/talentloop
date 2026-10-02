@@ -701,12 +701,20 @@ def question_template(req: Request):
 async def draft(req: Request):
     """AI-drafted questions for HR to review; nothing is saved until HR saves them."""
     body = await req.json()
+    topic, role = str(body.get("topic") or "")[:300], str(body.get("role") or "")[:120]
     with db.session() as s:
         ctx = ctx_of(req, s)
         auth.require(ctx, auth.MANAGE_JOBS, "draft questions")
+        if body.get("job_id"):
+            # Suggest from a job: its must-have skills, tools and responsibilities become the topic.
+            job, _ = get_job(s, ctx, str(body["job_id"]))
+            f = job.fields or {}
+            parts = [", ".join(f.get("must_have_skills") or []), ", ".join(f.get("tools") or []), "; ".join((f.get("responsibilities") or [])[:5])]
+            topic = (topic + " " if topic else "") + " | ".join(p for p in parts if p)
+            role = role or job.title
     try:
-        items = await assessments.draft_questions(str(body.get("section") or "domain"), str(body.get("topic") or "")[:300],
-                                                  str(body.get("difficulty") or "medium"), int(body.get("count") or 5), str(body.get("role") or "")[:120])
+        items = await assessments.draft_questions(str(body.get("section") or "domain"), topic[:900],
+                                                  str(body.get("difficulty") or "medium"), int(body.get("count") or 5), role)
     except Exception as e:
         from .api_hiring import ai_unavailable
         raise HTTPException(503, ai_unavailable(e))

@@ -24,7 +24,7 @@ from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
 from . import (api_accounts, api_flows, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
-               mailbox, matching, media, messages, proctor, refs, retention, store, worker)
+               communication, mailbox, matching, media, messages, proctor, refs, retention, store, worker)
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -346,6 +346,7 @@ def get_interview(iid: str, req: Request):
     out = exports.public_record(rec)
     if rec.get("state"):
         out["proctoring"] = proctor.summary(rec)
+        out["communication"] = communication.analyze(rec)
         out["stats"] = proctor.stats(rec)
         out["started_at"] = proctor.interview_start(rec)
     out["reconnect_window_sec"] = reconnect_window(rec)

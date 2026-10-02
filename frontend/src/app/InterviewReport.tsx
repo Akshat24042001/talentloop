@@ -255,6 +255,8 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
         </div>
       )}
 
+      {rec.communication && <Communication c={rec.communication} />}
+
       {pr && <Integrity pr={pr} rec={rec} start={start} warns={warns} moments={moments} routine={routine} qRef={qRef} Q={Q} stats={stats} />}
 
       <Section id="recordings" title="Recordings" description="The camera recording includes the candidate's microphone and the interviewer's voice, and keeps recording while the candidate is muted.">
@@ -424,6 +426,29 @@ function Integrity({ pr, rec, start, warns, moments, routine, qRef, Q, stats }: 
             <td className={cn('py-2 pr-4', x.severity === 'high' ? 'font-semibold text-red-600 dark:text-red-400' : x.severity === 'medium' ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200')}>{x.label}{x.duration ? ` (${x.duration}s)` : ''}</td>
             <td className="py-2 text-xs text-slate-500">{x.detail}</td></tr>)}</tbody></table></div>
       </details>
+    </Section>
+  )
+}
+
+// Communication signals: counted from the candidate's words and the timeline only (no face or voice emotion
+// analysis). Cues for the reviewer, never a score.
+function Communication({ c }: { c: any }) {
+  const tiles: [string, string, string][] = [
+    ['Candidate talk share', `${c.candidate_share}%`, 'of all words spoken'],
+    ['Average answer', `${c.avg_answer_words} words`, `${c.short_answers} short (under 15 words)`],
+    ['Concrete figures', String(c.specifics), 'numbers, durations, scale'],
+    ['Ownership', `${c.ownership.i} "I" · ${c.ownership.we} "we"`, 'action verbs'],
+    ['Filler words', `${c.filler_per_100} / 100`, 'um, like, basically…'],
+    ['Hedges', `${c.hedge_per_100} / 100`, 'maybe, I think, not sure'],
+    ['Tone of words', c.tone[0].toUpperCase() + c.tone.slice(1), `${c.tone_words.positive} positive · ${c.tone_words.negative} negative`],
+    ['Questions asked', String(c.questions_asked), 'by the candidate'],
+  ]
+  return (
+    <Section title="Communication signals" description="Counted from the candidate's words only. No face or voice emotion analysis. Cues to look at, not a score.">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{tiles.map(([k, v, s]) => (
+        <div key={k} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70 dark:bg-ink-850 dark:ring-ink-700">
+          <div className="text-xs text-slate-500 dark:text-slate-400">{k}</div><div className="tabular mt-1 text-lg font-semibold">{v}</div><div className="text-xs text-slate-500 dark:text-slate-400">{s}</div></div>))}</div>
+      {c.notes.length > 0 && <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-200">{c.notes.map((n: string) => <li key={n}>{n}</li>)}</ul>}
     </Section>
   )
 }
