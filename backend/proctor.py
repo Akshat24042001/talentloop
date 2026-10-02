@@ -32,6 +32,7 @@ LABELS = {
     "identity_mismatch": "Face did not match the registration photo", "person_changed": "A different face than at the start",
     "identity_check_unavailable": "Face match could not run", "answer_timing": "Answer timing",
     "answer_pattern": "Long silences before long, fluent answers (possible reading)", "second_voice": "Possible second voice in the room",
+    "call_ended": "How the call ended",
     "integrity_reminder": "Interviewer reminded the candidate (camera or focus)",
     "turn_error": "Interviewer recovered from an internal error (the candidate heard the question again)",
     "quick_switch": "Looked away from the interview briefly (tab or app)", "looking_away": "Head turned away from the screen for a while",

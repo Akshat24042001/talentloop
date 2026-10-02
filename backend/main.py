@@ -1079,6 +1079,24 @@ def _token_ok(rec: dict, token: str, current_only: bool) -> bool:
 _page_seen: dict[str, float] = {}
 
 
+def ended_reason_label(r: str) -> str:
+    """Vapi's endedReason in plain words, so HR (and we) can see why a call ended."""
+    r = (r or "").lower()
+    if "end-call-phrase" in r or r == "assistant-ended-call":
+        return "The interviewer closed the interview"
+    if r in ("customer-ended-call",):
+        return "The candidate left the call"
+    if "silence" in r:
+        return "Ended after a long silence"
+    if "max-duration" in r or "exceeded-max" in r:
+        return "Reached the maximum call length"
+    if "pipeline-error" in r or "llm" in r or "provider" in r or "error" in r:
+        return "Ended by a voice-provider error (the candidate can rejoin)"
+    if "customer-did-not" in r or "no-answer" in r:
+        return "The candidate didn't connect"
+    return "The call ended"
+
+
 async def _turn(iid: str, token: str, messages: list[dict]) -> str:
     async with store.lock(iid):
         rec = get_rec(iid)
@@ -1182,6 +1200,8 @@ async def vapi_webhook(iid: str, token: str, req: Request, bg: BackgroundTasks):
                 "durationSeconds": msg.get("durationSeconds"), "cost": msg.get("cost"), "at": time.time(),
                 "transcript": (art.get("transcript") or msg.get("transcript") or "")[:60000]})
             v["end_report"] = v["end_reports"][-1]
+            reason = str(msg.get("endedReason") or "")
+            server_event(rec, "call_ended", f"{ended_reason_label(reason)} ({reason})" if reason else "unknown reason")
             call_id = ((msg.get("call") or {}).get("id") or "")[:80]
             if call_id and call_id not in v.get("call_ids", []):
                 v.setdefault("call_ids", []).append(call_id)
