@@ -423,12 +423,19 @@ def list_candidates(req: Request, q: str = "", skill: str = "", min_years: float
         order = SORTS.get(sort, SORTS["new"])
         rows = qry.order_by(order, db.Candidate.id).offset((page - 1) * limit).limit(limit).all()
         ids = [c.id for c in rows]
-        apps = dict(s.query(db.Application.candidate_id, func.count()).filter(db.Application.candidate_id.in_(ids or [""]))
-                    .group_by(db.Application.candidate_id).all())
+        vis_jobs = auth.visible_job_ids(s, ctx)
+        applied: dict[str, list] = {}
+        aq = s.query(db.Application.candidate_id, db.Job.title, db.Application.stage) \
+            .join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.candidate_id.in_(ids or [""]))
+        if vis_jobs is not None:
+            aq = aq.filter(db.Job.id.in_(vis_jobs or [""]))
+        for cid_, title, stage in aq.order_by(db.Application.created_at.desc()):
+            applied.setdefault(cid_, []).append({"job": title, "stage": stage, "stage_label": STAGE_LABEL.get(stage, stage)})
         items = []
         for c in rows:
             row = cand_summary(c)
-            row["applications"] = apps.get(c.id, 0)
+            row["applications"] = len(applied.get(c.id, []))
+            row["applied_to"] = applied.get(c.id, [])[:3]
             items.append(row)
         return {"total": total, "page": page, "limit": limit, "items": items}
 
@@ -537,9 +544,18 @@ def candidate_detail(cid: str, req: Request):
         org = s.get(db.Org, c.org_id)
         st = org_settings(org)
         iv_refs = _interview_refs(s, [a.interview_id for a in s.query(db.Application.interview_id).filter(db.Application.candidate_id == c.id) if a.interview_id])
-        apps = [{"id": a.id, "ref": refs.app_ref(a.id), "job_id": j.id, "job_ref": refs.job_ref(j), "job": j.title, "stage": a.stage, "interview_ref": iv_refs.get(a.interview_id), "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at,
-                 "rating": a.rating, "knockout_failed": a.knockout_failed, "interview_id": a.interview_id, "answers": a.answers}
-                for a, j in s.query(db.Application, db.Job).join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.candidate_id == c.id)]
+        from . import flows
+        vis_jobs = auth.visible_job_ids(s, ctx)
+        apps = []
+        for a, j in s.query(db.Application, db.Job).join(db.Job, db.Job.id == db.Application.job_id) \
+                .filter(db.Application.candidate_id == c.id).order_by(db.Application.created_at.desc()):
+            if vis_jobs is not None and j.id not in vis_jobs:
+                continue
+            rnd = next((r for r in flows.flow_of(j) if r["id"] == a.round_id), None)
+            apps.append({"id": a.id, "ref": refs.app_ref(a.id), "job_id": j.id, "job_ref": refs.job_ref(j), "job": j.title, "department": j.department,
+                         "job_status": j.status, "stage": a.stage, "interview_ref": iv_refs.get(a.interview_id), "stage_label": STAGE_LABEL.get(a.stage, a.stage),
+                         "created_at": a.created_at, "updated_at": a.updated_at, "source": a.source, "round": rnd["name"] if rnd else None,
+                         "round_status": a.round_status, "rating": a.rating, "knockout_failed": a.knockout_failed, "interview_id": a.interview_id, "answers": a.answers})
         best = matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=8,
                                            min_score=st["best_fit_min_score"])
         vis = auth.visible_job_ids(s, ctx)

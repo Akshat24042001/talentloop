@@ -12,7 +12,7 @@ import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } 
 
 interface Detail extends Cand {
   tags: string[]; resume_name?: string; resume_type?: string; resume_v?: string; college?: string; created_at: number; profile: Record<string, any>; parsed: Record<string, any>; resume_text: string
-  applications: { id: string; job_id: string; job_ref: string; interview_ref?: string; job: string; stage: string; stage_label: string; created_at: number; rating?: number; knockout_failed?: string[]; interview_id?: string }[]
+  applications: { id: string; ref?: string; job_id: string; job_ref: string; interview_ref?: string; job: string; department?: string; job_status?: string; stage: string; stage_label: string; created_at: number; updated_at?: number; source?: string; round?: string | null; round_status?: string | null; rating?: number; knockout_failed?: string[]; interview_id?: string }[]
   best_jobs: { job_id: string; job_ref: string; title: string; department: string; status: string; score: number; breakdown: Breakdown; knocked_out: string[]; ai_report?: AIReport | null }[]
   best_fit_min_score?: number
   activity: { id: string; action: string; detail: string; at: number; user?: string; job?: string }[]
@@ -21,12 +21,13 @@ interface Detail extends Cand {
 export default function CandidateDetail({ id }: { id: string }) {
   const me = useMe()
   const { data: c, error, reload } = useApi<Detail>(`/api/candidates/${id}`)
-  const [tab, setTab] = useState<'fit' | 'resume' | 'text' | 'profile' | 'activity'>(c0Tab())
+  const [tab, setTab] = useState<'apps' | 'fit' | 'resume' | 'text' | 'profile' | 'activity' | null>(c0Tab())
   const [editing, setEditing] = useState(false)
   const [addTo, setAddTo] = useState('')
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!c) return <PageSkeleton />
   const p = c.profile
+  const cur = tab ?? (c.applications.length ? 'apps' : 'fit')
   async function add() {
     try { await api(`/api/jobs/${addTo}/applications`, { json: { candidate_id: c!.id } }); toast('Added to the job'); setAddTo(''); reload() } catch (e: any) { toast(e.message) }
   }
@@ -43,9 +44,32 @@ export default function CandidateDetail({ id }: { id: string }) {
           {me.can.manage_jobs && <Button variant="primary" onClick={() => setEditing(true)} icon={<Pencil />}>Edit</Button>}</>} />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
-          <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ id: 'fit', label: 'Best-fit jobs', count: c.best_jobs.length }, ...(c.has_resume ? [{ id: 'resume' as const, label: 'Resume' }] : []),
+          <Tabs className="mb-4" value={cur} onChange={setTab} tabs={[{ id: 'apps', label: 'Applied to', count: c.applications.length }, { id: 'fit', label: 'Best-fit jobs', count: c.best_jobs.length }, ...(c.has_resume ? [{ id: 'resume' as const, label: 'Resume' }] : []),
             { id: 'text', label: 'Resume text' }, { id: 'profile', label: 'Profile' }, { id: 'activity', label: 'Activity' }]} />
-          {tab === 'fit' && (
+          {cur === 'apps' && (
+            <div className="space-y-3">
+              {!c.applications.length && <Card><CardBody><p className="text-sm font-medium">Hasn't applied to any job yet</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{me.can.manage_jobs ? 'Add them to a job from the panel on the right, or check Best-fit jobs.' : 'They show here once they apply or HR adds them to a job.'}</p></CardBody></Card>}
+              {c.applications.map(a => (
+                <Card key={a.id} className="p-4 sm:p-5">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300"><Briefcase className="size-5" /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2"><a href={`/app/jobs/${a.job_ref}`} className="font-semibold hover:underline">{a.job}</a>
+                        <Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge>{a.job_status && a.job_status !== 'open' && <Badge>Job {a.job_status}</Badge>}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{a.round ? <>Now at <b>{a.round}</b>{a.round_status ? ` · ${a.round_status.replace(/_/g, ' ')}` : ''}</> : a.stage_label}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{[a.department, `applied ${when(a.created_at)}`, a.source ? (SOURCE_LABEL[a.source] || a.source) : '', a.rating ? `rated ${a.rating}/5` : ''].filter(Boolean).join(' · ')}</div>
+                      {!!a.knockout_failed?.length && <div className="mt-1.5 text-xs text-red-600 dark:text-red-400">Knockouts: {a.knockout_failed.join('; ')}</div>}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="primary" href={`/app/jobs/${a.job_ref}?tab=pipeline&app=${a.ref || a.id}`}>Open in pipeline</Button>
+                      {a.interview_ref && <Button size="sm" icon={<Video />} href={`/app/interviews/${a.interview_ref}`}>Interview report</Button>}
+                    </div>
+                  </div>
+                </Card>))}
+            </div>
+          )}
+          {cur === 'fit' && (
             <div className="space-y-3">
               {!c.best_jobs.length && <Card><CardBody>
                 <p className="text-sm font-medium">Not a strong fit for any open job right now</p>
@@ -67,9 +91,9 @@ export default function CandidateDetail({ id }: { id: string }) {
               ))}
             </div>
           )}
-          {tab === 'resume' && c.has_resume && <ResumeViewer c={c} />}
-          {tab === 'text' && <Card><CardBody><pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700 dark:text-slate-200">{c.resume_text || 'No resume text.'}</pre></CardBody></Card>}
-          {tab === 'profile' && <Card><CardBody>
+          {cur === 'resume' && c.has_resume && <ResumeViewer c={c} />}
+          {cur === 'text' && <Card><CardBody><pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700 dark:text-slate-200">{c.resume_text || 'No resume text.'}</pre></CardBody></Card>}
+          {cur === 'profile' && <Card><CardBody>
             {p.summary && <p className="mb-4 text-sm leading-relaxed">{p.summary}</p>}
             {(p.experience || []).map((e: any, i: number) => <div key={i} className="mb-3"><div className="font-semibold">{e.title} · {e.company}</div><div className="text-xs text-slate-500">{e.start} – {e.end || 'Present'}</div><p className="mt-1 whitespace-pre-line text-sm">{e.description}</p></div>)}
             {(p.education || []).map((e: any, i: number) => <div key={i} className="text-sm">{e.degree} {e.field} · {e.school} {e.year}</div>)}
@@ -79,7 +103,7 @@ export default function CandidateDetail({ id }: { id: string }) {
               <KV k="Parsed experience">{c.parsed.years != null ? `${c.parsed.years} yrs (${c.parsed.years_source})` : ''}</KV>
             </dl>
           </CardBody></Card>}
-          {tab === 'activity' && <Card><CardBody><ul className="space-y-2 text-sm">{c.activity.map(a => <li key={a.id}><Badge>{ACTION_LABEL[a.action] || a.action}</Badge> {a.detail} <span className="text-xs text-slate-500">· {actor(a)} · {when(a.at)}</span></li>)}</ul></CardBody></Card>}
+          {cur === 'activity' && <Card><CardBody><ul className="space-y-2 text-sm">{c.activity.map(a => <li key={a.id}><Badge>{ACTION_LABEL[a.action] || a.action}</Badge> {a.detail} <span className="text-xs text-slate-500">· {actor(a)} · {when(a.at)}</span></li>)}</ul></CardBody></Card>}
         </div>
         <div className="space-y-4">
           <Card><CardBody className="space-y-2 text-sm">
@@ -91,7 +115,7 @@ export default function CandidateDetail({ id }: { id: string }) {
           </CardBody></Card>
           <Card><CardHeader title="Applications" /><CardBody className="space-y-2 pt-3">
             {!c.applications.length && <p className="text-sm text-slate-500">Not in any job pipeline yet.</p>}
-            {c.applications.map(a => <a key={a.id} href={`/app/jobs/${a.job_ref}?tab=pipeline`} className="flex items-center justify-between gap-2 rounded-lg p-2 text-sm hover:bg-slate-50 dark:hover:bg-ink-850"><span className="flex items-center gap-2"><Briefcase className="size-4 text-slate-400" />{a.job}</span><Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge></a>)}
+            {c.applications.map(a => <a key={a.id} href={`/app/jobs/${a.job_ref}?tab=pipeline&app=${a.ref || a.id}`} className="flex items-center justify-between gap-2 rounded-lg p-2 text-sm hover:bg-slate-50 dark:hover:bg-ink-850"><span className="flex items-center gap-2"><Briefcase className="size-4 text-slate-400" />{a.job}</span><Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge></a>)}
             {me.can.manage_jobs && notApplied.length > 0 && <div className="flex gap-2 pt-2">
               <Select aria-label="Job" className="py-1.5 text-[13px]" value={addTo} onChange={e => setAddTo(e.target.value)}><option value="">Add to a job…</option>{notApplied.map(b => <option key={b.job_id} value={b.job_id}>{b.title}</option>)}</Select>
               <Button size="sm" disabled={!addTo} onClick={add} icon={<UserPlus />}>Add</Button></div>}
@@ -106,8 +130,9 @@ export default function CandidateDetail({ id }: { id: string }) {
   )
 }
 
-function c0Tab(): 'fit' | 'resume' {
-  return new URLSearchParams(location.search).get('tab') === 'resume' ? 'resume' : 'fit'
+function c0Tab(): 'apps' | 'fit' | 'resume' | null {
+  const t = new URLSearchParams(location.search).get('tab')
+  return t === 'resume' || t === 'fit' || t === 'apps' ? t : null
 }
 
 function ResumeViewer({ c }: { c: Detail }) {
