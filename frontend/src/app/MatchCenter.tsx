@@ -15,7 +15,14 @@ interface Ov {
 export default function MatchCenter() {
   const me = useMe()
   const { data, error, reload } = useApi<Ov>('/api/match/overview')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(false), [jobBusy, setJobBusy] = useState('')
+  const summary = (r: any) => r.error ? `${r.generated ? `${r.generated} written. ` : ''}${r.error}` : `${r.generated} AI report${r.generated === 1 ? '' : 's'} written`
+  async function runJob(j: Ov['jobs'][number]) {
+    setJobBusy(j.id)
+    try { const r = await api('/api/match/ai-reports', { json: { job_ids: [j.id] } }); toast(`${j.title}: ${summary(r)}`); reload() }
+    catch (e: any) { toast(e.message) }
+    setJobBusy('')
+  }
   async function runAll() {
     setBusy(true)
     try { const r = await api('/api/match/ai-reports', { json: {} }); toast(r.error ? `${r.generated ? `${r.generated} written. ` : ''}${r.error}` : `${r.generated} AI report${r.generated === 1 ? '' : 's'} written${r.skipped_over_budget ? `, ${r.skipped_over_budget} left for the next run` : ''}`); reload() }
@@ -52,7 +59,11 @@ export default function MatchCenter() {
                       </a></li>)) : <li className="p-4 text-sm text-slate-500">No matching candidates yet.</li>}
                   </ol>
                   <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500 dark:border-ink-800">
-                    <span>{j.scored} ranked · top {j.top_n} shortlisted</span>{j.ai_pending > 0 && <span className="text-amber-600">{j.ai_pending} report{j.ai_pending > 1 ? 's' : ''} pending</span>}
+                    <span>{j.scored} ranked · top {j.top_n} shortlisted</span>
+                    {j.ai_pending > 0 ? (me.can.manage_jobs
+                      ? <Button size="sm" variant="subtle" icon={<Sparkles />} loading={jobBusy === j.id} disabled={!!jobBusy && jobBusy !== j.id} onClick={() => runJob(j)}>Generate {Math.min(j.ai_pending, data.ai_budget)} report{Math.min(j.ai_pending, data.ai_budget) > 1 ? 's' : ''}</Button>
+                      : <span className="text-amber-600 dark:text-amber-400">{j.ai_pending} report{j.ai_pending > 1 ? 's' : ''} pending</span>)
+                      : j.shortlist.some(s => s.verdict) && <span className="text-emerald-600 dark:text-emerald-400">Reports ready</span>}
                   </div>
                 </Card>
               ))}
