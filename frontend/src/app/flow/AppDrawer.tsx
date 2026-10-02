@@ -52,7 +52,7 @@ export default function AppDrawer({ id, onClose, onChanged, onMoving }: { id: st
               {data && <div className="mt-2 flex flex-wrap gap-1.5"><Badge tone={closed ? (['offer', 'hired'].includes(data.stage) ? 'success' : 'danger') : 'brand'}>{data.stage_label}</Badge>
                 {cur?.result && <Badge tone={STATUS_TONE[cur.result.status]}>{cur.round.name}: {cur.result.status_label}</Badge>}</div>}
             </div>
-            <Dialog.Close className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-ink-800" aria-label="Close"><X className="size-5" /></Dialog.Close>
+            <Dialog.Close className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-ink-800" aria-label="Close"><X className="size-5" /></Dialog.Close>
           </header>
           {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <Loading /> : <>
             {canEdit && !closed && (
@@ -311,7 +311,7 @@ function Messages({ msgs, onRetry }: { msgs: Msg[]; onRetry: () => void }) {
     <div><H>Messages to the candidate</H>
       <ul className="space-y-1.5">{msgs.map(m => (
         <li key={m.id} className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-ink-850">
-          <div className="flex items-center gap-2 text-sm">{m.channel === 'whatsapp' ? <MessageCircle className="size-4 text-emerald-600" /> : <Mail className="size-4 text-slate-400" />}
+          <div className="flex items-center gap-2 text-sm">{m.channel === 'whatsapp' ? <MessageCircle className="size-4 text-emerald-600" /> : <Mail className="size-4 text-slate-500 dark:text-slate-400" />}
             <span className="min-w-0 flex-1 truncate font-medium">{m.subject || m.template}</span><Badge tone={MSG_TONE[m.status] || 'neutral'}>{MSG_LABEL[m.status] || m.status}</Badge>
             {['failed', 'not_configured'].includes(m.status) && <button className="text-xs font-semibold text-brand-600 dark:text-brand-400" onClick={() => retry(m.id)}>Retry</button>}</div>
           <div className="text-xs text-slate-500">{m.to} · {ago(m.created_at)}{m.error ? ` · ${m.error}` : ''}</div>

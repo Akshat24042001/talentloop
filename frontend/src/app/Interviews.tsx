@@ -81,7 +81,7 @@ export default function Interviews() {
       <Card className="mt-4 overflow-hidden">
         <div className="grid gap-2 border-b border-slate-100 p-4 dark:border-ink-800 md:grid-cols-[2fr_repeat(4,1fr)]">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <Input id="q" type="search" className="pl-9" placeholder="Search candidate, role, company or email" value={q} onChange={e => setQ(e.target.value)} />
           </div>
           <Select aria-label="Status" value={fs} onChange={e => setFs(e.target.value)}><option value="">All statuses</option>{Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
@@ -102,7 +102,7 @@ export default function Interviews() {
                   <a href={`/app/interviews/${encodeURIComponent(r.ref)}`} className="flex gap-3 px-4 py-3.5 active:bg-slate-50 dark:active:bg-ink-850">
                     <span className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-xs font-bold text-brand-700 dark:from-brand-500/25 dark:to-violet-500/25 dark:text-brand-200">{initials(r.candidate)}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2"><span className="truncate font-semibold text-slate-900 dark:text-white">{r.candidate || 'Candidate'}</span><span className="shrink-0 text-xs text-slate-400"><Ago ts={r.created_at} /></span></div>
+                      <div className="flex items-baseline justify-between gap-2"><span className="truncate font-semibold text-slate-900 dark:text-white">{r.candidate || 'Candidate'}</span><span className="shrink-0 text-xs text-slate-500 dark:text-slate-400"><Ago ts={r.created_at} /></span></div>
                       <div className="truncate text-xs text-slate-500 dark:text-slate-400">{r.role}{r.company ? ` · ${r.company}` : ''}</div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status] || r.status}</Badge>
@@ -131,16 +131,16 @@ export default function Interviews() {
                       </td>
                       <td className="hidden max-w-[240px] px-4 py-3 lg:table-cell"><div className="truncate text-slate-800 dark:text-slate-100" title={r.role}>{r.role}</div><div className="truncate text-xs text-slate-500 dark:text-slate-400">{r.company}</div></td>
                       <td className="px-4 py-3"><Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status] || r.status}</Badge></td>
-                      <td className="px-4 py-3">{r.recommendation ? <Badge tone={REC_TONE[r.recommendation]}>{REC_LABEL[r.recommendation]}</Badge> : <span className="text-slate-400">-</span>}</td>
+                      <td className="px-4 py-3">{r.recommendation ? <Badge tone={REC_TONE[r.recommendation]}>{REC_LABEL[r.recommendation]}</Badge> : <span className="text-slate-500 dark:text-slate-400">-</span>}</td>
                       <td className="px-4 py-3">{typeof r.overall === 'number'
                         ? <span className="flex items-center gap-2 font-semibold tabular"><span>{r.overall.toFixed(1)}</span><span className="relative h-1.5 w-14 rounded-r-full bg-[var(--track)]"><i className="absolute inset-y-0 left-0 rounded-r-full bg-[var(--series-1)]" style={{ width: `${(r.overall / 5) * 100}%` }} /></span></span>
-                        : <span className="text-slate-400">-</span>}</td>
+                        : <span className="text-slate-500 dark:text-slate-400">-</span>}</td>
                       <td className="px-4 py-3">
                         {r.disqualified ? <Badge tone="danger" icon={<UserX />}>Disqualified</Badge>
-                          : r.risk ? <Badge tone={r.risk === 'high' ? 'danger' : r.risk === 'medium' ? 'warning' : 'success'}>{r.risk[0]!.toUpperCase() + r.risk.slice(1)}</Badge> : <span className="text-slate-400">-</span>}
+                          : r.risk ? <Badge tone={r.risk === 'high' ? 'danger' : r.risk === 'medium' ? 'warning' : 'success'}>{r.risk[0]!.toUpperCase() + r.risk.slice(1)}</Badge> : <span className="text-slate-500 dark:text-slate-400">-</span>}
                         {r.warnings > 0 && !r.disqualified && <div className="mt-1 text-xs text-amber-600 dark:text-amber-300">{r.warnings} warning{r.warnings > 1 ? 's' : ''}</div>}
                       </td>
-                      <td className="hidden px-4 py-3 capitalize text-slate-700 dark:text-slate-200 lg:table-cell">{(r.decision || '').replace('_', ' ') || <span className="text-slate-400">-</span>}</td>
+                      <td className="hidden px-4 py-3 capitalize text-slate-700 dark:text-slate-200 lg:table-cell">{(r.decision || '').replace('_', ' ') || <span className="text-slate-500 dark:text-slate-400">-</span>}</td>
                       <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-slate-500 dark:text-slate-400 lg:table-cell" title={when(r.created_at)}>{ago(r.created_at)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <Button size="sm" href={`/app/interviews/${encodeURIComponent(r.ref)}`}>Report</Button>

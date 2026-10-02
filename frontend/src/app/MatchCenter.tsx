@@ -51,10 +51,10 @@ export default function MatchCenter() {
                   <ol className="flex-1 divide-y divide-slate-100 dark:divide-ink-800">
                     {j.shortlist.length ? j.shortlist.map((s, i) => (
                       <li key={s.candidate_id}><a href={`/app/jobs/${j.ref}/match/${s.ref}`} title="Open the full match report" className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-ink-850">
-                        <span className="tabular w-4 text-xs font-bold text-slate-400">{i + 1}</span>
+                        <span className="tabular w-4 text-xs font-bold text-slate-500 dark:text-slate-400">{i + 1}</span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
                         {s.applied && <Badge tone="brand">Applied</Badge>}
-                        {s.verdict ? <Badge tone={VERDICT[s.verdict]?.tone}>{VERDICT[s.verdict]?.label}</Badge> : <span className="text-[11px] text-slate-400">no report</span>}
+                        {s.verdict ? <Badge tone={VERDICT[s.verdict]?.tone}>{VERDICT[s.verdict]?.label}</Badge> : <span className="text-[11px] text-slate-500 dark:text-slate-400">no report</span>}
                         <span className="tabular w-7 text-right text-sm font-bold">{Math.round(s.score)}</span>
                       </a></li>)) : <li className="p-4 text-sm text-slate-500">No matching candidates yet.</li>}
                   </ol>

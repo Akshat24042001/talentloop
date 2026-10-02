@@ -68,7 +68,7 @@ export default function Landing() {
               return (
                 <div key={t as string} className="relative">
                   <span className="tabular text-xs font-bold text-brand-600 dark:text-brand-300">STEP {i + 1}</span>
-                  <div className="mt-2 flex items-center gap-2"><Icon className="size-5 text-slate-400" /><h3 className="font-semibold">{t as string}</h3></div>
+                  <div className="mt-2 flex items-center gap-2"><Icon className="size-5 text-slate-500 dark:text-slate-400" /><h3 className="font-semibold">{t as string}</h3></div>
                   <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">{b as string}</p>
                 </div>
               )
@@ -88,7 +88,7 @@ export default function Landing() {
         </div>
         <div className="mt-14 overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 to-violet-600 px-6 py-12 text-center text-white sm:px-12">
           <h2 className="text-3xl font-semibold tracking-tight">Hire your next person faster</h2>
-          <p className="mx-auto mt-2 max-w-xl text-brand-100">Set up your workspace in two minutes. Load sample data to see a full pipeline right away.</p>
+          <p className="mx-auto mt-2 max-w-xl text-brand-100">Set up your workspace in two minutes: add a job, upload resumes and see your shortlist right away.</p>
           <Button size="lg" href={me ? '/app' : '/signup'} className="mt-6 bg-white !text-brand-700 hover:bg-brand-50 dark:bg-white dark:hover:bg-brand-50" icon={<Wand2 />}>{me ? 'Open workspace' : 'Start free'}</Button>
         </div>
       </section>
@@ -113,7 +113,7 @@ function ProductShot() {
         <div className="mt-4 divide-y divide-slate-200/70 rounded-xl bg-white ring-1 ring-slate-200/70 dark:divide-ink-700 dark:bg-ink-900 dark:ring-ink-700">
           {rows.map(([n, s, sc, v], i) => (
             <div key={n} className="flex items-center gap-3 px-4 py-3">
-              <span className="tabular w-5 text-sm font-semibold text-slate-400">{i + 1}</span>
+              <span className="tabular w-5 text-sm font-semibold text-slate-500 dark:text-slate-400">{i + 1}</span>
               <span className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-brand-100 to-violet-100 text-[11px] font-bold text-brand-700">{n.split(' ').map(w => w[0]).join('')}</span>
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{n}</div><div className="truncate text-xs text-slate-500">{s}</div></div>
               <span className="hidden rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-200 sm:inline">{v}</span>

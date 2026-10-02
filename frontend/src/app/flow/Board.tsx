@@ -96,7 +96,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 flex-1 sm:max-w-xs"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+        <div className="relative min-w-48 flex-1 sm:max-w-xs"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
           <Input type="search" aria-label="Search applicants" className="pl-9" placeholder="Search name or email" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} /></div>
         <Button icon={<SlidersHorizontal />} onClick={() => setShowFilters(x => !x)} aria-expanded={showFilters}>Filters{Object.entries(f).filter(([k, v]) => k !== 'q' && k !== 'closed' && v).length ? ` (${Object.entries(f).filter(([k, v]) => k !== 'q' && k !== 'closed' && v).length})` : ''}</Button>
         <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={f.closed} onChange={e => setF({ ...f, closed: e.target.checked })} />Show not progressed</label>
@@ -142,7 +142,7 @@ export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: strin
                 </header>
                 <div className="flex max-h-[65vh] flex-col gap-2 overflow-y-auto">
                   {col.items.map(a => <CardItem key={a.id} a={a} checked={sel.has(a.id)} onCheck={canEdit ? () => toggle(a.id) : undefined} onOpen={() => openApp(a.id)} draggable={canEdit} onDrag={() => setDragId(a.id)} />)}
-                  {!col.items.length && <p className="px-2 py-6 text-center text-xs text-slate-400">Nobody here</p>}
+                  {!col.items.length && <p className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-400">Nobody here</p>}
                 </div>
               </section>))}
           </div></div>

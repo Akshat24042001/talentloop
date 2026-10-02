@@ -37,7 +37,7 @@ export function Frame({ org, children, wide }: { org?: Brand | null; children: R
         </div>
       </header>
       <main className={cn('mx-auto px-4 py-6 sm:py-10', wide ? 'max-w-5xl' : 'max-w-2xl')}>{children}</main>
-      <footer className="pb-8 text-center text-xs text-slate-400">Powered by TalentLoop</footer>
+      <footer className="pb-8 text-center text-xs text-slate-500 dark:text-slate-400">Powered by TalentLoop</footer>
     </div>
   )
 }

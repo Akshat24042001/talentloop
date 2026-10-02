@@ -155,7 +155,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
   return (
     <Card className={m.knocked_out ? 'opacity-70' : ''}>
       <div className="flex flex-wrap items-start gap-4 p-4 sm:p-5">
-        <span className="tabular w-6 pt-3 text-center text-sm font-bold text-slate-400">{m.rank}</span>
+        <span className="tabular w-6 pt-3 text-center text-sm font-bold text-slate-500 dark:text-slate-400">{m.rank}</span>
         <ScoreRing value={m.score} label="Match score" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -204,7 +204,7 @@ function TeamAccess({ job, reload, canManage }: { job: Job; reload: () => void; 
                 <Avatar name={c.name || c.email} />
                 <div className="min-w-0 flex-1"><div className="truncate font-medium">{c.name}</div><div className="truncate text-xs text-slate-500">{c.email}</div></div>
                 <Badge tone={c.permission === 'editor' ? 'violet' : 'neutral'}>{c.permission === 'editor' ? 'Can edit JD' : 'Can review'}</Badge>
-                {canManage && <button aria-label="Remove access" onClick={() => remove(c.id)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><X className="size-4" /></button>}
+                {canManage && <button aria-label="Remove access" onClick={() => remove(c.id)} className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><X className="size-4" /></button>}
               </li>))}</ul>
           )}
         </CardBody>

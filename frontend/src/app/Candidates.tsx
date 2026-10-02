@@ -24,7 +24,7 @@ export default function Candidates() {
         actions={me.can.manage_jobs && <><Button icon={<Plus />} onClick={() => setAdd(true)}>Add manually</Button><Button variant="primary" icon={<Upload />} onClick={() => setUpload(true)}>Upload resumes</Button></>} />
       <Card className="overflow-hidden">
         <div className="grid gap-2 border-b border-slate-100 p-4 dark:border-ink-800 md:grid-cols-[2fr_1fr_1fr_1fr]">
-          <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <Input type="search" aria-label="Search candidates" className="pl-9" placeholder="Search name, email, title, resume text" value={q} onChange={e => setQ(e.target.value)} /></div>
           <Input aria-label="Skill" placeholder="Skill, e.g. React" value={skill} onChange={e => { setSkill(e.target.value); setPage(1) }} />
           <Select aria-label="Experience" value={minY} onChange={e => { setMinY(e.target.value); setPage(1) }}><option value="">Any experience</option>{[1, 2, 3, 5, 8, 10].map(n => <option key={n} value={n}>{n}+ years</option>)}</Select>
@@ -46,9 +46,9 @@ export default function Candidates() {
                     {!!c.applied_to?.length && <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs"><span className="text-slate-500 dark:text-slate-400">Applied to</span>
                       {c.applied_to.map((a, i) => <span key={i} className="inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 font-medium text-brand-800 dark:bg-brand-500/15 dark:text-brand-200">{a.job}<span className="font-normal text-brand-600/80 dark:text-brand-300/80">· {a.stage_label}</span></span>)}
                       {c.applications > c.applied_to.length && <span className="text-slate-500 dark:text-slate-400">+{c.applications - c.applied_to.length} more</span>}</div>}
-                    <div className="mt-1.5 flex flex-wrap gap-1">{c.skills.slice(0, 8).map(s => <span key={s} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-ink-800 dark:text-slate-300">{s}</span>)}{c.skills.length > 8 && <span className="text-[11px] text-slate-400">+{c.skills.length - 8}</span>}</div>
+                    <div className="mt-1.5 flex flex-wrap gap-1">{c.skills.slice(0, 8).map(s => <span key={s} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-ink-800 dark:text-slate-300">{s}</span>)}{c.skills.length > 8 && <span className="text-[11px] text-slate-500 dark:text-slate-400">+{c.skills.length - 8}</span>}</div>
                   </div>
-                  <span className="text-xs text-slate-400"><Ago ts={c.created_at} /></span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400"><Ago ts={c.created_at} /></span>
                 </a></li>
               ))}
             </ul>

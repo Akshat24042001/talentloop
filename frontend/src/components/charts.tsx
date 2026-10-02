@@ -26,7 +26,7 @@ export function HBarChart({ rows, max, valueLabel = 'Value', markerLabel, empty 
                 {r.sub && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{r.sub}</div>}
               </div>
               <div className="relative h-3 rounded-r-[4px] bg-[var(--track)]">
-                {r.value == null ? <span className="absolute -top-0.5 left-2 text-[10px] leading-4 text-slate-400">not scored</span>
+                {r.value == null ? <span className="absolute -top-0.5 left-2 text-[10px] leading-4 text-slate-500 dark:text-slate-400">not scored</span>
                   : <i className="absolute inset-y-0 left-0 min-w-[2px] rounded-r-[4px] bg-[var(--series-1)]" style={{ width: `${Math.min(100, Math.max(0, (r.value / m) * 100))}%` }} />}
                 {r.marker != null && <i className="absolute -inset-y-1 w-1 rounded-full bg-[var(--series-2)] ring-2 ring-white dark:ring-ink-900" style={{ left: `calc(${Math.min(100, (r.marker / m) * 100)}% - 2px)` }} />}
               </div>
@@ -56,7 +56,7 @@ export function TimelineChart({ events, duration, markers = [] }: { events: Time
           </Tip>
         ))}
         {list.map((e, i) => (
-          <Tip key={i} label={<><b>{mmss(e.t)}</b> {e.label}{e.q && <div className="mt-0.5 text-slate-300">{e.q}</div>}{e.detail && <div className="text-slate-400">{e.detail}</div>}</>}>
+          <Tip key={i} label={<><b>{mmss(e.t)}</b> {e.label}{e.q && <div className="mt-0.5 text-slate-300">{e.q}</div>}{e.detail && <div className="text-slate-500 dark:text-slate-400">{e.detail}</div>}</>}>
             <i className={cn('absolute top-2.5 size-3 -translate-x-1/2 cursor-default rounded-full ring-2 ring-white dark:ring-ink-900', e.severity === 'high' ? 'bg-[var(--status-critical)]' : 'bg-[var(--status-serious)]')} style={{ left: pct(e.t) }} />
           </Tip>
         ))}
@@ -74,7 +74,7 @@ export function TimelineChart({ events, duration, markers = [] }: { events: Time
       <Lane name="Medium" list={events.filter(e => e.severity !== 'high')} />
       <div className="grid grid-cols-[64px_1fr] gap-2">
         <span />
-        <div className="relative h-6">{ticks.map(t => <span key={t} className="tabular absolute top-1 -translate-x-1/2 text-[11px] text-slate-400" style={{ left: pct(t) }}>{mmss(t)}</span>)}</div>
+        <div className="relative h-6">{ticks.map(t => <span key={t} className="tabular absolute top-1 -translate-x-1/2 text-[11px] text-slate-500 dark:text-slate-400" style={{ left: pct(t) }}>{mmss(t)}</span>)}</div>
       </div>
     </div>
   )

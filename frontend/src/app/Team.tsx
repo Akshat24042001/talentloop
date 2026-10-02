@@ -47,7 +47,7 @@ export default function Team() {
               <ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.members.map(m => (
                 <li key={m.id} className={`flex flex-wrap items-center gap-3 py-3 ${m.active ? '' : 'opacity-60'}`}>
                   <Avatar name={m.name || m.email} />
-                  <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 truncate font-medium">{m.name} {m.you && <span className="text-xs text-slate-400">(you)</span>}{!m.active && <Badge tone="warning">Access paused</Badge>}</div>
+                  <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 truncate font-medium">{m.name} {m.you && <span className="text-xs text-slate-500 dark:text-slate-400">(you)</span>}{!m.active && <Badge tone="warning">Access paused</Badge>}</div>
                     <div className="truncate text-xs text-slate-500">{m.email} · {m.last_login_at ? <Ago ts={m.last_login_at} prefix="active " /> : 'never signed in'}</div>
                     <TitleEdit value={m.title} editable={me.can.manage_team} onSave={t => saveTitle(m.id, t)} /></div>
                   {me.can.manage_team && !m.you && (
@@ -59,13 +59,13 @@ export default function Team() {
                   {me.can.manage_team && !m.you ? (
                     <Select aria-label="Role" className="w-40 py-1.5 text-[13px]" value={m.role} onChange={e => changeRole(m.id, e.target.value)}>{data.roles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</Select>
                   ) : <Badge tone={m.role === 'owner' ? 'violet' : 'neutral'}>{m.role_label}</Badge>}
-                  {me.can.manage_team && !m.you && <button aria-label={`Remove ${m.name}`} onClick={() => remove(m.id, m.name || m.email)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><Trash2 className="size-4" /></button>}
+                  {me.can.manage_team && !m.you && <button aria-label={`Remove ${m.name}`} onClick={() => remove(m.id, m.name || m.email)} className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><Trash2 className="size-4" /></button>}
                 </li>))}</ul>
             </CardBody>
           </Card>
           {data.invites.length > 0 && <Card><CardHeader title="Pending invites" /><CardBody className="pt-3"><ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.invites.map(i => (
-            <li key={i.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm"><Mail className="size-4 text-slate-400" /><span className="min-w-0 flex-1">{i.email} <span className="text-slate-500">· {i.role_label}{i.title ? ` · ${i.title}` : ''}</span>
-                {i.expired ? <Badge tone="warning" className="ml-2">Link expired</Badge> : <span className="ml-2 text-xs text-slate-400">expires {new Date(i.expires_at * 1000).toLocaleDateString()}</span>}</span>
+            <li key={i.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm"><Mail className="size-4 text-slate-500 dark:text-slate-400" /><span className="min-w-0 flex-1">{i.email} <span className="text-slate-500">· {i.role_label}{i.title ? ` · ${i.title}` : ''}</span>
+                {i.expired ? <Badge tone="warning" className="ml-2">Link expired</Badge> : <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">expires {new Date(i.expires_at * 1000).toLocaleDateString()}</span>}</span>
               <Button size="sm" icon={<RefreshCw />} onClick={() => renew(i.id)}>New link</Button>
               <Button size="sm" variant="ghost" onClick={() => revoke(i.id)}>Revoke</Button></li>))}</ul></CardBody></Card>}
         </div>
@@ -89,12 +89,12 @@ export default function Team() {
 function TitleEdit({ value, editable, onSave }: { value: string; editable: boolean; onSave: (v: string) => void }) {
   const [edit, setEdit] = useState(false), [v, setV] = useState(value)
   if (!edit) return (
-    <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">{value || <span className="text-slate-400">{editable ? 'No job title' : ''}</span>}
-      {editable && <button aria-label="Edit job title" onClick={() => { setV(value); setEdit(true) }} className="rounded p-0.5 text-slate-400 hover:text-slate-700"><Pencil className="size-3" /></button>}</div>)
+    <div className="mt-0.5 flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">{value || <span className="text-slate-500 dark:text-slate-400">{editable ? 'No job title' : ''}</span>}
+      {editable && <button aria-label="Edit job title" onClick={() => { setV(value); setEdit(true) }} className="rounded p-0.5 text-slate-500 dark:text-slate-400 hover:text-slate-700"><Pencil className="size-3" /></button>}</div>)
   return (
     <form className="mt-1 flex items-center gap-1" onSubmit={e => { e.preventDefault(); onSave(v.trim()); setEdit(false) }}>
       <Input aria-label="Job title" autoFocus className="h-7 max-w-56 py-1 text-xs" value={v} onChange={e => setV(e.target.value)} placeholder="e.g. Sales Manager" />
       <button type="submit" aria-label="Save title" className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check className="size-4" /></button>
-      <button type="button" aria-label="Cancel" onClick={() => setEdit(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X className="size-4" /></button>
+      <button type="button" aria-label="Cancel" onClick={() => setEdit(false)} className="rounded p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100"><X className="size-4" /></button>
     </form>)
 }

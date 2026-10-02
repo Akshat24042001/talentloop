@@ -105,8 +105,8 @@ export function Invite({ token }: { token: string }) {
     <AuthLayout title={`Join ${info.org}`} subtitle={<>You've been invited as <b>{info.role_label}</b>{info.title ? ` (${info.title})` : ''}.</>}>
       <form onSubmit={submit} className="space-y-4">
         {err && <Alert tone="danger">{err}</Alert>}
-        <Field label="Email" htmlFor="email"><div className="relative"><Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input id="email" className="pl-9" value={info.email} disabled /></div></Field>
-        {!info.has_account && <Field label="Your name" htmlFor="name"><div className="relative"><UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input id="name" className="pl-9" required value={name} onChange={e => setName(e.target.value)} /></div></Field>}
+        <Field label="Email" htmlFor="email"><div className="relative"><Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input id="email" className="pl-9" value={info.email} disabled /></div></Field>
+        {!info.has_account && <Field label="Your name" htmlFor="name"><div className="relative"><UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input id="name" className="pl-9" required value={name} onChange={e => setName(e.target.value)} /></div></Field>}
         <Field label={info.has_account ? 'Your existing password' : 'Choose a password'} htmlFor="password" hint={info.has_account ? 'You already have a TalentLoop account; this company is added to it.' : 'At least 8 characters.'}>
           <Input id="password" type="password" required minLength={8} value={pw} onChange={e => setPw(e.target.value)} autoComplete={info.has_account ? 'current-password' : 'new-password'} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<Building2 />}>Join {info.org}</Button>

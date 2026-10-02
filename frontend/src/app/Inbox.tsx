@@ -57,7 +57,7 @@ export function Outbox() {
       {!data ? <ListSkeleton rows={4} /> : !data.items.length ? <Card><Empty icon={<Inbox />} title="No messages">Messages appear here when candidates move through a flow.</Empty></Card> : <>
         <Card><ul className="divide-y divide-slate-100 dark:divide-ink-800">{data.items.map(m => (
           <li key={m.id} className="px-5 py-3">
-            <div className="flex flex-wrap items-center gap-2 text-sm">{m.channel === 'whatsapp' ? <MessageCircle className="size-4 text-emerald-600" /> : <Mail className="size-4 text-slate-400" />}
+            <div className="flex flex-wrap items-center gap-2 text-sm">{m.channel === 'whatsapp' ? <MessageCircle className="size-4 text-emerald-600" /> : <Mail className="size-4 text-slate-500 dark:text-slate-400" />}
               <button className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => setOpen(open === m.id ? null : m.id)}>{m.subject || m.template}</button>
               <Badge tone={MSG_TONE[m.status] || 'neutral'}>{MSG_LABEL[m.status] || m.status}</Badge>
               {['failed', 'not_configured'].includes(m.status) && <Button size="sm" variant="ghost" onClick={() => retry(m.id)}>Retry</Button>}</div>
@@ -78,7 +78,7 @@ export function MyInterviews() {
   const upcoming = (data || []).filter(x => x.ends_at > now), past = (data || []).filter(x => x.ends_at <= now).reverse()
   const row = (x: Mine) => (
     <li key={x.round_result_id} className="flex flex-wrap items-center gap-3 px-5 py-3">
-      <CalendarClock className="size-5 text-slate-400" />
+      <CalendarClock className="size-5 text-slate-500 dark:text-slate-400" />
       <div className="min-w-0 flex-1"><div className="font-semibold"><a className="hover:underline" href={`/app/candidates/${x.candidate_ref}`}>{x.candidate}</a> <span className="font-normal text-slate-500">· {x.round}, {x.job}</span></div>
         <div className="text-sm text-slate-500">{when(x.starts_at)}{x.location ? ` · ${x.location}` : ''}</div></div>
       {x.meeting_url && x.ends_at > now && <Button size="sm" icon={<Video />} href={x.meeting_url} target="_blank">Join</Button>}

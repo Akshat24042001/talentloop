@@ -1,8 +1,8 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import * as RSelect from '@radix-ui/react-select'
+import * as Popover from '@radix-ui/react-popover'
 import * as RTooltip from '@radix-ui/react-tooltip'
 import clsx from 'clsx'
-import { Check, ChevronDown, ChevronUp, LoaderCircle, X } from 'lucide-react'
+import { Check, ChevronDown, LoaderCircle, X } from 'lucide-react'
 import { Children, Fragment, forwardRef, isValidElement, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Tone } from '../lib/format'
 
@@ -67,11 +67,11 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...p }, ref) {
   return <textarea ref={ref} className={cn(FIELD, 'min-h-28 resize-y leading-relaxed', className)} {...p} />
 })
-// Dropdowns: a styled listbox (Radix Select) with the same props as a native <select> and <option> children,
-// so every form keeps `value` + `onChange={e => ...e.target.value}`. Keyboard, screen readers and `required`
-// in forms work as before; only the look changes.
+// Dropdowns: one styled listbox for the whole app, with the same props as a native <select> and <option> children
+// (`value` + `onChange={e => ...e.target.value}`), so every form keeps working. Long lists (more than 8 options) get
+// a search box. Keyboard: arrows, Home/End, Enter, Escape, type to search. A hidden native <select> keeps `required`
+// and form submission working.
 type Opt = { value: string; label: ReactNode; text: string; disabled?: boolean }
-const EMPTY = '__tl_empty__'                       // Radix reserves "" for "nothing selected"
 const textOf = (n: ReactNode): string => typeof n === 'string' || typeof n === 'number' ? String(n)
   : Array.isArray(n) ? n.map(textOf).join('') : isValidElement(n) ? textOf((n.props as { children?: ReactNode }).children) : ''
 function optionsOf(children: ReactNode): Opt[] {
@@ -84,47 +84,68 @@ function optionsOf(children: ReactNode): Opt[] {
   })
   return out
 }
-type SelectProps = Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> & { onChange?: (e: { target: { value: string }; currentTarget: { value: string } }) => void }
-export function Select({ className, children, value, defaultValue, onChange, id, required, disabled, name, ...rest }: SelectProps) {
+type SelectProps = Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> & { onChange?: (e: { target: { value: string }; currentTarget: { value: string } }) => void; searchable?: boolean }
+export function Select({ className, children, value, defaultValue, onChange, id, required, disabled, name, searchable, ...rest }: SelectProps) {
   const opts = optionsOf(children)
   const [inner, setInner] = useState(String(defaultValue ?? opts[0]?.value ?? ''))
   const cur = value !== undefined ? String(value) : inner
-  const toR = (v: string) => (v === '' ? EMPTY : v)
-  const fromR = (v: string) => (v === EMPTY ? '' : v)
-  const known = opts.some(o => o.value === cur)
   const isPh = (o: Opt) => o.value === '' && /(…|\.\.\.)$/.test(o.text)       // "Select…" is a hint, not a choice
-  const phOpt = opts.find(isPh)
-  const placeholder = cur === '' || !known
-  const rootValue = !known ? '' : cur === '' ? (phOpt ? '' : EMPTY) : cur
+  const choices = opts.filter(o => !isPh(o))
+  const selected = opts.find(o => o.value === cur)
+  const placeholder = !selected || isPh(selected)
+  const label = placeholder ? (opts.find(isPh)?.label ?? 'Select…') : selected!.label
+  const [open, setOpen] = useState(false), [q, setQ] = useState(''), [hi, setHi] = useState(0)
+  const search = searchable ?? choices.length > 8
+  const shown = q ? choices.filter(o => o.text.toLowerCase().includes(q.toLowerCase())) : choices
+  const listId = `${id || name || 'sel'}-list`
+  const pick = (o: Opt) => { if (o.disabled) return; if (value === undefined) setInner(o.value); onChange?.({ target: { value: o.value }, currentTarget: { value: o.value } }); setOpen(false) }
+  const openList = (o: boolean) => { setOpen(o); if (o) { setQ(''); setHi(Math.max(0, choices.findIndex(x => x.value === cur))) } }
+  function keys(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => Math.min(shown.length - 1, h + 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(0, h - 1)) }
+    else if (e.key === 'Home') { e.preventDefault(); setHi(0) }
+    else if (e.key === 'End') { e.preventDefault(); setHi(shown.length - 1) }
+    else if (e.key === 'Enter') { e.preventDefault(); const o = shown[hi]; if (o) pick(o) }
+    else if (!search && e.key.length === 1) { const i = shown.findIndex(o => o.text.toLowerCase().startsWith(e.key.toLowerCase())); if (i >= 0) setHi(i) }
+  }
+  useEffect(() => { document.getElementById(`${listId}-${hi}`)?.scrollIntoView({ block: 'nearest' }) }, [hi, open, listId])
   return (
-    <RSelect.Root value={rootValue} disabled={disabled} required={required} name={name}
-      onValueChange={v => { const x = fromR(v); if (value === undefined) setInner(x); onChange?.({ target: { value: x }, currentTarget: { value: x } }) }}>
-      <RSelect.Trigger id={id} aria-label={rest['aria-label']} title={rest.title}
-        className={cn(TRIGGER, placeholder && 'text-slate-400 dark:text-slate-500', className)}>
-        <span className="min-w-0 flex-1 truncate"><RSelect.Value placeholder={opts.find(o => o.value === '')?.label ?? 'Select…'} /></span>
-        <RSelect.Icon><ChevronDown className="size-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" /></RSelect.Icon>
-      </RSelect.Trigger>
-      <RSelect.Portal>
-        <RSelect.Content position="popper" sideOffset={6} collisionPadding={12}
-          className="z-[70] max-h-[min(var(--radix-select-content-available-height),340px)] min-w-[var(--radix-select-trigger-width)] max-w-[min(92vw,30rem)] overflow-hidden rounded-xl bg-white p-1 text-sm text-slate-800 shadow-xl shadow-slate-900/10 ring-1 ring-slate-200 animate-rise dark:bg-ink-850 dark:text-slate-100 dark:shadow-black/40 dark:ring-ink-700">
-          <RSelect.ScrollUpButton className="grid h-6 place-items-center text-slate-400"><ChevronUp className="size-4" /></RSelect.ScrollUpButton>
-          <RSelect.Viewport>
-            {opts.filter(o => !isPh(o)).map(o => (
-              <RSelect.Item key={o.value} value={toR(o.value)} disabled={o.disabled} textValue={o.text}
-                className={cn('relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-3 pr-8 outline-none',
-                  'data-[highlighted]:bg-brand-50 data-[highlighted]:text-brand-800 dark:data-[highlighted]:bg-brand-500/20 dark:data-[highlighted]:text-white',
-                  'data-[state=checked]:font-semibold data-[disabled]:pointer-events-none data-[disabled]:opacity-40', o.value === '' && 'text-slate-500 dark:text-slate-400')}>
-                <RSelect.ItemText>{o.label}</RSelect.ItemText>
-                <RSelect.ItemIndicator className="absolute right-2.5 text-brand-600 dark:text-brand-300"><Check className="size-4" /></RSelect.ItemIndicator>
-              </RSelect.Item>))}
-          </RSelect.Viewport>
-          <RSelect.ScrollDownButton className="grid h-6 place-items-center text-slate-400"><ChevronDown className="size-4" /></RSelect.ScrollDownButton>
-        </RSelect.Content>
-      </RSelect.Portal>
-    </RSelect.Root>
+    <Popover.Root open={open} onOpenChange={openList}>
+      <Popover.Trigger id={id} type="button" role="combobox" aria-expanded={open} aria-controls={listId} aria-haspopup="listbox" aria-label={rest['aria-label']}
+        title={rest.title} disabled={disabled} data-state={open ? 'open' : 'closed'} onKeyDown={e => { if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); openList(true) } }}
+        className={cn(TRIGGER, placeholder && 'text-slate-500 dark:text-slate-400', className)}>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="grid size-5 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-500 transition-colors group-hover:bg-slate-200 dark:bg-ink-800 dark:text-slate-300 dark:group-hover:bg-ink-700">
+          <ChevronDown className="size-3.5 transition-transform group-data-[state=open]:rotate-180" /></span>
+      </Popover.Trigger>
+      <select aria-hidden tabIndex={-1} required={required} name={name} value={placeholder ? '' : cur} onChange={() => {}} disabled={disabled}
+        className="pointer-events-none absolute h-px w-px opacity-0" onFocus={() => document.getElementById(id || '')?.focus()}>
+        <option value="" />{choices.map(o => <option key={o.value} value={o.value}>{o.text}</option>)}</select>
+      <Popover.Portal>
+        <Popover.Content sideOffset={6} collisionPadding={12} align="start" onKeyDown={keys}
+          onOpenAutoFocus={e => { if (!search) { e.preventDefault(); document.getElementById(listId)?.focus() } }}
+          className="z-[70] w-[var(--radix-popover-trigger-width)] min-w-48 max-w-[min(92vw,30rem)] overflow-hidden rounded-xl bg-white text-sm text-slate-800 shadow-xl shadow-slate-900/10 ring-1 ring-slate-200 animate-rise dark:bg-ink-850 dark:text-slate-100 dark:shadow-black/40 dark:ring-ink-700">
+          {search && <div className="border-b border-slate-100 p-2 dark:border-ink-700">
+            <input autoFocus aria-label="Search options" placeholder="Search…" value={q} onChange={e => { setQ(e.target.value); setHi(0) }}
+              className="w-full rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none ring-1 ring-inset ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 dark:bg-ink-900 dark:text-slate-100 dark:ring-ink-700" /></div>}
+          <div id={listId} role="listbox" tabIndex={-1} aria-activedescendant={`${listId}-${hi}`} className="max-h-[min(var(--radix-popover-content-available-height),320px)] overflow-y-auto p-1 outline-none">
+            {shown.map((o, i) => { const on = o.value === cur && !placeholder; return (
+              <div key={o.value} id={`${listId}-${i}`} role="option" aria-selected={on} aria-disabled={o.disabled || undefined}
+                onMouseEnter={() => setHi(i)} onClick={() => pick(o)}
+                className={cn('relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-3 pr-9 transition-colors',
+                  i === hi && 'bg-brand-50 text-brand-900 dark:bg-brand-500/20 dark:text-white', on && 'font-semibold',
+                  o.value === '' && 'text-slate-500 dark:text-slate-400', o.disabled && 'pointer-events-none opacity-40')}>
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {on && <Check className="absolute right-3 size-4 text-brand-600 dark:text-brand-300" />}
+              </div>) })}
+            {!shown.length && <div className="px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400">No matches</div>}
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   )
 }
-const TRIGGER = 'group flex h-10 w-full items-center gap-2 rounded-xl border-0 bg-white px-3.5 text-left text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-200 hover:ring-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 data-[state=open]:ring-2 data-[state=open]:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-ink-850 dark:text-slate-100 dark:ring-ink-700 dark:hover:ring-ink-600'
+const TRIGGER = 'group relative flex h-10 w-full items-center gap-2 rounded-xl border-0 bg-white pl-3.5 pr-2.5 text-left text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-200 transition-shadow hover:ring-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 data-[state=open]:ring-2 data-[state=open]:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-ink-850 dark:text-slate-100 dark:ring-ink-700 dark:hover:ring-ink-600'
 export function Field({ label, hint, htmlFor, action, children, className }: { label: ReactNode; hint?: ReactNode; htmlFor?: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <div className={className}>
@@ -198,7 +219,7 @@ export function Modal({ open, onOpenChange, title, description, children, footer
             : <Dialog.Description className="sr-only">{typeof title === 'string' ? title : 'Dialog'}</Dialog.Description>}
           {children}
           {footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div>}
-          {dismissable && onOpenChange && <Dialog.Close className="absolute right-4 top-4 rounded-lg p-1 text-slate-400 hover:bg-black/5 hover:text-slate-600 dark:hover:bg-white/10" aria-label="Close"><X className="size-4" /></Dialog.Close>}
+          {dismissable && onOpenChange && <Dialog.Close className="absolute right-4 top-4 rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-black/5 hover:text-slate-600 dark:hover:bg-white/10" aria-label="Close"><X className="size-4" /></Dialog.Close>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

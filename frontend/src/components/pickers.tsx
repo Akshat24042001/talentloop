@@ -28,7 +28,7 @@ export function DatePicker({ id, value, onChange, min, max, placeholder = 'Pick 
   return (
     <Popover.Root open={open} onOpenChange={o => { setOpen(o); if (o) { const d = sel || lo || new Date(); setView(new Date(d.getFullYear(), d.getMonth(), 1)) } }}>
       <Popover.Trigger id={id} type="button" disabled={disabled} aria-label={ariaLabel} className={TRIGGER}>
-        <CalendarDays className="size-4 shrink-0 text-slate-400" />
+        <CalendarDays className="size-4 shrink-0 text-slate-500 dark:text-slate-400" />
         <span className={cn('min-w-0 flex-1 truncate', !label && 'text-slate-400 dark:text-slate-500')}>{label || placeholder}</span>
       </Popover.Trigger>
       <Popover.Portal>
@@ -40,7 +40,7 @@ export function DatePicker({ id, value, onChange, min, max, placeholder = 'Pick 
             <button type="button" aria-label="Next month" onClick={() => setView(new Date(view.getFullYear(), view.getMonth() + 1, 1))} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-ink-800"><ChevronRight className="size-4" /></button>
           </div>
           <div className="grid grid-cols-7 gap-0.5 text-center">
-            {DOW.map(d => <span key={d} className="py-1 text-[11px] font-semibold text-slate-400">{d}</span>)}
+            {DOW.map(d => <span key={d} className="py-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">{d}</span>)}
             {days.map((d, i) => d ? (
               <button key={i} type="button" disabled={off(d)} aria-label={d.toDateString()} aria-pressed={iso(d) === value}
                 onClick={() => { onChange(iso(d)); setOpen(false) }}

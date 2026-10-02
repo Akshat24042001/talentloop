@@ -199,9 +199,9 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">AI recommendation <span className="normal-case tracking-normal font-normal">(HR decides)</span></div>
           {rep ? <><div className={cn('mt-2 text-4xl font-bold tracking-tight', REC_TONE[rep.recommendation] === 'success' ? 'text-emerald-600 dark:text-emerald-400' : REC_TONE[rep.recommendation] === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>{REC_LABEL[rep.recommendation] || rep.recommendation}</div>
             <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{REC_DETAIL[rep.recommendation] ? `AI grade: ${REC_DETAIL[rep.recommendation]} · ` : ''}Confidence: {rep.confidence || '-'}</div></>
-            : <div className="mt-2 text-xl font-semibold text-slate-400">{rec.status === 'in_progress' ? 'Interview in progress' : rec.status === 'created' ? 'Not taken yet' : 'Not scored yet'}</div>}
+            : <div className="mt-2 text-xl font-semibold text-slate-500 dark:text-slate-400">{rec.status === 'in_progress' ? 'Interview in progress' : rec.status === 'created' ? 'Not taken yet' : 'Not scored yet'}</div>}
           <div className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Overall score</div>
-          <div className="tabular mt-1 text-5xl font-bold tracking-tight text-slate-900 dark:text-white">{overall != null ? overall.toFixed(1) : '-'}<span className="text-xl font-semibold text-slate-400"> / 5</span></div>
+          <div className="tabular mt-1 text-5xl font-bold tracking-tight text-slate-900 dark:text-white">{overall != null ? overall.toFixed(1) : '-'}<span className="text-xl font-semibold text-slate-500 dark:text-slate-400"> / 5</span></div>
           <div className="relative mt-3 h-2 rounded-r-full bg-[var(--track)]" role="img" aria-label={`Overall ${overall ?? 'not scored'} out of 5`}><i className="absolute inset-y-0 left-0 rounded-r-full bg-[var(--series-1)]" style={{ width: `${overall != null ? (overall / 5) * 100 : 0}%` }} /></div>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Weighted by competency, computed from the per-question scores.</p>
         </Card>
@@ -234,10 +234,10 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
           <p className="text-[15px] leading-relaxed text-slate-700 dark:text-slate-200">{rep.summary}</p>
           {!!rep.human_review_reasons?.length && <div className="mt-4 space-y-2">{rep.human_review_reasons.map((r: string) => <Alert key={r} tone={/^DISQUALIFIED/.test(r) ? 'danger' : 'warning'} icon={<TriangleAlert />}>{r}</Alert>)}</div>}
           <div className="mt-5 grid gap-5 md:grid-cols-2">
-            <div><h4 className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Strengths</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-200">{(rep.strengths || []).map((s: string) => <li key={s}>{s}</li>)}{!rep.strengths?.length && <li className="text-slate-400">None noted</li>}</ul></div>
+            <div><h4 className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Strengths</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-200">{(rep.strengths || []).map((s: string) => <li key={s}>{s}</li>)}{!rep.strengths?.length && <li className="text-slate-500 dark:text-slate-400">None noted</li>}</ul></div>
             <div><h4 className="text-sm font-semibold text-amber-700 dark:text-amber-400">Concerns</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-200">
               {(rep.concerns || []).map((s: string) => <li key={s}>{s}</li>)}{(rep.red_flags || []).map((s: string) => <li key={s} className="text-red-600 dark:text-red-400"><b>Red flag:</b> {s}</li>)}
-              {!rep.concerns?.length && !rep.red_flags?.length && <li className="text-slate-400">None noted</li>}</ul></div>
+              {!rep.concerns?.length && !rep.red_flags?.length && <li className="text-slate-500 dark:text-slate-400">None noted</li>}</ul></div>
           </div>
         </Section>
       )}
@@ -294,7 +294,7 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
                     </div>
                   </div>
                   <div className="w-36 shrink-0">
-                    <div className="tabular text-3xl font-bold text-slate-900 dark:text-white">{r.score ?? '-'}<span className="text-sm font-medium text-slate-400"> / 5 AI</span></div>
+                    <div className="tabular text-3xl font-bold text-slate-900 dark:text-white">{r.score ?? '-'}<span className="text-sm font-medium text-slate-500 dark:text-slate-400"> / 5 AI</span></div>
                     {q.scored && <Select aria-label="Your score" className="mt-2 py-1.5" value={hrs[q.id] || ''} onChange={e => setHrs(h => ({ ...h, [q.id]: e.target.value }))}>
                       <option value="">Your score</option>{[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}</Select>}
                   </div>

@@ -48,14 +48,14 @@ function OrgSwitcher() {
       <button onClick={() => others.length && setOpen(o => !o)} className={cn('flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left ring-1 ring-slate-200 dark:ring-ink-700', others.length && 'hover:bg-slate-50 dark:hover:bg-ink-850')}>
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-slate-900 text-xs font-bold text-white dark:bg-white dark:text-ink-900">{me.org.name.slice(0, 1).toUpperCase()}</span>
         <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{me.org.name}</span><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{me.role_label}</span></span>
-        {others.length > 0 && <ChevronsUpDown className="size-4 text-slate-400" />}
+        {others.length > 0 && <ChevronsUpDown className="size-4 text-slate-500 dark:text-slate-400" />}
       </button>
       {open && (
         <div className="absolute inset-x-0 top-full z-40 mt-1 rounded-xl bg-white p-1 shadow-xl ring-1 ring-slate-200 dark:bg-ink-850 dark:ring-ink-700">
           {others.map(m => (
             <button key={m.org_id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-ink-800"
               onClick={async () => { await api('/api/auth/switch-org', { json: { org_id: m.org_id } }); await refresh(); setOpen(false); toast(`Switched to ${m.name}`); location.href = '/app' }}>
-              <Building2 className="size-4 text-slate-400" />{m.name}
+              <Building2 className="size-4 text-slate-500 dark:text-slate-400" />{m.name}
             </button>
           ))}
         </div>
@@ -74,7 +74,7 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
       <div className="mt-5"><OrgSwitcher /></div>
       <nav className="mt-5 space-y-0.5">{NAV.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>
       {me?.can.manage_jobs && <>
-        <div className="mx-3 mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Hiring</div>
+        <div className="mx-3 mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Hiring</div>
         <nav className="space-y-0.5">{NAV_HIRING.filter(n => n.href !== '/app/audit' || me.can.manage_team).map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>
       </>}
       <div className="mx-3 my-4 h-px bg-slate-100 dark:bg-ink-800" />
@@ -118,7 +118,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-ink-950/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-y-auto bg-white px-4 py-5 shadow-2xl dark:bg-ink-900 animate-rise">
-            <button aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-ink-800"><X className="size-4" /></button>
+            <button aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-ink-800"><X className="size-4" /></button>
             <Sidebar path={path} onNav={() => setOpen(false)} />
           </div>
         </div>

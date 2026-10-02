@@ -53,7 +53,7 @@ export function ReportView({ r, compact }: { r: AIReport; compact?: boolean }) {
       <button className="flex w-full items-center justify-between gap-2 text-left" onClick={() => setOpen(o => !o)} aria-expanded={open}>
         <span className="flex flex-wrap items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-brand-600 dark:text-brand-300" />AI match report
           {v && <Badge tone={v.tone}>{v.label}</Badge>}{r.score != null && <span className="tabular text-slate-500">{r.score}/100</span>}</span>
-        <ChevronDown className={cn('size-4 text-slate-400 transition-transform', open && 'rotate-180')} />
+        <ChevronDown className={cn('size-4 text-slate-500 dark:text-slate-400 transition-transform', open && 'rotate-180')} />
       </button>
       <p className="mt-2 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{r.summary}</p>
       {open && (

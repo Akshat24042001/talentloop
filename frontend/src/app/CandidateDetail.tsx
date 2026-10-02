@@ -109,15 +109,15 @@ export default function CandidateDetail({ id }: { id: string }) {
         </div>
         <div className="space-y-4">
           <Card><CardBody className="space-y-2 text-sm">
-            {c.email && <a href={`mailto:${c.email}`} className="flex items-center gap-2 hover:underline"><Mail className="size-4 text-slate-400" />{c.email}</a>}
-            {c.phone && <a href={`tel:${c.phone}`} className="flex items-center gap-2"><Phone className="size-4 text-slate-400" />{c.phone}</a>}
-            {c.location && <div className="flex items-center gap-2"><MapPin className="size-4 text-slate-400" />{c.location}</div>}
+            {c.email && <a href={`mailto:${c.email}`} className="flex items-center gap-2 hover:underline"><Mail className="size-4 text-slate-500 dark:text-slate-400" />{c.email}</a>}
+            {c.phone && <a href={`tel:${c.phone}`} className="flex items-center gap-2"><Phone className="size-4 text-slate-500 dark:text-slate-400" />{c.phone}</a>}
+            {c.location && <div className="flex items-center gap-2"><MapPin className="size-4 text-slate-500 dark:text-slate-400" />{c.location}</div>}
             {p.linkedin && <a href={p.linkedin.startsWith('http') ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener" className="flex items-center gap-2 text-brand-600 dark:text-brand-400 hover:underline"><ExternalLink className="size-4" />LinkedIn</a>}
             <div className="pt-2 text-xs text-slate-500">{SOURCE_LABEL[c.source] || c.source} · added <Ago ts={c.created_at} />{c.notice_days != null ? ` · ${c.notice_days} days notice` : ''}</div>
           </CardBody></Card>
           <Card><CardHeader title="Applications" /><CardBody className="space-y-2 pt-3">
             {!c.applications.length && <p className="text-sm text-slate-500">Not in any job pipeline yet.</p>}
-            {c.applications.map(a => <a key={a.id} href={`/app/jobs/${a.job_ref}?tab=pipeline&app=${a.ref || a.id}`} className="flex items-center justify-between gap-2 rounded-lg p-2 text-sm hover:bg-slate-50 dark:hover:bg-ink-850"><span className="flex items-center gap-2"><Briefcase className="size-4 text-slate-400" />{a.job}</span><Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge></a>)}
+            {c.applications.map(a => <a key={a.id} href={`/app/jobs/${a.job_ref}?tab=pipeline&app=${a.ref || a.id}`} className="flex items-center justify-between gap-2 rounded-lg p-2 text-sm hover:bg-slate-50 dark:hover:bg-ink-850"><span className="flex items-center gap-2"><Briefcase className="size-4 text-slate-500 dark:text-slate-400" />{a.job}</span><Badge tone={STAGE_TONE[a.stage]}>{a.stage_label}</Badge></a>)}
             {me.can.manage_jobs && notApplied.length > 0 && <div className="flex gap-2 pt-2">
               <Select aria-label="Job" className="py-1.5 text-[13px]" value={addTo} onChange={e => setAddTo(e.target.value)}><option value="">Add to a job…</option>{notApplied.map(b => <option key={b.job_id} value={b.job_id}>{b.title}</option>)}</Select>
               <Button size="sm" disabled={!addTo} onClick={add} icon={<UserPlus />}>Add</Button></div>}

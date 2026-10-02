@@ -110,7 +110,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: { t
 }
 
 export function scoreTone(s: number | null | undefined): string {
-  if (s == null) return 'text-slate-400'
+  if (s == null) return 'text-slate-500 dark:text-slate-400'
   return s >= 75 ? 'text-emerald-600 dark:text-emerald-400' : s >= 55 ? 'text-brand-600 dark:text-brand-300' : s >= 40 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'
 }
 export function ScoreBar({ value, max = 100, className }: { value: number | null | undefined; max?: number; className?: string }) {
@@ -177,7 +177,7 @@ export function ListInput({ value, onChange, placeholder }: { value: string[]; o
           <input value={v} placeholder={i === 0 ? placeholder : ''} onChange={e => { const n = [...rows]; n[i] = e.target.value; onChange(n) }}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const n = [...rows]; n.splice(i + 1, 0, ''); onChange(n); setTimeout(() => (e.target as HTMLInputElement).parentElement?.nextElementSibling?.querySelector('input')?.focus(), 0) } }}
             className="block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm shadow-sm ring-1 ring-inset ring-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-ink-850 dark:ring-ink-700" />
-          <button type="button" aria-label="Remove line" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800"><X className="size-4" /></button>
+          <button type="button" aria-label="Remove line" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="rounded-lg px-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800"><X className="size-4" /></button>
         </div>
       ))}
       <Button type="button" size="sm" variant="ghost" onClick={() => onChange([...rows, ''])}>+ Add line</Button>

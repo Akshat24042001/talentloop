@@ -109,7 +109,7 @@ export default function JobEditor({ id }: { id?: string }) {
             {meta.sections.map(s => {
               const miss = s.fields.filter(f => missing.includes(f)).length
               return <button type="button" key={s.id} aria-current={active === s.id ? 'step' : undefined}
-                onClick={() => go(s.id)} className={cn('flex items-center justify-between rounded-lg px-3 py-2 text-sm', active === s.id ? 'bg-white font-semibold shadow-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300')}>
+                onClick={() => go(s.id)} className={cn('flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm', active === s.id ? 'bg-white font-semibold text-slate-900 shadow-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:text-white dark:ring-ink-700' : 'text-slate-600 hover:bg-white/60 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-ink-900/60 dark:hover:text-white')}>
                 {s.title}{miss ? <span className="grid size-5 place-items-center rounded-full bg-red-100 text-[11px] font-bold text-red-700 dark:bg-red-500/20 dark:text-red-300">{miss}</span> : <Check className="size-3.5 text-emerald-500" />}</button>
             })}
             <div className="mt-4 rounded-xl bg-white p-3 text-xs ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700">
@@ -128,7 +128,7 @@ export default function JobEditor({ id }: { id?: string }) {
           {meta.sections.map((s, i) => s.id !== active ? null : (
             <Card key={s.id} id={`sec-${s.id}`} className="p-5 sm:p-6 animate-rise">
               <div className="flex items-start justify-between gap-3"><div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Step {i + 1} of {meta.sections.length}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Step {i + 1} of {meta.sections.length}</div>
                 <h2 className="mt-1 text-base font-semibold">{s.title}</h2>
                 <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{s.description}</p></div></div>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">

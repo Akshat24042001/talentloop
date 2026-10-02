@@ -76,7 +76,7 @@ export default function FlowBuilder({ jobId, canEdit, canManage = false }: { job
               return (
                 <button key={t.type} draggable onDragStart={() => setDrag({ type: t.type })} onDragEnd={() => { setDrag(null); setOver(null) }} onClick={() => add(t.type)} title={t.description}
                   className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm ring-1 ring-slate-200 hover:bg-slate-50 hover:ring-brand-300 dark:ring-ink-700 dark:hover:bg-ink-850">
-                  <Icon className="size-4 shrink-0 text-brand-500" /><span className="min-w-0 flex-1 truncate font-medium">{SHORT_LABEL[t.type]}</span><Plus className="size-3.5 text-slate-400" />
+                  <Icon className="size-4 shrink-0 text-brand-500" /><span className="min-w-0 flex-1 truncate font-medium">{SHORT_LABEL[t.type]}</span><Plus className="size-3.5 text-slate-500 dark:text-slate-400" />
                 </button>)
             })}
           </CardBody>
@@ -101,7 +101,7 @@ export default function FlowBuilder({ jobId, canEdit, canManage = false }: { job
                   {canEdit && i > 0 ? <GripVertical className="size-4 shrink-0 cursor-grab text-slate-300" /> : <span className="w-4" />}
                   <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300"><Icon className="size-[18px]" /></span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-1.5"><span className="tabular text-xs text-slate-400">{i + 1}.</span><span className="truncate font-semibold">{r.name}</span>
+                    <span className="flex flex-wrap items-center gap-1.5"><span className="tabular text-xs text-slate-500 dark:text-slate-400">{i + 1}.</span><span className="truncate font-semibold">{r.name}</span>
                       {!saved(r.id) && <Badge tone="brand">New</Badge>}</span>
                     <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{SHORT_LABEL[r.type]} · {ruleText(r)}{r.deadline_days ? ` · ${r.deadline_days}d deadline` : ''}</span>
                   </span>
@@ -109,7 +109,7 @@ export default function FlowBuilder({ jobId, canEdit, canManage = false }: { job
                   {canEdit && i > 0 && <span className="flex opacity-60 group-hover:opacity-100">
                     <button aria-label="Move up" disabled={i < 2} onClick={e => { e.stopPropagation(); move(i, i - 1) }} className="rounded p-1 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-ink-800"><ArrowUp className="size-4" /></button>
                     <button aria-label="Move down" disabled={i === rounds.length - 1} onClick={e => { e.stopPropagation(); move(i, i + 1) }} className="rounded p-1 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-ink-800"><ArrowDown className="size-4" /></button>
-                    <button aria-label="Remove round" onClick={e => { e.stopPropagation(); remove(r.id) }} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><Trash2 className="size-4" /></button>
+                    <button aria-label="Remove round" onClick={e => { e.stopPropagation(); remove(r.id) }} className="rounded p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-ink-800"><Trash2 className="size-4" /></button>
                   </span>}
                 </div>
               </li>)
@@ -321,7 +321,7 @@ function Slots({ jobId, roundId, team, interviewers, minutes }: { jobId: string;
       <ul className="max-h-56 space-y-1 overflow-y-auto text-sm">{(data || []).map(s => (
         <li key={s.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-ink-850">
           <span className="tabular flex-1">{when(s.starts_at)}{s.interviewer ? <span className="text-slate-500"> · {s.interviewer}</span> : null}</span>
-          {s.booked ? <Badge tone="violet">{s.candidate?.name || 'Booked'}</Badge> : <button aria-label="Delete slot" onClick={() => del(s.id)} className="text-slate-400 hover:text-red-600"><Trash2 className="size-3.5" /></button>}
+          {s.booked ? <Badge tone="violet">{s.candidate?.name || 'Booked'}</Badge> : <button aria-label="Delete slot" onClick={() => del(s.id)} className="text-slate-500 dark:text-slate-400 hover:text-red-600"><Trash2 className="size-3.5" /></button>}
         </li>))}</ul>
       <Modal open={open} onOpenChange={setOpen} title="Add interview slots" description="Candidates pick one of these times themselves (at least an hour ahead)."
         footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" loading={busy} onClick={create}>Add slots</Button></>}>

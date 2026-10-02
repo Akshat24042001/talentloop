@@ -187,7 +187,7 @@ function TestRunner({ base, first, stream, onFinish }: { base: string; first: Se
         const a = ans[it.qid]
         return (
           <Card key={it.qid} className="p-5">
-            <div className="mb-3 flex gap-2"><span className="tabular font-semibold text-slate-400">{it.n}.</span><p className="flex-1 whitespace-pre-line font-medium">{it.text}</p>{it.marks !== 1 && <span className="text-xs text-slate-500">{it.marks} marks</span>}</div>
+            <div className="mb-3 flex gap-2"><span className="tabular font-semibold text-slate-500 dark:text-slate-400">{it.n}.</span><p className="flex-1 whitespace-pre-line font-medium">{it.text}</p>{it.marks !== 1 && <span className="text-xs text-slate-500">{it.marks} marks</span>}</div>
             {it.kind === 'numeric' ? <input type="number" step="any" aria-label={`Answer to question ${it.n}`} className="h-10 w-48 rounded-xl px-3 ring-1 ring-slate-200 dark:bg-ink-850 dark:ring-ink-700" defaultValue={typeof a === 'number' ? a : ''} onBlur={e => answer(it, e.target.value === '' ? null : +e.target.value)} />
               : <div className="space-y-2">{it.options.map((o, i) => {
                 const on = Array.isArray(a) && a.includes(i)

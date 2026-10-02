@@ -42,7 +42,7 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
   return (
     <>
       <PageHeader back={<BackLink href={`/app/jobs/${d.job.ref}`}>{d.job.title}</BackLink>}
-        title={<span>{d.candidate.name} <span className="font-normal text-slate-400">for</span> {d.job.title}</span>}
+        title={<span>{d.candidate.name} <span className="font-normal text-slate-500 dark:text-slate-400">for</span> {d.job.title}</span>}
         description={[d.candidate.headline, d.candidate.current_company, d.candidate.location, d.candidate.years != null ? `${d.candidate.years} years` : ''].filter(Boolean).join(' · ')}
         actions={<>
           <Button icon={<Printer />} onClick={() => print()}>Print</Button>
@@ -71,7 +71,7 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
             <div className="flex h-4 overflow-hidden rounded-full bg-[var(--track)]" role="img" aria-label={`Fit score ${Math.round(d.score)} of 100`}>
               {d.signals.map((s, i) => <span key={s.key} title={`${s.label}: ${s.points} points`} style={{ width: `${s.points}%`, opacity: 1 - i * 0.15 }} className="h-full bg-[var(--series-1)] first:rounded-l-full [&+span]:border-l [&+span]:border-white/70 dark:[&+span]:border-ink-900/70" />)}
             </div>
-            <div className="mt-1 flex justify-between text-[11px] text-slate-400"><span>0</span><span className="font-semibold text-slate-700 dark:text-slate-200">{Math.round(d.score)} of 100</span><span>100</span></div>
+            <div className="mt-1 flex justify-between text-[11px] text-slate-500 dark:text-slate-400"><span>0</span><span className="font-semibold text-slate-700 dark:text-slate-200">{Math.round(d.score)} of 100</span><span>100</span></div>
             <table className="mt-4 w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500 dark:text-slate-400"><th className="pb-2 font-medium">Signal</th><th className="pb-2 font-medium">Score</th><th className="pb-2 text-right font-medium">Weight</th><th className="pb-2 text-right font-medium">Points</th></tr></thead>
               <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{d.signals.map((s, i) => (

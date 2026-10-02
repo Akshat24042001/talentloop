@@ -23,7 +23,7 @@ export default function Jobs() {
         actions={me.can.manage_jobs && <>{me.org && <Button href={`/careers/${me.org.slug}`} target="_blank" icon={<Copy />}>Careers page</Button>}<Button variant="primary" href="/app/jobs/new" icon={<Plus />}>New job</Button></>} />
       <Card className="overflow-hidden">
         <div className="grid gap-2 border-b border-slate-100 p-4 dark:border-ink-800 sm:grid-cols-[2fr_1fr_1fr]">
-          <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
             <Input type="search" aria-label="Search jobs" className="pl-9" placeholder="Search title, department or location" value={q} onChange={e => setQ(e.target.value)} /></div>
           <Select aria-label="Status" value={st} onChange={e => setSt(e.target.value)}><option value="">All statuses</option>{Object.entries(JOB_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</Select>
           <Select aria-label="Department" value={dep} onChange={e => setDep(e.target.value)}><option value="">All departments</option>{deps.map(d => <option key={d}>{d}</option>)}</Select>

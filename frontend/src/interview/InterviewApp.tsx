@@ -80,7 +80,7 @@ function Consent({ s }: { s: State }) {
         <section className="animate-rise">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-300"><Bot className="size-3.5" />AI interview</span>
           <h1 id="title" className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{P.role || 'Interview'}</h1>
-          {P.company && <p className="mt-1 text-lg text-slate-400">{P.company}</p>}
+          {P.company && <p className="mt-1 text-lg text-slate-500 dark:text-slate-400">{P.company}</p>}
           <p className="mt-5 text-[15px] leading-relaxed text-slate-300">{first ? `Hi ${first}, welcome.` : 'Welcome.'} This is a first-round conversation with an AI interviewer. Here's how it works:</p>
           <ul className="mt-6 grid gap-2.5">
             {rules.filter(r => r.show !== false).map((r, i) => (
@@ -94,7 +94,7 @@ function Consent({ s }: { s: State }) {
         <aside className="lg:pt-12">
           <div className="sticky top-6 rounded-3xl bg-ink-850/80 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
             <h2 className="text-lg font-semibold text-white">{P.resuming ? 'Rejoin your interview' : 'Before you begin'}</h2>
-            <p className="mt-1 text-sm text-slate-400">Next, we'll check your camera, microphone{P.require_screen_share ? ', screen' : ''} and connection.</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Next, we'll check your camera, microphone{P.require_screen_share ? ', screen' : ''} and connection.</p>
             <label className="mt-5 flex cursor-pointer gap-3 rounded-2xl bg-white/[.04] p-4 ring-1 ring-white/10 hover:bg-white/[.06]">
               <input id="consent" type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} className="mt-0.5 size-[18px] shrink-0 accent-brand-500" />
               <span className="text-[12.5px] leading-relaxed text-slate-300">I agree that this interview (my camera video, audio, screen if shared, snapshots, transcript and the events above) will be recorded and processed by AI services, including cloud providers that may be outside India, only to evaluate my application. A person at the company reviews the result and makes the decision. I can ask HR for a human interview instead, and ask for my data to be deleted.</span>
@@ -115,7 +115,7 @@ function CheckRow({ id, c, icon }: { id: string; c: State['checks'][CheckKey]; i
   return (
     <li id={id} className={cn('flex items-center gap-3 rounded-xl px-3.5 py-3 ring-1 transition-colors', c.state || 'pending',
       c.state === 'ok' ? 'bg-emerald-500/[.07] ring-emerald-500/20' : c.state === 'bad' ? 'bg-red-500/10 ring-red-500/25' : 'bg-white/[.03] ring-white/[.07]')}>
-      <span className="text-slate-400 [&_svg]:size-[18px]">{icon}</span>
+      <span className="text-slate-500 dark:text-slate-400 [&_svg]:size-[18px]">{icon}</span>
       <span className={cn('min-w-0 flex-1 text-sm', c.state === 'bad' ? 'text-red-200' : 'text-slate-200')}>{c.text}</span>
       {c.state === 'ok' ? <span className="grid size-6 place-items-center rounded-full bg-emerald-500 text-white"><Check className="size-3.5" strokeWidth={3} /></span>
         : c.state === 'bad' ? <span className="grid size-6 place-items-center rounded-full bg-red-500 text-white"><X className="size-3.5" strokeWidth={3} /></span>
@@ -135,7 +135,7 @@ function Lobby({ s }: { s: State }) {
         <section>
           <div className="relative aspect-video overflow-hidden rounded-3xl bg-ink-900 shadow-2xl ring-1 ring-white/10">
             <video id="preview" ref={vref.preview} className="mirror size-full object-cover" autoPlay muted playsInline />
-            {!s.checks.cam.state && <div className="absolute inset-0 grid place-items-center text-sm text-slate-400"><span className="flex items-center gap-2"><Spinner className="size-4" />Starting your camera...</span></div>}
+            {!s.checks.cam.state && <div className="absolute inset-0 grid place-items-center text-sm text-slate-500 dark:text-slate-400"><span className="flex items-center gap-2"><Spinner className="size-4" />Starting your camera...</span></div>}
             <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/60 to-transparent p-4">
               <span className="rounded-lg bg-black/50 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">{P.candidate_name || 'You'}</span>
               <div className="flex items-center gap-2 rounded-lg bg-black/50 px-2.5 py-1.5 backdrop-blur">
@@ -148,11 +148,11 @@ function Lobby({ s }: { s: State }) {
               <span className="absolute bottom-1.5 left-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">Your screen</span>
             </div>}
           </div>
-          <p className="mt-3 text-center text-sm text-slate-400">Say "Hello, my name is ..." to test your microphone.</p>
+          <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">Say "Hello, my name is ..." to test your microphone.</p>
         </section>
         <aside className="rounded-3xl bg-ink-850/80 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
           <h2 className="text-xl font-semibold text-white">Ready to join?</h2>
-          <p className="mt-1 text-sm text-slate-400">{P.role}{P.company ? ` · ${P.company}` : ''}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{P.role}{P.company ? ` · ${P.company}` : ''}</p>
           <ul className="mt-5 grid gap-2">
             <CheckRow id="ckCam" c={s.checks.cam} icon={<Video />} />
             <CheckRow id="ckMic" c={s.checks.mic} icon={<Mic />} />
@@ -168,7 +168,7 @@ function Lobby({ s }: { s: State }) {
           {s.shareErr && <p className="mt-3 text-sm text-red-300">{s.shareErr}</p>}
           {s.err2 && <p className="mt-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-200 ring-1 ring-red-500/20">{s.err2}</p>}
           <Button id="startBtn" variant="primary" size="lg" className="mt-6 w-full" disabled={!s.startReady} loading={s.starting} onClick={() => engine.begin()}>Join interview</Button>
-          <p id="checkMsg" className="mt-3 min-h-5 text-center text-sm text-slate-400">{s.rejoin.left != null ? (s.rejoin.left > 0 ? `${s.rejoin.left}s left to rejoin` : 'Rejoin window has passed.') : s.checkMsg}</p>
+          <p id="checkMsg" className="mt-3 min-h-5 text-center text-sm text-slate-500 dark:text-slate-400">{s.rejoin.left != null ? (s.rejoin.left > 0 ? `${s.rejoin.left}s left to rejoin` : 'Rejoin window has passed.') : s.checkMsg}</p>
         </aside>
       </div>
     </Shell>
@@ -188,7 +188,7 @@ function Done({ s }: { s: State }) {
         </div>
         <h1 id="doneTitle" className="mt-5 text-2xl font-semibold tracking-tight text-white">{s.done.title}</h1>
         <p id="doneMsg" className="mt-2 text-[15px] leading-relaxed text-slate-300">{s.done.msg}</p>
-        <p id="uploadMsg" className="mt-3 min-h-5 text-sm text-slate-400">{s.uploadMsg}</p>
+        <p id="uploadMsg" className="mt-3 min-h-5 text-sm text-slate-500 dark:text-slate-400">{s.uploadMsg}</p>
         {s.rejoin.show && (
           <div id="reconnectBox" className="mt-4 flex flex-col items-center gap-2">
             <Button id="reconnectBtn" variant="primary" size="lg" icon={<RefreshCw />} disabled={s.starting || s.rejoin.left === 0} loading={s.starting} onClick={() => engine.begin()}>Rejoin now</Button>
@@ -296,7 +296,7 @@ function CallStage({ s }: { s: State }) {
           <Logo compact />
           <div className="min-w-0">
             <div id="callTitle" className="truncate text-sm font-semibold text-white">{P.role}</div>
-            {P.company && <div className="truncate text-xs text-slate-400">{P.company}</div>}
+            {P.company && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{P.company}</div>}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -332,16 +332,16 @@ function CallStage({ s }: { s: State }) {
                   {!q ? 'Starting' : q.kind === 'closing' ? 'Wrapping up' : q.kind === 'follow_up' ? 'Follow-up' : q.kind === 'rephrase' ? 'Rephrased' : 'Current question'}
                 </span>
               </div>
-              {q?.kind === 'follow_up' && q.main && <p className="mt-3 text-[13px] leading-relaxed text-slate-400"><span className="font-semibold text-slate-300">About: </span>{q.main}</p>}
+              {q?.kind === 'follow_up' && q.main && <p className="mt-3 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400"><span className="font-semibold text-slate-300">About: </span>{q.main}</p>}
               <p id="qText" key={q ? `${q.kind}${q.text}` : 'none'} className="mt-3 animate-rise text-xl font-semibold leading-snug text-white sm:text-[22px]">
                 {!q ? 'Connecting you to your interviewer...' : q.kind === 'closing' ? "That's the end of the interview. Thank you for your time!" : q.text}
               </p>
-              <p className="mt-4 flex gap-2 text-[12.5px] leading-relaxed text-slate-400"><Mic className="mt-0.5 size-3.5 shrink-0" />Answer out loud and take your time. When you finish, just pause. Say "please repeat" if you missed anything.</p>
+              <p className="mt-4 flex gap-2 text-[12.5px] leading-relaxed text-slate-500 dark:text-slate-400"><Mic className="mt-0.5 size-3.5 shrink-0" />Answer out loud and take your time. When you finish, just pause. Say "please repeat" if you missed anything.</p>
             </div>
             {s.muted && <div id="mutedBanner" className="flex items-start gap-2.5 rounded-2xl bg-amber-500/10 p-3.5 text-sm text-amber-200 ring-1 ring-amber-500/20"><MicOff className="mt-0.5 size-4 shrink-0" />You're muted, so the interviewer can't hear you. Unmute to answer.</div>}
             {s.err3 && <div className="rounded-2xl bg-red-500/10 p-3.5 text-sm text-red-200 ring-1 ring-red-500/20">{s.err3}</div>}
             <div className="flex min-h-[180px] flex-1 flex-col rounded-3xl bg-ink-850 ring-1 ring-white/[.08] lg:min-h-0">
-              <div className="flex items-center gap-2 border-b border-white/[.06] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400"><MessageSquareText className="size-3.5" />Live transcript</div>
+              <div className="flex items-center gap-2 border-b border-white/[.06] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"><MessageSquareText className="size-3.5" />Live transcript</div>
               <div ref={tx} id="captions" aria-live="polite" className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
                 {!s.lines.length && <p className="text-sm text-slate-500">The conversation will appear here.</p>}
                 {s.lines.map(l => (
@@ -417,7 +417,7 @@ function Overlays({ s }: { s: State }) {
       </Overlay>
       <Overlay id="monOverlay" show={s.overlay.mon} icon={<Monitor />} title="Second screen detected">
         This interview must be taken on one screen. Disconnect the extra monitor (or set your displays to "Duplicate") to continue. The interviewer has been notified.
-        <p className="mt-3 text-xs text-slate-400">This closes by itself once only one screen is connected.</p>
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">This closes by itself once only one screen is connected.</p>
       </Overlay>
       <Overlay id="dqOverlay" show={s.overlay.dq} icon={<ShieldCheck />} title="The interview has been stopped">
         You left the interview after the final warning. The hiring team has been informed.
