@@ -72,6 +72,11 @@ export default function Board({ jobId }: { jobId: string }) {
     else if (!col.round || col.round.id === a.round_id) return
     try { await api(`/api/applications/${a.id}/decide`, { json: { action, round_id: col.round?.id } }); toast(`${a.candidate.name} → ${col.title}`); reload() } catch (e: any) { toast(e.message) }
   }
+  async function startWaiting(col: Col) {
+    const ids = col.items.filter(a => a.current?.status === 'pending').map(a => a.id)
+    if (!confirm(`Start "${col.title}" for ${ids.length} candidate(s)? Their invitations go out now.`)) return
+    try { const r = await api<{ done: number; errors: { error: string }[] }>('/api/applications/bulk', { json: { ids, action: 'move', round_id: col.round!.id } }); toast(`${r.done} started${r.errors.length ? `, ${r.errors.length} skipped` : ''}`); reload() } catch (e: any) { toast(e.message) }
+  }
   async function topN(r: Round) {
     const n = prompt(`Pass the best N in "${r.name}" (by score). N =`, String(r.pass_rule.value || 10)); if (!n) return
     const rest = confirm('Also mark everyone else who finished this round as not progressed? (Cancel keeps them waiting.)')
@@ -121,7 +126,8 @@ export default function Board({ jobId }: { jobId: string }) {
                 <header className="flex items-center gap-2 px-1.5 pb-2 pt-1">
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={col.title}>{col.title}</span>
                   <span className="tabular rounded-full bg-white px-1.5 text-xs font-semibold text-slate-600 dark:bg-ink-800 dark:text-slate-300">{col.items.length}</span>
-                  {canEdit && col.round?.pass_rule.mode === 'top_n' && col.items.some(a => a.round_status === 'submitted') && <Button size="sm" variant="subtle" onClick={() => topN(col.round!)}>Pass top {col.round.pass_rule.value}</Button>}
+                  {canEdit && col.round && col.items.some(a => a.current?.status === 'pending') && <Button size="sm" variant="subtle" onClick={() => startWaiting(col)}>Start {col.items.filter(a => a.current?.status === 'pending').length}</Button>}
+                  {data.permission === 'manage' && col.round?.pass_rule.mode === 'top_n' && col.items.some(a => a.round_status === 'submitted') && <Button size="sm" variant="subtle" onClick={() => topN(col.round!)}>Pass top {col.round.pass_rule.value}</Button>}
                 </header>
                 <div className="flex max-h-[65vh] flex-col gap-2 overflow-y-auto">
                   {col.items.map(a => <CardItem key={a.id} a={a} checked={sel.has(a.id)} onCheck={canEdit ? () => toggle(a.id) : undefined} onOpen={() => openApp(a.id)} draggable={canEdit} onDrag={() => setDragId(a.id)} />)}

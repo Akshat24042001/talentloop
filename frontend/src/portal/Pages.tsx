@@ -236,7 +236,8 @@ export function DrivePage({ code }: { code: string }) {
     setBusy(true)
     const fd = new FormData(); fd.append('data', JSON.stringify({ ...f, answers, consent }))
     if (resume) fd.append('resume', resume); if (photo) fd.append('photo', photo, 'photo.jpg')
-    try { setDone(await send(`/api/drive/${code}/register`, undefined, fd)) } catch (e: any) { setErr(e.message) }
+    try { setDone(await send(`/api/drive/${code}/register`, undefined, fd)); window.scrollTo(0, 0) }
+    catch (e: any) { setErr(e.message); requestAnimationFrame(() => document.getElementById('dv-err')?.scrollIntoView({ behavior: 'smooth', block: 'center' })) }
     setBusy(false)
   }
   if (done) return (
@@ -252,7 +253,6 @@ export function DrivePage({ code }: { code: string }) {
       {(data.opens_at || data.closes_at) && <p className="mt-2 text-sm">Test window: {data.opens_at ? when(data.opens_at) : 'now'} to {data.closes_at ? when(data.closes_at) : 'open'}</p>}
       {!data.registration_open ? <Alert className="mt-5" tone="warning">Registration for this drive is closed.</Alert> : (
         <Card className="mt-5 p-5 sm:p-6"><form onSubmit={submit} className="space-y-4">
-          {err && <Alert tone="danger">{err}</Alert>}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name *" htmlFor="dv-n"><Input id="dv-n" required autoComplete="name" value={f.name} onChange={set('name')} /></Field>
             <Field label="Email *" htmlFor="dv-e"><Input id="dv-e" type="email" required autoComplete="email" value={f.email} onChange={set('email')} /></Field>
@@ -273,6 +273,7 @@ export function DrivePage({ code }: { code: string }) {
                 : <Button type="button" icon={<Camera />} onClick={() => setCamOn(true)}>Open camera</Button>}</Field>}
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e => setConsent(e.target.checked)} required />
             <span>I agree that {data.org.name} may store and process my details, photo and test results to consider me for this role. I can ask for them to be deleted at any time.</span></label>
+          <div id="dv-err" aria-live="assertive">{err && <Alert tone="danger" title="Not registered yet">{err}</Alert>}</div>
           <Button type="submit" variant="primary" size="lg" loading={busy}>Register</Button>
         </form></Card>)}
     </Frame>

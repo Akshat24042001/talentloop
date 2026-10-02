@@ -52,8 +52,8 @@ export default function QuestionBank() {
                 <div className="mb-1 flex flex-wrap gap-1.5"><Badge>{q.section_label}</Badge><Badge tone={q.difficulty === 'hard' ? 'danger' : q.difficulty === 'easy' ? 'success' : 'warning'}>{q.difficulty}</Badge>
                   {q.kind !== 'single' && <Badge tone="violet">{q.kind === 'multiple' ? 'Several answers' : 'Number answer'}</Badge>}{q.active === false && <Badge>Inactive</Badge>}</div>
                 <p className="whitespace-pre-line text-sm font-medium">{q.text}</p>
-                {q.kind === 'numeric' ? <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400">Answer: {q.answer[0]}</p> : (
-                  <ol className="mt-1.5 grid gap-1 text-sm sm:grid-cols-2">{q.options.map((o, i) => <li key={i} className={q.answer.includes(i) ? 'font-semibold text-emerald-700 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}>{LETTERS[i]}. {o}</li>)}</ol>)}
+                {q.kind === 'numeric' ? (q.answer ? <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400">Answer: {q.answer[0]}</p> : null) : (
+                  <ol className="mt-1.5 grid gap-1 text-sm sm:grid-cols-2">{q.options.map((o, i) => <li key={i} className={q.answer?.includes(i) ? 'font-semibold text-emerald-700 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}>{LETTERS[i]}. {o}</li>)}</ol>)}
               </div>
               {canEdit && <div className="flex items-center gap-1">
                 <Switch id={`qa-${q.id}`} checked={q.active !== false} onChange={() => toggle(q)} label={<span className="sr-only">Active</span>} />

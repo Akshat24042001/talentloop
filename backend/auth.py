@@ -83,7 +83,9 @@ def rate_limit(key: str, limit: int, per_sec: float) -> None:
     while q and t - q[0] > per_sec:
         q.popleft()
     if len(q) >= limit:
-        raise HTTPException(429, "Too many attempts. Please wait a minute and try again.")
+        wait = max(1, int(q[0] + per_sec - t))
+        when = f"{wait} seconds" if wait < 90 else f"{round(wait / 60)} minutes"
+        raise HTTPException(429, f"Too many attempts from this connection. Please try again in {when}.")
     q.append(t)
 
 

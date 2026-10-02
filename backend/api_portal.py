@@ -39,6 +39,10 @@ def _by_token(s, token: str) -> tuple[db.RoundResult, db.Application, db.Job, db
 def _active(rr: db.RoundResult, app: db.Application):
     if app.stage in ("withdrawn",):
         raise HTTPException(410, "You withdrew this application.")
+    if app.stage in flows.CLOSED_STAGES + flows.FINAL_STAGES:
+        raise HTTPException(410, "This application is closed. Check your application status page for details.")
+    if rr.status in ("failed", "skipped", "passed", "no_show"):
+        raise HTTPException(410, "This step is finished. Check your application status page for what's next.")
     if app.round_id != rr.round_id and rr.status not in ("booked",):
         raise HTTPException(410, "This step is finished. Check your application status page for what's next.")
     if rr.status in ("expired",):
@@ -96,6 +100,7 @@ def round_page(token: str, req: Request):
                "candidate": {"first_name": (c.name or "").split()[0] if c else "", "has_photo": bool(c and c.photo_file)},
                "transparency": transparency(rnd), "finished": rr.status in ("submitted", "passed", "failed", "on_hold", "skipped", "no_show"),
                "current": app.round_id == rr.round_id, "withdrawn": app.stage == "withdrawn", "status_link": flows.status_link(app),
+               "closed": app.stage in flows.CLOSED_STAGES + flows.FINAL_STAGES or rr.status in ("failed", "skipped", "no_show"),
                "human_requested": bool(app.human_requested_at), "accommodation": (app.accommodation or {}).get("status")}
         kind = rr.round_type
         if kind == "test":
@@ -324,6 +329,8 @@ async def round_snapshot(token: str, req: Request, image: UploadFile = File(...)
         raise HTTPException(400, "Snapshots must be JPEG images under 3 MB.")
     with db.session() as s:
         rr, app, job, org = _by_token(s, token)
+        if rr.status not in ("invited", "in_progress"):
+            return {"ok": True, "kept": False}
         integ = dict(rr.integrity or {})
         snaps = integ.get("snapshots", [])
         if len(snaps) >= 60:
@@ -435,6 +442,8 @@ async def book_slot(token: str, req: Request):
 def join_meeting(token: str, req: Request):
     with db.session() as s:
         rr, app, job, org = _by_token(s, token)
+        if ((rr.data or {}).get("booking") or {}).get("cancelled_at") or app.stage in flows.CLOSED_STAGES:
+            raise HTTPException(410, "This interview was cancelled. Check your application status page.")
         url = scheduling.mark_joined(s, rr)
     if not url:
         raise HTTPException(404, "No meeting link for this interview.")
@@ -446,8 +455,8 @@ def booking_ics(token: str):
     with db.session() as s:
         rr, app, job, org = _by_token(s, token)
         b = (rr.data or {}).get("booking")
-        if not b:
-            raise HTTPException(404, "Nothing booked yet")
+        if not b or b.get("cancelled_at"):
+            raise HTTPException(404, "Nothing booked")
         rnd = flows.round_of(job, rr.round_id) or {"name": "Interview"}
         cal = scheduling.ics(rr.id, b["starts_at"], b["ends_at"], f"{rnd['name']}: {job.title} at {org.name}", "Your interview",
                              f"{flows.invite_link(s, rr)}/join" if b.get("meeting_url") else b.get("location", ""))
@@ -557,7 +566,10 @@ async def request_accommodation(token: str, req: Request):
         raise HTTPException(400, "Please describe what you need.")
     with db.session() as s:
         app, job, org, c = _by_portal(s, token)
-        app.accommodation = {"request": text[:1500], "requested_at": time.time(), "status": "requested"}
+        cur = app.accommodation or {}
+        if cur.get("request") and cur.get("status") in ("requested", "approved"):
+            raise HTTPException(409, "You already have a request with the hiring team. Please contact them to change it.")
+        app.accommodation = {**{k: v for k, v in cur.items() if k == "human_handled"}, "request": text[:1500], "requested_at": time.time(), "status": "requested"}
         app.updated_at = time.time()
         flows._log(s, app, job, None, "accommodation_requested", text[:200])
     return {"ok": True}
@@ -643,7 +655,9 @@ async def manager_decide(token: str, req: Request):
         raise HTTPException(400, "Please add a short reason.")
     with db.session() as s:
         rr, app, job, org, c = _by_manager(s, token)
-        if app.round_id != rr.round_id or rr.status in ("passed", "failed") or app.stage in ("rejected", "withdrawn"):
+        if rr.round_type != "manager_approval":
+            raise HTTPException(404, "This link is not a decision link.")
+        if app.round_id != rr.round_id or rr.status in ("passed", "failed") or app.stage in flows.CLOSED_STAGES + flows.FINAL_STAGES:
             raise HTTPException(409, "A decision has already been recorded for this candidate.")
         who = str(body.get("name") or "").strip()[:100] or ", ".join((rr.data or {}).get("approvers", [])[:1]) or "Manager"
         flows.decide(s, rr, choice, f"{who} (decision link)", reason)
@@ -693,6 +707,8 @@ async def interviewer_feedback(token: str, req: Request, data: str = Form(...), 
         raise HTTPException(413, "The recording is too large (max 80 MB).")
     with db.session() as s:
         rr, app, job, org, c = _by_manager(s, token)
+        if rr.round_type != "human_interview":
+            raise HTTPException(404, "This link is not a feedback link.")
         if (rr.data or {}).get("feedback"):
             raise HTTPException(409, "Feedback has already been submitted.")
         rec_key = ""
@@ -732,10 +748,12 @@ def drive_page(code: str, req: Request):
         if not d:
             raise HTTPException(404, "This drive link is not valid.")
         job, org = s.get(db.Job, d.job_id), s.get(db.Org, d.org_id)
+        if not job or not org or org.disabled:
+            raise HTTPException(404, "This drive link is not valid.")
         jd = jd_schema.compose(job.fields or {}, org.name, org_settings(org), public=True)
         now = time.time()
         return {"org": brand(org), "college": d.college, "job": {"title": job.title, "facts": jd["facts"], "summary": (job.fields or {}).get("summary", "")},
-                "opens_at": d.opens_at, "closes_at": d.closes_at, "registration_open": d.status == "open" and (not d.closes_at or now <= d.closes_at),
+                "opens_at": d.opens_at, "closes_at": d.closes_at, "registration_open": d.status == "open" and job.status != "closed" and (not d.closes_at or now <= d.closes_at),
                 "test_open": d.status == "open" and (not d.opens_at or now >= d.opens_at) and (not d.closes_at or now <= d.closes_at),
                 "require_photo": (d.settings or {}).get("require_photo", True),
                 "questions": [{k: q.get(k) for k in ("id", "question", "kind", "required")} for q in (job.fields or {}).get("screening_questions") or []]}
@@ -754,6 +772,8 @@ async def drive_register(code: str, req: Request, data: str = Form(...), resume:
         if not drive or drive.status != "open" or (drive.closes_at and time.time() > drive.closes_at):
             raise HTTPException(404, "Registration for this drive is closed.")
         job = s.get(db.Job, drive.job_id)
+        if not job or job.status == "closed":
+            raise HTTPException(404, "Registration for this drive is closed.")
         need_photo = (drive.settings or {}).get("require_photo", True)
         drive_id, org_id, college = drive.id, drive.org_id, drive.college
         questions = (job.fields or {}).get("screening_questions") or []
@@ -811,6 +831,8 @@ def drive_results(share_code: str, req: Request):
         if not d:
             raise HTTPException(404, "This results link is not valid.")
         job, org = s.get(db.Job, d.job_id), s.get(db.Org, d.org_id)
+        if not job or not org:
+            raise HTTPException(404, "This results link is not valid.")
         show = (d.settings or {}).get("show_scores")
         flow = {r["id"]: r for r in flows.flow_of(job)}
         rows = s.query(db.Application, db.Candidate).join(db.Candidate, db.Candidate.id == db.Application.candidate_id).filter(db.Application.drive_id == d.id).all()

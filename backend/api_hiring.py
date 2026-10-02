@@ -200,10 +200,14 @@ def delete_job(job_id: str, req: Request):
     with db.session() as s:
         ctx = ctx_of(req, s)
         job, _ = get_job(s, ctx, job_id, "manage")
+        from . import flows
+        files = flows.purge_job(s, job)              # round results, slots, drives and messages go with the job
         for model in (db.Match, db.Application, db.JobCollaborator):
             s.query(model).filter_by(job_id=job.id).delete()
         log_activity(s, ctx, "job_deleted", job.title)
         s.delete(job)
+    for prefix in files:
+        store.delete_files(prefix)
     return {"ok": True}
 
 
@@ -705,6 +709,8 @@ async def update_application(aid: str, req: Request):
         if not a:
             raise HTTPException(404, "Application not found")
         job, perm = get_job(s, ctx, a.job_id)
+        if ctx.role == "viewer" and not ctx.via_key:
+            raise HTTPException(403, "Viewers have read-only access.")
         if "stage" in body and body["stage"] != a.stage:
             if perm not in ("manage", "edit"):
                 raise HTTPException(403, "Reviewers can rate and comment, but not move candidates.")
@@ -743,10 +749,13 @@ def remove_application(aid: str, req: Request):
         if perm != "manage":
             raise HTTPException(403, "Only HR can remove a candidate from a job.")
         c = s.get(db.Candidate, a.candidate_id)
-        s.query(db.RoundResult).filter_by(application_id=a.id).delete()
+        from . import flows
+        files = flows.purge_application(s, a)      # frees a booked interview slot; removes round data and messages
         s.delete(a)
         s.query(db.Job).filter_by(id=job.id).update({db.Job.matched_at: None})
         log_activity(s, ctx, "application_removed", f"{c.name if c else ''} removed from {job.title}", job_id=job.id, candidate_id=a.candidate_id)
+    for prefix in files:
+        store.delete_files(prefix)
     return {"ok": True}
 
 
@@ -1060,7 +1069,8 @@ def required_missing(org: db.Org, profile: dict) -> list[str]:
 
 
 async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | None, source: str):
-    auth.rate_limit(f"apply:{auth.client_ip(req)}", 12, 3600)
+    # Generous per connection (an office, a college lab or a mobile network shares one address); stricter per email below.
+    auth.rate_limit(f"apply:{auth.client_ip(req)}", 60, 3600)
     try:
         d = json.loads(data or "{}")
     except json.JSONDecodeError:
@@ -1068,7 +1078,7 @@ async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | Non
     profile = clean_profile(d)
     if not profile.get("name") or not profile.get("email"):
         raise HTTPException(400, "Your name and email are required.")
-    auth.norm_email(profile["email"])
+    email = auth.norm_email(profile["email"])
     missing = required_missing(org, profile) if source == "careers" else []
     if missing:
         raise HTTPException(400, "Please fill in: " + ", ".join(missing))
@@ -1087,6 +1097,7 @@ async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | Non
         raw = await asyncio.to_thread(docs_pdf.resume_pdf, profile)      # resume built in the form becomes a PDF HR can download
         fname = f"{auth.slugify(profile['name'], 40)}-resume.pdf"
     full_text = (text + "\n" + built).strip()
+    auth.rate_limit(f"apply-email:{email}", 10, 3600)        # counted only once the form is valid
     return profile, raw, fname, full_text, d
 
 

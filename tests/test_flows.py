@@ -120,7 +120,7 @@ def experienced(c, slug, me_id):
     assert cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][0]["id"]}).status_code == 409, "a booked slot can't be taken twice"
     ok(cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][1]["id"]}))      # one reschedule
     r = cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][2]["id"]})
-    assert r.status_code == 409 and "rescheduled once" in r.text
+    assert r.status_code == 409 and "can't change the time again" in r.text
     ics = cand.get(f"/api/r/{tok(hlink)}/calendar.ics")
     assert ics.status_code == 200 and "BEGIN:VEVENT" in ics.text
     assert outbox(c, "interview_booked") and outbox(c, "interviewer_booked")
@@ -326,15 +326,20 @@ def live_edit_and_bulk(c, slug):
     new_rounds = [r for r in rounds if r["id"] != task_r["id"]]
     info = ok(c.put(f"/api/jobs/{job['ref']}/flow", json={"rounds": new_rounds}))
     assert info["candidates_in_removed_rounds"] == 2 and info["removed"] == 1
-    ok(c.post(f"/api/applications/{other}/decide", json={"action": "pass"}))
+    assert info["placed"] == 2
     det = ok(c.get(f"/api/applications/{other}"))
-    assert det["round_id"] == rounds[3]["id"], "continued to the round that now follows that position"
+    assert det["round_id"] == rounds[3]["id"] and det["round_status"] == "pending", "placed in the round that now follows, not started"
+    removed_r = next(x for x in det["rounds"] if x["round"]["id"] == rounds[3]["id"])
+    assert not removed_r["result"]["candidate_link"], "nothing is sent until HR starts the round"
+    ok(c.post(f"/api/applications/{other}/decide", json={"action": "move", "round_id": rounds[3]["id"]}))
+    det = ok(c.get(f"/api/applications/{other}"))
+    assert det["round_id"] == rounds[3]["id"] and det["round_status"] != "pending", det["round_status"]
     # top-N on CV screening
     job2, r2 = make_job(c, "Field Sales Executive", "experienced")
     for i in range(4):
         apply(job2, slug, f"Cand {i}", f"cand{i}@x.test", resume=f"Cand {i}\nB2B Sales Negotiation " * (i + 1) + "3 years experience")
     res = ok(c.post(f"/api/jobs/{job2['ref']}/rounds/{r2[1]['id']}/top-n", json={"n": 2, "reject_rest": True}))
-    assert res == {"passed": 2, "failed": 2}, res
+    assert res == {"passed": 2, "failed": 2, "flagged_waiting": 0}, res
     print("LIVE FLOW EDITS, BULK ACTIONS, TOP-N, PRACTICAL TASK: OK")
 
 

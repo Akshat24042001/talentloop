@@ -351,6 +351,8 @@ def remove_member(mid: str, req: Request):
             raise HTTPException(400, "You can't remove yourself. Ask another owner or admin.")
         u = s.get(db.User, m.user_id)
         s.query(db.AuthSession).filter_by(user_id=m.user_id, org_id=m.org_id).delete()
+        # their open interview slots can't be booked any more (booked ones stay for HR to reassign)
+        s.query(db.Slot).filter(db.Slot.org_id == m.org_id, db.Slot.interviewer_id == m.user_id, db.Slot.booked_by.is_(None)).delete(synchronize_session=False)
         s.delete(m)
         log_activity(s, ctx, "member_removed", (u.name or u.email) if u else m.user_id)
     return {"ok": True}

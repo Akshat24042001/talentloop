@@ -117,6 +117,7 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [file, setFile] = useState<File | null>(null), [consent, setConsent] = useState(false), [relocate, setRelocate] = useState(false)
   const [busy, setBusy] = useState(false), [err, setErr] = useState(''), [done, setDone] = useState(false), [parsing, setParsing] = useState(false)
+  const errRef = useRef<HTMLDivElement>(null), topRef = useRef<HTMLDivElement>(null)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(v => ({ ...v, [k]: e.target.value }))
   async function onFile(x: File) {
     setFile(x); setParsing(true)
@@ -131,17 +132,17 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
   }
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr('')
-    if (mode === 'upload' && !file) { setErr('Please attach your resume, or switch to "Build my resume".'); return }
+    if (mode === 'upload' && !file) { setErr('Please attach your resume, or switch to "Build my resume".'); requestAnimationFrame(() => errRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })); return }
     setBusy(true)
     const data = { ...f, skills, consent, willing_to_relocate: relocate, answers, ...(mode === 'build' ? { experience: exp.filter(x => x.title || x.company), education: edu.degree || edu.school ? [edu] : [] } : {}) }
     const fd = new FormData(); fd.append('data', JSON.stringify(data)); if (mode === 'upload' && file) fd.append('resume', file)
-    try { await postForm(url, fd); setDone(true) } catch (e: any) { setErr(e.message) }
+    try { await postForm(url, fd); setDone(true); requestAnimationFrame(() => topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })) }
+    catch (e: any) { setErr(e.message || 'Your application could not be sent. Please try again.'); requestAnimationFrame(() => errRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })) }
     setBusy(false)
   }
-  if (done) return <Alert tone="success" icon={<CircleCheck />} title={talentPool ? "You're in our talent pool" : 'Application sent'}>Thank you, {f.name.split(' ')[0]}. {orgName} will be in touch if there's a fit.</Alert>
+  if (done) return <div ref={topRef}><Alert tone="success" icon={<CircleCheck />} title={talentPool ? "You're in our talent pool" : 'Application sent'}>Thank you, {f.name.split(' ')[0]}. {orgName} will be in touch if there's a fit.</Alert></div>
   return (
     <form onSubmit={submit} className="space-y-5">
-      {err && <Alert tone="danger">{err}</Alert>}
       <div className="inline-flex rounded-xl bg-slate-100 p-1 text-sm dark:bg-ink-850">
         {(['upload', 'build'] as const).map(m => <button type="button" key={m} onClick={() => setMode(m)} className={`rounded-lg px-4 py-1.5 font-medium ${mode === m ? 'bg-white shadow-sm dark:bg-ink-700' : 'text-slate-500'}`}>{m === 'upload' ? 'Upload resume' : 'Build my resume'}</button>)}
       </div>
@@ -206,6 +207,7 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
       </div>
       <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" className="mt-1" checked={consent} onChange={e => setConsent(e.target.checked)} required />
         <span>I agree that {orgName} may store and process my details to consider me for roles, including automated matching. I can ask for them to be deleted at any time.</span></label>
+      <div ref={errRef} aria-live="assertive">{err && <Alert tone="danger" title={talentPool ? 'Not sent yet' : 'Your application was not sent'}>{err}</Alert>}</div>
       <Button variant="primary" size="lg" type="submit" loading={busy} icon={talentPool ? <Building2 /> : <Send />} className="w-full sm:w-auto">{talentPool ? 'Join talent pool' : 'Submit application'}</Button>
     </form>
   )

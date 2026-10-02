@@ -4,7 +4,7 @@ import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Select, Tip, c
 import { Avatar, BackLink, Empty, ErrorBox, KV, Loading, PageHeader, ScoreRing, Tabs, useApi, Ago } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
-import { navigate, useLocation } from '../lib/router'
+import { canLeave, navigate, setLeaveGuard, useLocation } from '../lib/router'
 import { useMe } from '../lib/session'
 import { ACTION_LABEL, JOB_STATUS, STAGE_TONE, actor } from './labels'
 import Board from './flow/Board'
@@ -28,7 +28,7 @@ export default function JobDetail({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>((query.get('tab') as Tab) || 'matches')
   const { data: job, error, reload } = useApi<Job>(`/api/jobs/${id}`)
   const me = useMe()
-  const switchTab = (t: Tab) => { setTab(t); navigate(`/app/jobs/${id}?tab=${t}`, { replace: true, keepScroll: true }) }
+  const switchTab = (t: Tab) => { if (t === tab || !canLeave()) return; setLeaveGuard(null); setTab(t); navigate(`/app/jobs/${id}?tab=${t}`, { replace: true, keepScroll: true, force: true }) }
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!job) return <Loading />
   const st = JOB_STATUS[job.status]!
@@ -59,7 +59,7 @@ export default function JobDetail({ id }: { id: string }) {
       {tab === 'overview' && <Overview job={job} />}
       {tab === 'matches' && <Matches job={job} canManage={job.permission === 'manage'} />}
       {tab === 'pipeline' && <Board jobId={job.id} />}
-      {tab === 'flow' && <FlowBuilder jobId={job.id} canEdit={job.permission !== 'view'} />}
+      {tab === 'flow' && <FlowBuilder jobId={job.id} canEdit={job.permission !== 'view'} canManage={job.permission === 'manage'} />}
       {tab === 'drives' && <JobDrives jobId={job.id} canManage={job.permission === 'manage'} />}
       {tab === 'team' && <TeamAccess job={job} reload={reload} canManage={job.permission === 'manage' && me.can.manage_jobs} />}
       {tab === 'activity' && <Activity id={id} />}

@@ -180,8 +180,17 @@ def pipeline(job_id: str, req: Request):
         return {"rounds": flow, "items": items, "permission": perm, "statuses": flows.STATUS_LABEL}
 
 
-def _do(s, ctx, a, job, action: str, round_id: str = "", reason: str = "", notify: bool = True):
+def _do(s, ctx, a, job, action: str, round_id: str = "", reason: str = "", notify: bool = True, bulk: bool = False):
     actor = _actor(ctx)
+    # Closed applications only change on purpose: moving someone to a round re-opens them.
+    if a.stage in flows.CLOSED_STAGES and action in ("pass", "hold", "select", "reject", "start"):
+        raise HTTPException(400, f"This application is closed ({STAGE_LABEL.get(a.stage, a.stage)}). Move them to a round to re-open it.")
+    if a.stage == "hired" and action != "move":
+        raise HTTPException(400, "This candidate is already hired.")
+    if a.stage == "offer" and action in ("pass", "hold", "select"):
+        raise HTTPException(400, "This candidate is already selected.")
+    if a.stage == "offer" and action == "reject" and bulk:
+        raise HTTPException(400, "Selected candidates aren't rejected in bulk. Open their application to change the decision.")
     if action in ("pass", "fail", "hold"):
         rr = flows.get_result(s, a, a.round_id) if a.round_id else None
         if not rr:
@@ -238,7 +247,7 @@ async def bulk(req: Request):
                     log_activity(s, ctx, "message_sent", text[:120], job_id=job.id, candidate_id=a.candidate_id)
                 else:
                     _do(s, ctx, a, job, action, str(body.get("round_id") or ""), str(body.get("reason") or "")[:1000],
-                        notify=body.get("notify", True) is not False)
+                        notify=body.get("notify", True) is not False, bulk=True)
                 done += 1
         except HTTPException as e:
             errors.append({"id": aid, "error": e.detail})
@@ -259,7 +268,10 @@ async def apply_top_n(job_id: str, rid: str, req: Request):
         n = int(body.get("n") or (rnd.get("pass_rule") or {}).get("value") or 10)
         rows = s.query(db.RoundResult, db.Application).join(db.Application, db.Application.id == db.RoundResult.application_id) \
             .filter(db.RoundResult.job_id == job.id, db.RoundResult.round_id == rid, db.RoundResult.status == "submitted",
-                    db.Application.round_id == rid).order_by(db.RoundResult.score.desc().nullslast()).all()
+                    db.Application.round_id == rid, db.Application.stage.notin_(flows.CLOSED_STAGES + flows.FINAL_STAGES)) \
+            .order_by(db.RoundResult.score.desc().nullslast()).all()
+        flagged = [rr for rr, a in rows if (rr.integrity or {}).get("flagged")]
+        rows = [(rr, a) for rr, a in rows if not (rr.integrity or {}).get("flagged")]   # flags always wait for a person
         passed = failed = 0
         for i, (rr, a) in enumerate(rows):
             if i < n:
@@ -270,7 +282,7 @@ async def apply_top_n(job_id: str, rid: str, req: Request):
                 failed += 1
         log_activity(s, ctx, "top_n_applied", f"{rnd['name']}: top {n} passed" + (f", {failed} not progressed" if failed else ""), job_id=job.id)
     worker.kick()
-    return {"passed": passed, "failed": failed}
+    return {"passed": passed, "failed": failed, "flagged_waiting": len(flagged)}
 
 
 @router.get("/api/applications/{aid}")
@@ -383,12 +395,14 @@ async def hr_feedback(rrid: str, req: Request):
     body = await req.json()
     with db.session() as s:
         ctx = ctx_of(req, s)
-        rr, a, job = _rr(s, ctx, rrid, "view")
+        rr, a, job = _rr(s, ctx, rrid, "edit")      # feedback includes a Select/Reject decision
+        if rr.round_type != "human_interview":
+            raise HTTPException(400, "Feedback belongs to an interview round.")
         who = (ctx.user.name or ctx.user.email) if ctx.user else "API"
     summary = await scheduling.summarise_notes(str(body.get("notes") or ""))
     with db.session() as s:
         ctx = ctx_of(req, s)
-        rr, a, job = _rr(s, ctx, rrid, "view")
+        rr, a, job = _rr(s, ctx, rrid, "edit")
         dec = str(body.get("decision") or "hold")
         if dec not in ("pass", "fail", "hold"):
             raise HTTPException(400, "Choose Select, Reject or Hold")
@@ -573,7 +587,8 @@ def list_questions(req: Request, section: str = "", difficulty: str = "", q: str
         for sec, diff, n in s.query(db.Question.section, db.Question.difficulty, func.count()).filter(db.Question.org_id == ctx.org_id,
                                                                                                     db.Question.active.is_(True)).group_by(db.Question.section, db.Question.difficulty):
             stats.setdefault(sec, {"easy": 0, "medium": 0, "hard": 0})[diff] = n
-        return {"total": total, "items": [assessments.question_json(x) for x in rows], "stats": stats,
+        answers = ctx.via_key or ctx.has(auth.MANAGE_JOBS)       # answer keys stay with HR
+        return {"total": total, "items": [assessments.question_json(x, with_answer=answers) for x in rows], "stats": stats,
                 "sections": [{"id": k, "label": v} for k, v in assessments.SECTION_LABEL.items()]}
 
 
@@ -824,6 +839,9 @@ async def create_slots(job_id: str, rid: str, req: Request):
         if not rnd or rnd["type"] != "human_interview":
             raise HTTPException(400, "Slots belong to a human interview round")
         mins = int((rnd.get("config") or {}).get("duration_min") or 45)
+        for iv in {str(x) for x in [body.get("interviewer_id")] + [sp.get("interviewer_id") for sp in body.get("slots") or [] if isinstance(sp, dict)] if x}:
+            if not flows.is_member(s, ctx.org_id, iv):
+                raise HTTPException(400, "The interviewer must be a member of your team.")
         made = []
         spans = body.get("slots") or []
         if body.get("series"):

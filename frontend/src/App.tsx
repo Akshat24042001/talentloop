@@ -28,11 +28,12 @@ import Landing from './site/Landing'
 import RoundPage from './portal/RoundPage'
 import { DecidePage, DrivePage, FeedbackPage, ResultsPage, StatusPage } from './portal/Pages'
 
-type Route = [string, (p: Record<string, string>) => ReactNode, string?]
+type Need = 'manage_jobs' | 'manage_team'
+type Route = [string, (p: Record<string, string>) => ReactNode, string?, Need?]
 const APP: Route[] = [
   ['/app', () => <Dashboard />, 'Dashboard'],
   ['/app/jobs', () => <Jobs />, 'Jobs'],
-  ['/app/jobs/new', () => <JobEditor />, 'New job'],
+  ['/app/jobs/new', () => <JobEditor />, 'New job', 'manage_jobs'],
   ['/app/jobs/:id', p => <JobDetail key={p.id} id={p.id!} />, 'Job'],
   ['/app/jobs/:id/edit', p => <JobEditor key={p.id} id={p.id} />, 'Edit job'],
   ['/app/candidates', () => <Candidates />, 'Candidates'],
@@ -41,20 +42,20 @@ const APP: Route[] = [
   ['/app/interviews', () => <Interviews />, 'AI interviews'],
   ['/app/interviews/new', () => <NewInterview />, 'New interview'],
   ['/app/interviews/:id', p => <InterviewReport key={p.id} id={p.id!} />, 'Interview report'],
-  ['/app/questions', () => <QuestionBank />, 'Question bank'],
-  ['/app/drives', () => <Drives />, 'Campus drives'],
-  ['/app/requests', () => <Requests />, 'Candidate requests'],
-  ['/app/outbox', () => <Outbox />, 'Outbox'],
+  ['/app/questions', () => <QuestionBank />, 'Question bank', 'manage_jobs'],
+  ['/app/drives', () => <Drives />, 'Campus drives', 'manage_jobs'],
+  ['/app/requests', () => <Requests />, 'Candidate requests', 'manage_jobs'],
+  ['/app/outbox', () => <Outbox />, 'Outbox', 'manage_jobs'],
   ['/app/my-interviews', () => <MyInterviews />, 'My interviews'],
-  ['/app/reports', () => <Reports />, 'Reports'],
-  ['/app/audit', () => <AuditLog />, 'Audit log'],
+  ['/app/reports', () => <Reports />, 'Reports', 'manage_jobs'],
+  ['/app/audit', () => <AuditLog />, 'Audit log', 'manage_team'],
   ['/app/team', () => <Team />, 'Team'],
   ['/app/settings', () => <Settings />, 'Settings'],
   ['/admin', () => <Admin />, 'Platform admin'],
 ]
 
 function find(routes: Route[], path: string) {
-  for (const [pat, render, title] of routes) { const p = match(pat, path); if (p) return { node: render(p), title } }
+  for (const [pat, render, title, need] of routes) { const p = match(pat, path); if (p) return { node: render(p), title, need } }
   return null
 }
 
@@ -68,6 +69,7 @@ function Workspace({ path }: { path: string }) {
   if (!me) return <Loading className="min-h-screen" />
   if (!me.org && !(me.platform_admin && path === '/admin')) return <NoCompany />
   if (path === '/admin' && !me.platform_admin) return <Shell><NotFound /></Shell>
+  if (hit?.need && !me.can[hit.need]) return <Shell><NoAccess /></Shell>
   return <Shell>{hit ? hit.node : <NotFound />}</Shell>
 }
 
@@ -79,6 +81,9 @@ function NoCompany() {
       <div className="mt-5 flex justify-center gap-2"><Button href="/signup" variant="primary">Create a workspace</Button><Button onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); location.href = '/login' }}>Sign out</Button></div>
     </div></div>
   )
+}
+function NoAccess() {
+  return <div className="py-24 text-center"><h1 className="text-xl font-semibold">Not available for your role</h1><p className="mt-2 text-sm text-slate-500">Ask an owner or HR if you need access to this page.</p><Button className="mt-5" href="/app">Go to dashboard</Button></div>
 }
 function NotFound() {
   return <div className="py-24 text-center"><h1 className="text-xl font-semibold">Page not found</h1><p className="mt-2 text-sm text-slate-500">The link may be old, or you may not have access.</p><Button className="mt-5" href="/app">Go to dashboard</Button></div>

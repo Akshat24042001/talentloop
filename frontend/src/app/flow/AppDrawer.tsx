@@ -7,6 +7,7 @@ import { Alert, Badge, Button, Field, Input, Modal, Select, Spinner, Textarea, c
 import { ErrorBox, Loading, useApi } from '../../components/kit'
 import { api } from '../../lib/api'
 import { ago, when } from '../../lib/format'
+import { useMe } from '../../lib/session'
 import { ROUND_ICON } from './FlowBuilder'
 import { ReasonModal } from './Board'
 import { REC_TONE, STATUS_TONE, type Round, type RoundSummary } from './types'
@@ -21,6 +22,7 @@ interface Detail {
 }
 
 export default function AppDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+  const me = useMe()
   const { data, error, reload } = useApi<Detail>(`/api/applications/${id}`)
   const [reject, setReject] = useState(false)
   const refresh = () => { reload(); onChanged() }
@@ -47,7 +49,9 @@ export default function AppDrawer({ id, onClose, onChanged }: { id: string; onCl
           {error ? <div className="p-5"><ErrorBox error={error} retry={reload} /></div> : !data ? <Loading /> : <>
             {canEdit && !closed && (
               <div className="flex flex-wrap gap-2 border-b border-slate-100 px-5 py-3 dark:border-ink-800">
-                {data.round_id ? <>
+                {data.round_id && cur?.result?.status === 'pending' ? <>
+                  <Button size="sm" variant="primary" icon={<Play />} onClick={() => decide('move', { round_id: cur.round.id })}>Start {cur.round.name}</Button>
+                </> : data.round_id ? <>
                   <Button size="sm" variant="primary" icon={<Check />} onClick={() => decide('pass')}>Pass {cur?.round.name || 'round'}</Button>
                   <Button size="sm" icon={<Hand />} onClick={() => decide('hold')}>Hold</Button>
                 </> : <Button size="sm" variant="primary" onClick={() => decide('start')}>Start the flow</Button>}
@@ -57,10 +61,10 @@ export default function AppDrawer({ id, onClose, onChanged }: { id: string; onCl
                 <Button size="sm" variant="ghost" className="text-red-600" onClick={() => setReject(true)}>Reject</Button>
               </div>)}
             <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-              <Requests d={data} canEdit={!!canEdit} onDone={refresh} />
+              <Requests d={data} canEdit={data.permission === 'manage'} onDone={refresh} />
               {data.knockout_failed?.length ? <Alert tone="danger" title="Knockout answers">{data.knockout_failed.join('; ')}</Alert> : null}
               <ol className="space-y-3">{data.rounds.map((r, i) => <RoundBlock key={r.round.id} i={i} r={r} d={data} canEdit={!!canEdit} onChanged={refresh} />)}</ol>
-              <Notes d={data} canEdit={!!canEdit} onSaved={refresh} />
+              <Notes d={data} canEdit={me.role !== 'viewer'} onSaved={refresh} />
               <Messages msgs={data.messages} onRetry={reload} />
             </div>
             <footer className="flex flex-wrap gap-2 border-t border-slate-100 px-5 py-3 dark:border-ink-800">

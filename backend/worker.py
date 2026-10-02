@@ -172,25 +172,41 @@ def time_rules() -> None:
         open_rr = s.query(db.RoundResult).filter(db.RoundResult.status.in_(("invited", "in_progress", "booked")),
                                                  db.RoundResult.deadline_at.isnot(None)).limit(500).all()
         for rr in open_rr:
-            app = s.get(db.Application, rr.application_id)
-            if not app or app.round_id != rr.round_id or app.stage in ("rejected", "withdrawn"):
-                continue
-            d = rr.data or {}
-            if rr.status != "booked" and rr.deadline_at < now:
-                if rr.status == "in_progress" and rr.round_type == "test":
-                    continue                              # the test auto-submits on its own timer
-                rr.status = "expired"
-                app.round_status = "expired"
-                flows._log(s, app, s.get(db.Job, rr.job_id), None, "round_expired", f"{rr.round_type}: deadline passed")
-            elif rr.status == "invited" and rr.deadline_at - now < 86400 and not d.get("reminded"):
-                rr.data = {**d, "reminded": now}
-                job = s.get(db.Job, rr.job_id)
-                rnd = flows.round_of(job, rr.round_id) or {"name": rr.round_type}
-                link = flows.invite_link(s, rr)          # the same link they already have
-                flows.notify_candidate(s, app, "Reminder", f"A reminder that your next step ({rnd['name']}) closes on "
-                                       f"{time.strftime('%d %b %Y, %H:%M', time.localtime(rr.deadline_at))}.", "reminder", link, "Continue here")
+            try:
+                _deadline(s, rr, now)
+            except Exception:
+                log.exception("[%s] deadline check failed", rr.id)
+        # Tests left open (browser closed mid-test): sections run out on the server clock and the test is scored.
+        from .api_portal import _maybe_roll
+        for rr in s.query(db.RoundResult).filter(db.RoundResult.round_type == "test", db.RoundResult.status == "in_progress").limit(200).all():
+            try:
+                if (rr.data or {}).get("paper") and now - float((rr.data or {}).get("last_seen") or 0) > 60:
+                    _maybe_roll(s, rr)
+            except Exception:
+                log.exception("[%s] closing an abandoned test failed", rr.id)
         from . import scheduling
         scheduling.reminders_and_no_shows(s, now)
+
+
+def _deadline(s, rr: db.RoundResult, now: float) -> None:
+    """Expire a round past its deadline, or remind the candidate a day before."""
+    app = s.get(db.Application, rr.application_id)
+    if not app or not s.get(db.Job, rr.job_id) or app.round_id != rr.round_id or app.stage in flows.CLOSED_STAGES + flows.FINAL_STAGES:
+        return
+    d = rr.data or {}
+    if rr.status != "booked" and rr.deadline_at < now:
+        if rr.status == "in_progress" and rr.round_type == "test":
+            return                                # the test finishes on its own timer (below)
+        rr.status = "expired"
+        app.round_status = "expired"
+        flows._log(s, app, s.get(db.Job, rr.job_id), None, "round_expired", f"{rr.round_type}: deadline passed")
+    elif rr.status == "invited" and rr.deadline_at - now < 86400 and not d.get("reminded"):
+        rr.data = {**d, "reminded": now}
+        job = s.get(db.Job, rr.job_id)
+        rnd = flows.round_of(job, rr.round_id) or {"name": rr.round_type}
+        link = flows.invite_link(s, rr)          # the same link they already have
+        flows.notify_candidate(s, app, "Reminder", f"A reminder that your next step ({rnd['name']}) closes on "
+                               f"{time.strftime('%d %b %Y, %H:%M', time.localtime(rr.deadline_at))}.", "reminder", link, "Continue here")
 
 
 def kick() -> None:

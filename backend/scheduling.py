@@ -23,8 +23,10 @@ def slot_json(sl: db.Slot, s=None) -> dict:
 
 
 def open_slots(s, job_id: str, round_id: str) -> list[db.Slot]:
-    return s.query(db.Slot).filter(db.Slot.job_id == job_id, db.Slot.round_id == round_id, db.Slot.booked_by.is_(None),
+    rows = s.query(db.Slot).filter(db.Slot.job_id == job_id, db.Slot.round_id == round_id, db.Slot.booked_by.is_(None),
                                    db.Slot.starts_at > time.time() + 3600).order_by(db.Slot.starts_at).all()
+    ok = {}                                       # an interviewer who left or was switched off can't be booked
+    return [x for x in rows if not x.interviewer_id or ok.setdefault(x.interviewer_id, flows.is_member(s, x.org_id, x.interviewer_id))]
 
 
 def _fmt(ts: float) -> str:
@@ -54,11 +56,12 @@ def book(s, rr: db.RoundResult, slot_id: str) -> db.Slot:
     job = s.get(db.Job, rr.job_id)
     rnd = flows.round_of(job, rr.round_id) or {"config": {}, "name": "Interview"}
     d = dict(rr.data or {})
-    old = d.get("booking")
+    old = d.get("booking") if not (d.get("booking") or {}).get("cancelled_at") else None
     if old:
         allowed = int((rnd.get("config") or {}).get("reschedules_allowed", 1))
         if int(d.get("reschedules", 0)) >= allowed:
-            raise ValueError("You have already rescheduled once. Please contact the hiring team to change the time again.")
+            raise ValueError("You can't change the time again from here. Please contact the hiring team." if allowed else
+                             "Rescheduling isn't available for this interview. Please contact the hiring team.")
         prev = s.get(db.Slot, old["slot_id"])
         if prev and prev.booked_by == rr.id:
             prev.booked_by = None
@@ -91,12 +94,13 @@ def _confirm(s, rr, app, job, rnd, rescheduled=False):
     join = f"{flows.invite_link(s, rr)}/join" if b.get("meeting_url") else ""
     where = join or b.get("location") or "We will share the details."
     text = (f"Your {rnd['name']} is {'rescheduled to' if rescheduled else 'booked for'} {_fmt(b['starts_at'])}."
-            f" {'Join here: ' + join if join else 'Venue: ' + where}. You can reschedule once from your link if needed.")
+            f" {'Join here: ' + join if join else 'Venue: ' + where}."
+            + (" You can change the time from your link if needed." if int((rnd.get("config") or {}).get("reschedules_allowed", 1)) > int((rr.data or {}).get("reschedules", 0)) else ""))
     cal = ics(rr.id, b["starts_at"], b["ends_at"], f"{rnd['name']}: {job.title} at {org.name}", text, where)
     body = f"Hi {(c.name or 'there').split()[0]},\n\n{text}\n\nRegards,\n{org.name} Hiring Team\n\n--ICS--\n{cal}"
     messages.queue(s, org.id, to_email=c.email, to_phone=c.phone, subject=f"Interview {'rescheduled' if rescheduled else 'confirmed'} | {job.title}",
                    body=body, template="interview_booked", candidate_id=c.id, application_id=app.id, whatsapp_text=text)
-    if b.get("interviewer_id"):
+    if b.get("interviewer_id") and flows.is_member(s, app.org_id, b["interviewer_id"]):
         u = s.get(db.User, b["interviewer_id"])
         if u:
             fb = feedback_link(rr)
@@ -127,6 +131,8 @@ def reminders_and_no_shows(s, now: float) -> None:
             continue
         app = s.get(db.Application, rr.application_id)
         job = s.get(db.Job, rr.job_id)
+        if not app or not job or app.round_id != rr.round_id or app.stage in flows.CLOSED_STAGES + flows.FINAL_STAGES or b.get("cancelled_at"):
+            continue                                  # no reminders for an interview that no longer applies
         rnd = flows.round_of(job, rr.round_id) or {"name": "Interview"}
         start, end = b["starts_at"], b["ends_at"]
         if 0 < start - now <= 86400 and not d.get("reminded_24h"):

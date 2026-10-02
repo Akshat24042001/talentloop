@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Switch, Textarea, cn, toast } from '../../components/ui'
 import { ErrorBox, Loading, useApi } from '../../components/kit'
 import { api } from '../../lib/api'
+import { setLeaveGuard } from '../../lib/router'
 import { when } from '../../lib/format'
 import { LANGUAGES, PASS_LABEL, SHORT_LABEL, newRound, type FlowMeta, type Round, type RoundType, type TeamMember } from './types'
 
@@ -12,7 +13,7 @@ export const ROUND_ICON: Record<RoundType, typeof Bot> = {
   ai_interview: Bot, human_interview: Users, manager_approval: UserCheck,
 }
 
-export default function FlowBuilder({ jobId, canEdit }: { jobId: string; canEdit: boolean }) {
+export default function FlowBuilder({ jobId, canEdit, canManage = false }: { jobId: string; canEdit: boolean; canManage?: boolean }) {
   const { data: meta, error: e1 } = useApi<FlowMeta>('/api/flow-meta')
   const { data, error, reload } = useApi<{ rounds: Round[]; counts: Record<string, number>; team: TeamMember[] }>(`/api/jobs/${jobId}/flow`)
   const [rounds, setRounds] = useState<Round[] | null>(null)
@@ -24,7 +25,9 @@ export default function FlowBuilder({ jobId, canEdit }: { jobId: string; canEdit
   useEffect(() => {
     if (!dirty) return
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
-    window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn)
+    window.addEventListener('beforeunload', warn)
+    setLeaveGuard(() => confirm('You have unsaved changes to the hiring flow. Leave without saving them?'))
+    return () => { window.removeEventListener('beforeunload', warn); setLeaveGuard(null) }
   }, [dirty])
   if (error || e1) return <ErrorBox error={error || e1} retry={reload} />
   if (!data || !meta || !rounds) return <Loading />
@@ -52,8 +55,9 @@ export default function FlowBuilder({ jobId, canEdit }: { jobId: string; canEdit
   async function save() {
     setBusy(true)
     try {
-      const r = await api<{ rounds_list: Round[]; removed: number }>(`/api/jobs/${jobId}/flow`, { method: 'PUT', json: { rounds } })
-      setRounds(r.rounds_list); setDirty(false); toast('Flow saved'); reload()
+      const r = await api<{ rounds_list: Round[]; removed: number; placed: number }>(`/api/jobs/${jobId}/flow`, { method: 'PUT', json: { rounds } })
+      setRounds(r.rounds_list); setDirty(false); reload()
+      toast(r.placed ? `Flow saved. ${r.placed} candidate(s) from removed rounds are now in the new rounds, waiting to be started (Applicants tab).` : 'Flow saved')
     } catch (e: any) { toast(e.message) }
     setBusy(false)
   }
@@ -114,7 +118,7 @@ export default function FlowBuilder({ jobId, canEdit }: { jobId: string; canEdit
       </div>
       {cur && <RoundEditor key={cur.id} r={cur} meta={meta} team={data.team} jobId={jobId} canEdit={canEdit} saved={saved(cur.id) && !dirty}
         onChange={patch => update(cur.id, patch)} />}
-      {tplOpen && <Templates meta={meta} jobId={jobId} rounds={rounds} dirty={dirty} onClose={() => setTplOpen(false)} onApplied={() => { setDirty(false); setRounds(null); reload() }} />}
+      {tplOpen && <Templates canManage={canManage} meta={meta} jobId={jobId} rounds={rounds} dirty={dirty} onClose={() => setTplOpen(false)} onApplied={() => { setDirty(false); setRounds(null); reload() }} />}
     </div>
   )
 }
@@ -334,13 +338,16 @@ function Slots({ jobId, roundId, team, interviewers, minutes }: { jobId: string;
   )
 }
 
-function Templates({ meta, jobId, rounds, dirty, onClose, onApplied }: { meta: FlowMeta; jobId: string; rounds: Round[]; dirty: boolean; onClose: () => void; onApplied: () => void }) {
+function Templates({ canManage, meta, jobId, rounds, dirty, onClose, onApplied }: { canManage: boolean; meta: FlowMeta; jobId: string; rounds: Round[]; dirty: boolean; onClose: () => void; onApplied: () => void }) {
   const [name, setName] = useState(''), [desc, setDesc] = useState(''), [busy, setBusy] = useState('')
   const [list, setList] = useState(meta.templates)
   async function apply(id: string) {
     if (!confirm('Replace this job\'s flow with the template? Candidates already in a round continue from their position.')) return
     setBusy(id)
-    try { await api(`/api/jobs/${jobId}/flow/template`, { json: { template: id } }); toast('Template applied'); onApplied(); onClose() } catch (e: any) { toast(e.message) }
+    try {
+      const r = await api(`/api/jobs/${jobId}/flow/template`, { json: { template: id } })
+      toast(r.placed ? `Template applied. ${r.placed} candidate(s) are in the new rounds, waiting to be started (Applicants tab).` : 'Template applied'); onApplied(); onClose()
+    } catch (e: any) { toast(e.message) }
     setBusy('')
   }
   async function saveAs() {
@@ -359,15 +366,15 @@ function Templates({ meta, jobId, rounds, dirty, onClose, onApplied }: { meta: F
         {list.map(t => (
           <div key={t.id} className="flex items-center gap-3 rounded-xl p-3 ring-1 ring-slate-200 dark:ring-ink-700">
             <div className="min-w-0 flex-1"><div className="flex items-center gap-2 font-semibold">{t.name}{t.custom && <Badge tone="violet">Yours</Badge>}</div><div className="text-xs text-slate-500">{t.description || `${t.rounds} rounds`}</div></div>
-            {t.custom && <Button size="sm" variant="ghost" aria-label={`Delete ${t.name}`} icon={<Trash2 />} onClick={() => del(t.id)} />}
+            {t.custom && canManage && <Button size="sm" variant="ghost" aria-label={`Delete ${t.name}`} icon={<Trash2 />} onClick={() => del(t.id)} />}
             <Button size="sm" aria-label={`Use ${t.name}`} loading={busy === t.id} onClick={() => apply(t.id)}>Use</Button>
           </div>))}
-        <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-ink-800">
+        {canManage && <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-ink-800">
           <div className="text-sm font-semibold">Save the current flow as a template</div>
           <Input aria-label="Template name" placeholder="Template name" value={name} onChange={e => setName(e.target.value)} />
           <Input aria-label="Template description" placeholder="Description (optional)" value={desc} onChange={e => setDesc(e.target.value)} />
           <Button variant="primary" disabled={!name.trim()} loading={busy === 'save'} onClick={saveAs} icon={<Save />}>Save template</Button>
-        </div>
+        </div>}
       </div>
     </Modal>
   )

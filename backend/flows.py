@@ -48,6 +48,8 @@ STATUS_LABEL = {"pending": "Not started", "invited": "Invited", "in_progress": "
                 "passed": "Passed", "failed": "Not progressed", "on_hold": "On hold", "expired": "Missed deadline", "booked": "Slot booked",
                 "no_show": "No-show", "skipped": "Skipped", "setting_up": "Preparing"}
 OPEN_STATUSES = ("pending", "setting_up", "invited", "in_progress", "booked", "submitted", "on_hold")
+CLOSED_STAGES = ("rejected", "withdrawn")          # no further rounds; HR can re-open by moving them to a round
+FINAL_STAGES = ("offer", "hired")                  # selected: rounds are over
 
 DEFAULT_CONFIG = {
     "cv_screening": {"use_ai_report": True},
@@ -244,10 +246,33 @@ def advance(s, app: db.Application, job: db.Job, actor: str | None, notify: bool
     return enter_round(s, app, job, flow[nxt], actor, notify=notify)
 
 
+def release(s, rr: db.RoundResult | None) -> None:
+    """A candidate leaves a round (moved, rejected, withdrew, selected, removed): free their interview slot and
+    close an AI interview link they haven't used, so nobody is reminded of or joins a step that no longer applies."""
+    if rr is None:
+        return
+    d = dict(rr.data or {})
+    b = d.get("booking")
+    if b and b.get("slot_id"):
+        sl = s.get(db.Slot, b["slot_id"])
+        if sl and sl.booked_by == rr.id:
+            sl.booked_by = None
+        d["booking"] = {**b, "cancelled_at": time.time()}
+        rr.data = d
+    iid = d.get("interview_id")
+    if iid and rr.round_type == "ai_interview":
+        from . import store
+        rec = store.load(iid)
+        if rec and rec.get("status") == "created":
+            rec["status"] = "cancelled"
+            store.save(rec)
+
+
 def enter_round(s, app: db.Application, job: db.Job, rnd: dict, actor: str | None, notify: bool = True) -> db.RoundResult:
     flow = flow_of(job)
     pos = next((i for i, r in enumerate(flow) if r["id"] == rnd["id"]), 0)
     rr = get_result(s, app, rnd["id"])
+    release(s, rr)                                # re-entering a round starts it fresh
     if rr is None:
         rr = db.RoundResult(org_id=app.org_id, job_id=job.id, application_id=app.id, candidate_id=app.candidate_id,
                             round_id=rnd["id"], round_type=rnd["type"])
@@ -359,8 +384,8 @@ def decide(s, rr: db.RoundResult, decision: str, actor: str | None, reason: str 
     rr.completed_at = rr.completed_at or time.time()
     rr.updated_at = time.time()
     _log(s, app, job, actor, "round_decided", f"{rnd['name']}: {STATUS_LABEL[rr.status]}" + (f" ({reason})" if reason else ""))
-    if app.round_id != rr.round_id:
-        return                                   # an old round re-decided: no movement
+    if app.round_id != rr.round_id or app.stage in CLOSED_STAGES + FINAL_STAGES:
+        return                                   # an old round, or a closed application: recorded, no movement
     app.round_status = rr.status
     if decision == "pass":
         advance(s, app, job, actor, notify=notify)
@@ -378,8 +403,10 @@ def move_to(s, app: db.Application, job: db.Job, rid: str, actor: str | None, no
     if rnd["type"] == "application":
         raise ValueError("Candidates can't be moved back to the application form")
     cur = get_result(s, app, app.round_id) if app.round_id else None
-    if cur and cur.status in OPEN_STATUSES and cur.round_id != rid:
-        cur.status, cur.decision, cur.decided_by = "skipped", "skip", (actor or "")[:200]
+    if cur and cur.round_id != rid:
+        release(s, cur)
+        if cur.status in OPEN_STATUSES:
+            cur.status, cur.decision, cur.decided_by = "skipped", "skip", (actor or "")[:200]
     if app.stage in ("rejected", "withdrawn"):
         app.stage = STAGE_OF.get(rnd["type"], "screening")
     return enter_round(s, app, job, rnd, actor, notify=notify)
@@ -388,6 +415,7 @@ def move_to(s, app: db.Application, job: db.Job, rid: str, actor: str | None, no
 def reject(s, app: db.Application, reason: str, actor: str | None, notify: bool = True) -> None:
     job = s.get(db.Job, app.job_id)
     cur = get_result(s, app, app.round_id) if app.round_id else None
+    release(s, cur)
     if cur and cur.status in OPEN_STATUSES:
         cur.status, cur.decision = "failed", "fail"
     app.stage, app.round_status, app.decided_at, app.updated_at = "rejected", "failed", time.time(), time.time()
@@ -400,6 +428,10 @@ def reject(s, app: db.Application, reason: str, actor: str | None, notify: bool 
 
 def select(s, app: db.Application, actor: str | None, notify: bool = True) -> None:
     job = s.get(db.Job, app.job_id)
+    cur = get_result(s, app, app.round_id) if app.round_id else None
+    if cur and cur.status in OPEN_STATUSES:       # selected ahead of an unfinished round
+        release(s, cur)
+        cur.status, cur.decision = "skipped", "skip"
     app.stage, app.round_status, app.decided_at, app.updated_at = "offer", "passed", time.time(), time.time()
     _log(s, app, job, actor, "selected", "Passed every round")
     if notify:
@@ -410,6 +442,7 @@ def select(s, app: db.Application, actor: str | None, notify: bool = True) -> No
 def withdraw(s, app: db.Application, note: str = "") -> None:
     job = s.get(db.Job, app.job_id)
     cur = get_result(s, app, app.round_id) if app.round_id else None
+    release(s, cur)
     if cur and cur.status in OPEN_STATUSES:
         cur.status = "skipped"
     app.stage, app.updated_at = "withdrawn", time.time()
@@ -443,6 +476,8 @@ def approvers_for(s, job: db.Job, rnd: dict) -> list[dict]:
     out = []
     for a in (rnd.get("config") or {}).get("approvers") or []:
         u = s.get(db.User, a) if isinstance(a, str) and "@" not in a else None
+        if u and not is_member(s, job.org_id, u.id):
+            continue                               # a person from another company (or removed): never sent anything
         if u:
             out.append({"name": u.name, "email": u.email})
         elif isinstance(a, str) and "@" in a:
@@ -455,6 +490,34 @@ def approvers_for(s, job: db.Job, rnd: dict) -> list[dict]:
         if u:
             out.append({"name": u.name, "email": u.email})
     return out
+
+
+def is_member(s, org_id: str, user_id: str | None) -> bool:
+    return bool(user_id) and s.query(db.Membership).filter(db.Membership.org_id == org_id, db.Membership.user_id == user_id,
+                                                           db.Membership.active.isnot(False)).count() > 0
+
+
+def purge_application(s, app: db.Application) -> list[str]:
+    """Delete an application's flow data (round results, messages) after releasing what it holds.
+    Returns the stored-file prefixes to delete once the transaction is done."""
+    prefixes = []
+    for rr in s.query(db.RoundResult).filter(db.RoundResult.application_id == app.id):
+        release(s, rr)
+        prefixes.append(f"{app.org_id}/rounds/{rr.id}")
+    s.query(db.RoundResult).filter(db.RoundResult.application_id == app.id).delete(synchronize_session=False)
+    s.query(db.Message).filter(db.Message.application_id == app.id).delete(synchronize_session=False)
+    return prefixes
+
+
+def purge_job(s, job: db.Job) -> list[str]:
+    """Everything that belongs to a job's flow: applications' round data, slots, campus drives, task files."""
+    prefixes = []
+    for a in s.query(db.Application).filter(db.Application.job_id == job.id):
+        prefixes += purge_application(s, a)
+    s.query(db.Slot).filter(db.Slot.job_id == job.id).delete(synchronize_session=False)
+    s.query(db.Drive).filter(db.Drive.job_id == job.id).delete(synchronize_session=False)
+    prefixes.append(f"{job.org_id}/jobs/{job.id}")
+    return prefixes
 
 
 def _log(s, app, job, actor, action, detail):
@@ -475,13 +538,36 @@ def apply_flow_change(s, job: db.Job, new_rounds: list[dict]) -> dict:
     for r in flow:                     # task files are uploaded through their own endpoint; never taken from the client
         if r["type"] == "practical_task":
             r["config"]["attachment"] = ((old.get(r["id"]) or {}).get("config") or {}).get("attachment")
+    old_pos = {r["id"]: i for i, r in enumerate(flow_of(job))}
     job.flow = flow
     new_ids = {r["id"] for r in job.flow}
     removed = old_ids - new_ids
-    affected = s.query(db.Application).filter(db.Application.job_id == job.id, db.Application.round_id.in_(removed or {""}),
-                                             db.Application.stage.notin_(("rejected", "withdrawn", "offer", "hired"))).count()
+    # Candidates in a removed round move to the round now at the same place in the flow, as "Not started":
+    # nothing is sent until HR starts them (board column or the application drawer).
+    placed = 0
+    apps = s.query(db.Application).filter(db.Application.job_id == job.id, db.Application.round_id.in_(removed or {""}),
+                                          db.Application.stage.notin_(CLOSED_STAGES + FINAL_STAGES)).all()
+    for app in apps:
+        cur = get_result(s, app, app.round_id)
+        if cur:
+            release(s, cur)
+            if cur.status in OPEN_STATUSES:
+                cur.status, cur.decision, cur.decided_by = "skipped", "skip", "Flow changed"
+        if len(flow) < 2:
+            continue
+        target = flow[max(1, min(old_pos.get(app.round_id, 1), len(flow) - 1))]
+        rr = get_result(s, app, target["id"]) or db.RoundResult(org_id=app.org_id, job_id=job.id, application_id=app.id,
+                                                                  candidate_id=app.candidate_id, round_id=target["id"], round_type=target["type"])
+        s.add(rr)
+        rr.status, rr.score, rr.decision, rr.decided_by, rr.data, rr.integrity = "pending", None, "", "", {"pos": flow.index(target)}, None
+        rr.deadline_at = rr.started_at = rr.completed_at = None
+        app.round_id, app.round_status, app.updated_at = target["id"], "pending", time.time()
+        if app.stage not in FINAL_STAGES:
+            app.stage = STAGE_OF.get(target["type"], app.stage)
+        _log(s, app, job, None, "round_moved", f"Flow changed: now in {target['name']} (not started)")
+        placed += 1
     job.updated_at = time.time()
-    return {"rounds": len(job.flow), "removed": len(removed), "candidates_in_removed_rounds": affected}
+    return {"rounds": len(job.flow), "removed": len(removed), "candidates_in_removed_rounds": len(apps), "placed": placed}
 
 
 def summary_for(rr: db.RoundResult) -> dict:

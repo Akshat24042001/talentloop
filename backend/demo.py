@@ -160,6 +160,7 @@ def clear(s, org_id: str) -> dict:
     jobs = [j for j in s.query(db.Job).filter_by(org_id=org_id) if (j.fields or {}).get("_sample")]
     cands = s.query(db.Candidate).filter_by(org_id=org_id, source="demo").all()
     jids, cids = [j.id for j in jobs], [c.id for c in cands]
+    files = [p for j in jobs for p in flows.purge_job(s, j)]
     for model, col, ids in ((db.Match, "job_id", jids), (db.RoundResult, "job_id", jids), (db.Slot, "job_id", jids),
                             (db.Message, "candidate_id", cids), (db.RoundResult, "candidate_id", cids),
                             (db.Application, "job_id", jids), (db.JobCollaborator, "job_id", jids),
@@ -171,4 +172,6 @@ def clear(s, org_id: str) -> dict:
     for c in cands:
         s.delete(c)
         store.delete_files(f"{org_id}/candidates/{c.id}")
+    for p in files:
+        store.delete_files(p)
     return {"jobs": len(jobs), "candidates": len(cands)}
