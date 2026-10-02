@@ -476,6 +476,24 @@ async def score_upload(rr_id: str) -> None:
                               integrity=[str(x)[:300] for x in sc.get("integrity") or []][:6], concerns=[str(x)[:300] for x in sc.get("concerns") or []][:5])
             else:
                 result["note"] = "Nothing was submitted or no rubric is set. Please review the screenshots yourself."
+        elif kind == "reference_check":
+            from . import references
+            with db.session() as s2:
+                rr2 = s2.get(db.RoundResult, rr_id)
+                score = references.score(rr2) if rr2 else None
+                answered = [r for r in ((rr2.data or {}).get("referees") or []) if r.get("answered_at")] if rr2 else []
+            result = {"referees": len(answered)}
+            if answered:
+                payload = json.dumps({"role": role, "referees": [{"relationship": references.RELATIONS.get(r.get("confirmed_relationship") or r.get("relationship"), "Other"),
+                                                                  "title": r.get("confirmed_title", ""), "ratings_1_to_5": r.get("ratings"), "answers": r.get("answers")}
+                                                                 for r in answered]}, ensure_ascii=False)
+                if llm.MOCK:
+                    sc = {"summary": "Mock summary of the references.", "strengths": [], "concerns": [], "consistency": "consistent", "follow_up": []}
+                else:
+                    sc = await llm.complete_json(references.REF_SYSTEM, payload, llm.SMART_MODEL, temperature=0.1, max_tokens=900, timeout=90)
+                result.update(summary=str(sc.get("summary") or "")[:1200], strengths=[str(x)[:300] for x in sc.get("strengths") or []][:4],
+                              concerns=[str(x)[:300] for x in sc.get("concerns") or []][:4], follow_up=[str(x)[:300] for x in sc.get("follow_up") or []][:3],
+                              consistency=sc.get("consistency") if sc.get("consistency") in ("consistent", "mixed", "conflicting") else None)
         elif kind == "practical_task":
             local = store.get_file(d["file"]) if d.get("file") else None
             content = extract_submission(str(local), d.get("file_name", "")) if local else ""

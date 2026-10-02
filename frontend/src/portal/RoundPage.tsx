@@ -3,7 +3,7 @@
 import { AlarmClock, CalendarCheck, CalendarPlus, Camera, CircleCheck, Download, FileUp, Headphones, Maximize, Mic, MonitorUp, Phone, RotateCcw, Send, Square, UserRound, Video } from 'lucide-react'
 import { ask } from '../components/dialogs'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Badge, Button, Card, Field, Modal, Spinner, Textarea, cn, toast } from '../components/ui'
+import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Spinner, Textarea, cn, toast } from '../components/ui'
 import { when } from '../lib/format'
 import { Frame, HowItWorks, PageState, Preview, fmtClock, getJSON, grab, send, useCamera, useLoad, type Brand, type Transparency } from './common'
 
@@ -14,6 +14,7 @@ interface Page {
   test?: { sections: { label: string; count: number; minutes: number }[]; negative_marking: number; max_exits: number; require_camera: boolean; started: boolean; sessions_used: number; max_sessions: number; window: { opens_at: number | null; closes_at: number | null; open: boolean; college: string } | null; extra_time: boolean; done?: boolean }
   recording?: { prompt: string; brief: string; max_seconds: number; retakes: number; prepare_seconds: number; uploaded: boolean }
   task?: { instructions: string; file_types: string; attachment: string | null; rubric: string[]; uploaded: string | null }
+  references?: { min: number; max: number; require_manager: boolean; referees: { id: string; name: string; email: string; relationship: string; answered: boolean }[]; relations: Record<string, string> }
   live?: { instructions: string; minutes: number; deliverable: 'code' | 'text' | 'file' | 'none'; language: string; snapshot_every_sec: number; rubric: string[]
     started_at: number | null; ends_at: number | null; draft: string; submitted: boolean; file: string | null; server_now: number }
   interview?: any
@@ -38,6 +39,7 @@ export default function RoundPage({ token }: { token: string }) {
         : data.type === 'test' ? <TestRound p={data} base={base} onDone={reload} />
         : data.type === 'video_intro' || data.type === 'role_task' ? <RecordRound p={data} base={base} onDone={reload} />
         : data.type === 'practical_task' ? <TaskRound p={data} base={base} onDone={reload} />
+        : data.type === 'reference_check' ? <RefRound p={data} base={base} onDone={reload} />
         : data.type === 'live_task' ? <LiveRound p={data} base={base} onDone={reload} />
         : data.type === 'ai_interview' ? <AIRound p={data} base={base} reload={reload} />
         : data.type === 'human_interview' ? <BookRound p={data} base={base} reload={reload} />
@@ -325,6 +327,51 @@ function TaskRound({ p, base, onDone }: { p: Page; base: string; onDone: () => v
         {err && <Alert tone="danger">{err}</Alert>}
         <Button variant="primary" size="lg" icon={<Send />} loading={busy} disabled={!file} onClick={submit}>Submit</Button>
       </Card>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------- reference check
+function RefRound({ p, base, onDone }: { p: Page; base: string; onDone: () => void }) {
+  const R = p.references!
+  const blank = () => ({ name: '', email: '', phone: '', company: '', relationship: 'manager' })
+  const [rows, setRows] = useState(() => Array.from({ length: R.referees.length ? 0 : R.min }, blank))
+  const [busy, setBusy] = useState(false), [err, setErr] = useState('')
+  const set = (i: number, k: string, v: string) => setRows(rows.map((r, j) => j === i ? { ...r, [k]: v } : r))
+  const total = R.referees.length + rows.length
+  async function submit() {
+    setBusy(true); setErr('')
+    try { await send(`${base}/referees`, { referees: rows }); setRows([]); onDone() } catch (e: any) { setErr(e.message) }
+    setBusy(false)
+  }
+  const valid = rows.every(r => r.name.trim() && /^\S+@\S+\.\S+$/.test(r.email.trim()))
+  return (
+    <div className="space-y-4">
+      <HowItWorks t={p.transparency} />
+      {R.referees.length > 0 && <Card className="p-5">
+        <div className="mb-2 font-semibold">Your referees</div>
+        <ul className="divide-y divide-slate-100 text-sm dark:divide-ink-800">{R.referees.map(r => (
+          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span><b>{r.name}</b> <span className="text-slate-500 dark:text-slate-400">· {r.relationship} · {r.email}</span></span>
+            {r.answered ? <Badge tone="success">Answered</Badge> : <Badge tone="warning">Waiting</Badge>}</li>))}</ul>
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">We emailed each of them. If someone hasn't seen it, ask them to check spam, or tell the hiring team.</p>
+      </Card>}
+      {(rows.length > 0 || R.referees.length < R.max) && <Card className="space-y-4 p-5">
+        <div><div className="font-semibold">{R.referees.length ? 'Add another referee' : `Name ${R.min} to ${R.max} referees`}</div>
+          <p className="text-sm text-slate-600 dark:text-slate-300">People who saw your work up close: managers, senior colleagues, clients or teachers.{R.require_manager ? ' At least one must have managed you.' : ''} Please let them know to expect an email.</p></div>
+        {rows.map((r, i) => (
+          <div key={i} className="grid gap-3 rounded-xl p-3 ring-1 ring-slate-200 sm:grid-cols-2 dark:ring-ink-700">
+            <Field label="Name" htmlFor={`rr-n${i}`}><Input id={`rr-n${i}`} value={r.name} onChange={e => set(i, 'name', e.target.value)} /></Field>
+            <Field label="Email" htmlFor={`rr-e${i}`}><Input id={`rr-e${i}`} type="email" value={r.email} onChange={e => set(i, 'email', e.target.value)} /></Field>
+            <Field label="How they know you" htmlFor={`rr-r${i}`}><Select id={`rr-r${i}`} value={r.relationship} onChange={e => set(i, 'relationship', e.target.value)}>{Object.entries(R.relations).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+            <Field label="Company or college (optional)" htmlFor={`rr-c${i}`}><Input id={`rr-c${i}`} value={r.company} onChange={e => set(i, 'company', e.target.value)} /></Field>
+            {rows.length > (R.referees.length ? 1 : R.min) && <Button size="sm" variant="ghost" className="w-fit" onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</Button>}
+          </div>))}
+        <div className="flex flex-wrap gap-2">
+          {total < R.max && <Button onClick={() => setRows([...rows, blank()])}>Add a referee</Button>}
+          {rows.length > 0 && <Button variant="primary" icon={<Send />} loading={busy} disabled={!valid} onClick={submit}>Send the requests</Button>}
+        </div>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </Card>}
     </div>
   )
 }

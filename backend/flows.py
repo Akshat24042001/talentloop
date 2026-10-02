@@ -42,6 +42,8 @@ ROUND_TYPES = {
                      "description": "AI voice interview with a scorecard and recommendation."},
     "human_interview": {"label": "Human interview", "stage": "interview", "candidate": True,
                         "description": "Scheduled interview with a manager or panel; candidates book a slot themselves."},
+    "reference_check": {"label": "Reference check", "stage": "shortlisted", "candidate": True,
+                        "description": "The candidate names referees; each answers a short form with no sign-in. AI summarises and flags fake references."},
     "manager_approval": {"label": "Manager approval", "stage": "shortlisted", "candidate": False,
                          "description": "One-click Select, Reject or Hold by the hiring manager from a link, no login."},
 }
@@ -72,9 +74,10 @@ DEFAULT_CONFIG = {
     "ai_interview": {"duration_min": 15, "language": "en", "channel": "web", "max_warnings": 2, "role_play": False, "role_play_brief": ""},
     "human_interview": {"duration_min": 45, "mode": "video", "interviewers": [], "reschedules_allowed": 1, "meeting_url": "", "location": ""},
     "manager_approval": {"approvers": []},
+    "reference_check": {"min_referees": 2, "max_referees": 3, "require_manager": False},
 }
 DEFAULT_RULE = {"cv_screening": {"mode": "top_n", "value": 25}, "test": {"mode": "min_score", "value": 50}, "video_intro": {"mode": "hr_review", "value": 0},
-                "role_task": {"mode": "hr_review", "value": 0}, "practical_task": {"mode": "hr_review", "value": 0}, "live_task": {"mode": "hr_review", "value": 0},
+                "role_task": {"mode": "hr_review", "value": 0}, "practical_task": {"mode": "hr_review", "value": 0}, "live_task": {"mode": "hr_review", "value": 0}, "reference_check": {"mode": "hr_review", "value": 0},
                 "ai_interview": {"mode": "hr_review", "value": 0}, "human_interview": {"mode": "hr_review", "value": 0},
                 "manager_approval": {"mode": "hr_review", "value": 0}, "application": {"mode": "auto_pass", "value": 0}}
 
@@ -181,6 +184,7 @@ ROUND_INVITE = {
     "role_task": "Your next step is a short recorded role task{name}. You'll read a brief, then record your answer.",
     "practical_task": "Your next step is a practical task{name}. Download the instructions and upload your work.",
     "live_task": "Your next step is a live task{name}, about {minutes} minutes. Use a laptop or desktop: you'll share your screen while you work.",
+    "reference_check": "Your next step is a reference check{name}. Please name people who have worked with you; we'll send them a short form.",
     "ai_interview": "Your next step is a first-round interview with our AI interviewer{name}. It is a voice conversation in your browser, about {minutes} minutes, available any time.",
     "human_interview": "You're invited to an interview{name}. Please pick a time that suits you.",
 }

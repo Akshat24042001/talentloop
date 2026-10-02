@@ -1,7 +1,7 @@
 // Shared shapes and labels for hiring flows (see backend/flows.py).
 import type { Tone } from '../../lib/format'
 
-export type RoundType = 'application' | 'cv_screening' | 'test' | 'video_intro' | 'role_task' | 'practical_task' | 'live_task' | 'ai_interview' | 'human_interview' | 'manager_approval'
+export type RoundType = 'application' | 'cv_screening' | 'test' | 'video_intro' | 'role_task' | 'practical_task' | 'live_task' | 'reference_check' | 'ai_interview' | 'human_interview' | 'manager_approval'
 export interface Round {
   id: string; type: RoundType; name: string; pass_rule: { mode: 'min_score' | 'top_n' | 'hr_review' | 'auto_pass'; value: number }
   advance: 'auto' | 'hr'; deadline_days: number | null; message: string; config: Record<string, any>
@@ -22,7 +22,7 @@ export interface RoundSummary {
 export const PASS_LABEL: Record<string, string> = { min_score: 'Minimum score', top_n: 'Top N by score', hr_review: 'HR reviews each', auto_pass: 'Everyone passes' }
 export const SHORT_LABEL: Record<RoundType, string> = {
   application: 'Application', cv_screening: 'CV screening', test: 'Test', video_intro: 'Video intro', role_task: 'Role task',
-  practical_task: 'Practical task', live_task: 'Live task', ai_interview: 'AI interview', human_interview: 'Human interview', manager_approval: 'Manager approval',
+  practical_task: 'Practical task', live_task: 'Live task', reference_check: 'Reference check', ai_interview: 'AI interview', human_interview: 'Human interview', manager_approval: 'Manager approval',
 }
 export const STATUS_TONE: Record<string, Tone> = {
   pending: 'neutral', setting_up: 'neutral', invited: 'brand', in_progress: 'brand', booked: 'violet', submitted: 'warning', on_hold: 'warning',

@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func
 
-from . import assessments, auth, calibration, db, flows, messages, refs, scheduling, similarity, store, worker
+from . import assessments, auth, calibration, db, flows, messages, references, refs, scheduling, similarity, store, worker
 from .offload import offload
 from .api_accounts import log_activity, org_settings
 from .api_hiring import STAGE_LABEL, cand_summary, ctx_of, get_job, LIST_COLS
@@ -354,6 +354,22 @@ def _rr(s, ctx, rrid: str, need: str = "edit") -> tuple[db.RoundResult, db.Appli
         raise HTTPException(404, "Not found")
     a, job, _ = _app_and_job(s, ctx, rr.application_id, need)
     return rr, a, job
+
+
+@router.post("/api/round-results/{rrid}/referees/{ref_id}/remind")
+def remind_referee(rrid: str, ref_id: str, req: Request):
+    """Email a referee who hasn't answered a fresh link. Returns the link so HR can also share it themselves."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        rr, a, job = _rr(s, ctx, rrid)
+        if rr.round_type != "reference_check":
+            raise HTTPException(400, "Not a reference check.")
+        try:
+            link = references.resend(s, rr, ref_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        log_activity(s, ctx, "referee_reminded", ref_id, job_id=job.id, candidate_id=a.candidate_id)
+        return {"ok": True, "link": link}
 
 
 @router.post("/api/round-results/{rrid}/resend")

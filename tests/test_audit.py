@@ -370,6 +370,48 @@ check("automatic decisions count as the team agreeing with the AI", cr_["decided
 check("AI vs team agreement is miscounted", cr_["agree"] != 3 or cr_["compared"] != 5 or cr_["agreement"] != 60, str(cr_)[:300])
 check("the biggest disagreements aren't listed first", [d["score"] for d in cr_["disagreements"]][:1] != [75], str(cr_["disagreements"]))
 
+
+# Reference check: candidate names referees, each answers by a no-login link; score is the average rating; fake references flagged
+rj, RR = mkjob(["application", "reference_check", "manager_approval"], "Ops Lead")
+ra = mkapp(rj); move(ra, RR["reference_check"]["id"]); rt = tok(rnd(ra, "reference_check")["result"]["candidate_link"])
+rp = ok(pub.get(f"/api/r/{rt}"))
+check("the reference page doesn't say how many referees are needed", rp.get("references", {}).get("min") != 2, str(rp.get("references"))[:200])
+bad = pub.post(f"/api/r/{rt}/referees", json={"referees": [{"name": "Me", "email": "c%d@m.test" % k[0]}, {"name": "B", "email": "b@r.test"}]})
+check("a candidate can name themselves as a referee", bad.status_code == 200, bad.text[:150])
+check("one referee is accepted when two are required", pub.post(f"/api/r/{rt}/referees", json={"referees": [{"name": "Asha Rao", "email": "asha@r.test"}]}).status_code == 200)
+ok(pub.post(f"/api/r/{rt}/referees", json={"referees": [{"name": "Asha Rao", "email": "asha@r.test", "relationship": "manager"},
+                                                       {"name": "Vik Sen", "email": "vik@r.test", "relationship": "peer"}]}, headers={"X-Forwarded-For": "10.0.0.1"}))
+with db.session() as s_:
+    sent_ = [m.to for m in s_.query(db.Message).filter(db.Message.template == "reference_request")]
+check("the referees aren't emailed", sorted(sent_) != ["asha@r.test", "vik@r.test"], str(sent_))
+with db.session() as s_:
+    rr_ = s_.get(db.RoundResult, rnd(ra, "reference_check")["result"]["id"])
+    from backend import references as _refs
+    links_ = []
+    for r_ in rr_.data["referees"]:                    # the emailed secrets aren't stored; issue fresh ones the way a reminder does
+        links_.append(_refs.resend(s_, rr_, r_["id"]).rsplit("/", 1)[1])
+cand_view = ok(pub.get(f"/api/r/{rt}"))["references"]["referees"]
+check("the candidate can see what referees wrote", any("answers" in r or "ratings" in r for r in cand_view))
+check("a guessed referee link opens the form", pub.get(f"/api/ref/{links_[0].split('.')[0]}.guess").status_code != 404)
+rf = ok(pub.get(f"/api/ref/{links_[0]}"))
+check("the referee form doesn't name the candidate", not rf["candidate"], str(rf)[:150])
+ans_ = {"context": "Managed her for 2 years at Zed.", "strengths": "Owns problems end to end.", "improve": "Delegation.", "rehire": "Yes"}
+check("a reference with a missing answer is accepted", pub.post(f"/api/ref/{links_[0]}", json={"ratings": {}, "answers": {"context": "x"}}).status_code == 200)
+ok(pub.post(f"/api/ref/{links_[0]}", json={"ratings": {"Quality of work": 5, "Reliability and ownership": 4, "Communication": 4, "Working with others": "na"},
+                                          "answers": ans_, "opened_at": time.time() - 300}, headers={"X-Forwarded-For": "10.0.0.1"}))
+check("a referee can answer twice", pub.post(f"/api/ref/{links_[0]}", json={"ratings": {}, "answers": ans_}).status_code != 409)
+check("the round finishes before enough referees answered", rnd(ra, "reference_check")["result"]["status"] == "submitted")
+ok(pub.post(f"/api/ref/{links_[1]}", json={"ratings": {"Quality of work": 3, "Reliability and ownership": 3, "Communication": 3, "Working with others": 3},
+                                          "answers": ans_, "opened_at": time.time() - 10}, headers={"X-Forwarded-For": "10.0.0.9"}))
+asyncio.run(worker.tick())
+rres = rnd(ra, "reference_check")["result"]
+check("the reference score isn't the average rating", rres["score"] != round(((5 + 4 + 4 + 3 * 4) / 7 - 1) / 4 * 100, 1), str(rres["score"]))
+rsn = " ".join(rres["integrity"].get("reasons") or [])
+check("a referee answering from the candidate's network isn't flagged", "same network address the candidate" not in rsn, rsn)
+check("a reference filled in seconds isn't flagged", "seconds" not in rsn, rsn)
+check("an honest referee on another network is flagged", "Vik Sen answered from the same network address the candidate" in rsn, rsn)
+check("another company can remind a referee", other.post(f"/api/round-results/{rres['id']}/referees/x/remind").status_code != 404)
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

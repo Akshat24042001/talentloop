@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from . import assessments, auth, db, flows, jd_schema, matching, refs, resumes, scheduling, store, worker
+from . import assessments, auth, db, flows, jd_schema, matching, references, refs, resumes, scheduling, store, worker
 from .offload import offload
 from .api_accounts import org_settings
 
@@ -79,6 +79,12 @@ def transparency(rnd: dict) -> dict:
                         f"You share your entire screen while you work; we keep a screenshot about every {int(cfg.get('snapshot_every_sec') or 30)} seconds.",
                         "AI reviews your work and how you approached it against these criteria and writes comments."],
                 "human": "The hiring team sees your work, the screenshots and the AI comments, and decides."}
+    if kind == "reference_check":
+        return {"measures": ["What people who worked with you say about your work, reliability, communication and teamwork"],
+                "how": ["You name referees. Each gets a short form by email; it takes them about 5 minutes and needs no sign-in.",
+                        "You see whether each referee has answered, never what they wrote.",
+                        "AI summarises the answers for the hiring team, quoting the referees. The score is the average of their ratings."],
+                "human": "The hiring team reads the references and decides."}
     if kind == "ai_interview":
         return {"measures": ["How well you answer questions about the role and your experience", "How clearly you explain your thinking"],
                 "how": ["You talk to an AI assistant, not a person. The interview is recorded and transcribed.",
@@ -133,6 +139,9 @@ def round_page(token: str, req: Request):
                            "rubric": [r.get("criterion") for r in cfg.get("rubric", [])], "started_at": d.get("live_started_at"),
                            "ends_at": d.get("live_ends_at"), "draft": d.get("live_draft", ""), "submitted": bool(d.get("live_submitted_at")),
                            "file": d.get("file_name"), "server_now": time.time()}
+        elif kind == "reference_check":
+            out["references"] = {"min": int(cfg.get("min_referees") or 2), "max": int(cfg.get("max_referees") or 3),
+                                 "require_manager": bool(cfg.get("require_manager")), "referees": references.public_view(rr), "relations": references.RELATIONS}
         elif kind == "ai_interview":
             iid = d.get("interview_id")
             out["interview"] = {"url": f"/interview.html?id={iid}" if iid and rr.status in ("invited", "in_progress") else None,
@@ -454,6 +463,67 @@ async def live_submit(token: str, req: Request):
     return {"ok": True}
 
 
+# ---- reference check
+@router.post("/api/r/{token}/referees")
+@offload
+async def add_referees(token: str, req: Request):
+    _limit(req, "referees", 20, 3600)
+    body = await req.json()
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        if rr.round_type != "reference_check":
+            raise HTTPException(400, "This link isn't a reference check.")
+        _active(rr, app)
+        cfg = (flows.round_of(job, rr.round_id) or {}).get("config") or {}
+        people = body.get("referees") or []
+        if cfg.get("require_manager") and not (rr.data or {}).get("referees") and not any(p.get("relationship") == "manager" for p in people):
+            raise HTTPException(400, "Please include at least one person who managed you.")
+        try:
+            references.add_referees(s, rr, app, job, people, auth.client_ip(req))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return {"referees": references.public_view(rr)}
+
+
+@router.get("/api/ref/{token}")
+def referee_page(token: str, req: Request):
+    _limit(req, "ref", 120)
+    with db.session() as s:
+        rr, ref = references.find(s, token)
+        if not rr:
+            raise HTTPException(404, "This link is not valid or has been replaced by a newer one.")
+        app, job, org = s.get(db.Application, rr.application_id), s.get(db.Job, rr.job_id), s.get(db.Org, rr.org_id)
+        c = s.get(db.Candidate, app.candidate_id) if app else None
+        if not (app and job and org and c) or org.disabled:
+            raise HTTPException(404, "This reference request is no longer available.")
+        return {"org": brand(org), "candidate": c.name, "job": job.title, "referee": ref["name"], "relationship": ref.get("relationship"),
+                "company": ref.get("company", ""), "relations": references.RELATIONS, "ratings": references.RATINGS, "questions": references.QUESTIONS,
+                "answered": bool(ref.get("answered_at")), "closed": app.stage in flows.CLOSED_STAGES + ("withdrawn",)}
+
+
+@router.post("/api/ref/{token}")
+@offload
+async def referee_answer(token: str, req: Request):
+    _limit(req, "ref-post", 20)
+    body = await req.json()
+    with db.session() as s:
+        rr, ref = references.find(s, token)
+        if not rr:
+            raise HTTPException(404, "This link is not valid or has been replaced by a newer one.")
+        if ref.get("answered_at"):
+            raise HTTPException(409, "You have already sent this reference. Thank you.")
+        app = s.get(db.Application, rr.application_id)
+        if not app or app.stage in flows.CLOSED_STAGES + ("withdrawn",):
+            raise HTTPException(410, "This reference request is closed. Thank you for your time.")
+        try:
+            references.record_answer(s, rr, ref, body, auth.client_ip(req))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        flows._log(s, app, s.get(db.Job, rr.job_id), None, "reference_received", f"Reference from {ref['name']}")
+    worker.kick()
+    return {"ok": True}
+
+
 # ---- practical task
 @router.get("/api/r/{token}/attachment")
 def task_attachment(token: str, req: Request):
@@ -638,7 +708,7 @@ def status_page(token: str, req: Request):
 
 
 def ROUND_FACING(r: dict) -> bool:          # noqa: N802
-    return r["type"] in ("test", "video_intro", "role_task", "practical_task", "live_task", "ai_interview")
+    return r["type"] in ("test", "video_intro", "role_task", "practical_task", "live_task", "reference_check", "ai_interview")
 
 
 @router.post("/api/status/{token}/accommodation")

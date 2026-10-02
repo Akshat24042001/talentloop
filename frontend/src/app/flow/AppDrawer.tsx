@@ -128,7 +128,7 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
             <div className="flex flex-wrap gap-2 pt-1">
               {res.candidate_link && ['invited', 'in_progress', 'booked', 'expired', 'pending'].includes(res.status) && <LinkActions url={res.candidate_link} label="Candidate link" copied="Candidate link copied" to={d.candidate}
                 subject={`${r.round.name}: ${d.job.title}`} message={`Hi ${d.candidate.name.split(' ')[0]}, here is your link for the ${r.round.name} step of your application for ${d.job.title}:`} />}
-              {['test', 'video_intro', 'role_task', 'practical_task', 'live_task', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
+              {['test', 'video_intro', 'role_task', 'practical_task', 'live_task', 'reference_check', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
                 <Button size="sm" icon={<RefreshCw />} onClick={() => act('resend', r.round.type === 'manager_approval' ? 'Approval request sent again' : 'Link sent again')}>Resend</Button>}
               {['test', 'video_intro', 'role_task', 'practical_task', 'live_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={async () => await ask('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
               {res.score != null || ['submitted', 'on_hold', 'passed', 'failed'].includes(res.status) ? (score == null ? <Button size="sm" variant="ghost" onClick={() => setScore(String(res.score ?? ''))}>Change score</Button>
@@ -191,6 +191,7 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
       {a.note && <Alert tone="info">{a.note}</Alert>}{a.error && <Alert tone="warning">{a.error}</Alert>}
     </>
   }
+  if (type === 'reference_check') return <References res={res} data={data} />
   if (type === 'live_task') {
     const a = data.assessment || {}
     if (!data.live_started_at) return <p className="text-slate-500">Not started yet.</p>
@@ -237,6 +238,34 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
   </>
   if (type === 'application' && data.knockouts?.length) return <p className="text-red-600">Knockouts: {data.knockouts.join('; ')}</p>
   return null
+}
+
+const REL: Record<string, string> = { manager: 'Manager', senior: 'Senior colleague', peer: 'Colleague', report: 'Someone they managed', client: 'Client', teacher: 'Teacher or professor', other: 'Other' }
+function References({ res, data }: { res: RoundSummary; data: Record<string, any> }) {
+  const refs: any[] = data.referees || [], a = data.assessment || {}
+  const [link, setLink] = useState<Record<string, string>>({})
+  if (!refs.length) return <p className="text-slate-500">{res.status === 'invited' ? 'Waiting for the candidate to name referees.' : 'No referees yet.'}</p>
+  async function remind(id: string) { try { const r = await api(`/api/round-results/${res.id}/referees/${id}/remind`, { method: 'POST' }); setLink({ ...link, [id]: r.link }); toast('Reminder sent with a fresh link') } catch (e: any) { toast(e.message) } }
+  return <>
+    {data.scoring && data.scoring !== 'done' && <p className="flex items-center gap-1.5 text-slate-500"><Spinner className="size-3.5" />Summarising…</p>}
+    {a.summary && <div><H>Summary{a.consistency ? ` · ${a.consistency}` : ''}</H><p>{a.summary}</p></div>}
+    {(a.strengths?.length > 0 || a.concerns?.length > 0) && <div className="grid gap-2 sm:grid-cols-2">
+      {a.strengths?.length > 0 && <div><H>Strengths</H><ul className="list-disc pl-5">{a.strengths.map((x: string) => <li key={x}>{x}</li>)}</ul></div>}
+      {a.concerns?.length > 0 && <div><H>Concerns</H><ul className="list-disc pl-5">{a.concerns.map((x: string) => <li key={x}>{x}</li>)}</ul></div>}</div>}
+    {a.follow_up?.length > 0 && <div><H>Worth asking</H><ul className="list-disc pl-5">{a.follow_up.map((x: string) => <li key={x}>{x}</li>)}</ul></div>}
+    {a.error && <Alert tone="warning">{a.error}</Alert>}
+    <ul className="space-y-2">{refs.map(r => (
+      <li key={r.id} className="rounded-xl bg-slate-50 p-3 dark:bg-ink-850">
+        <div className="flex flex-wrap items-center gap-2"><b>{r.name}</b><span className="text-xs text-slate-500 dark:text-slate-400">{REL[r.confirmed_relationship || r.relationship] || 'Other'}{r.confirmed_title ? `, ${r.confirmed_title}` : ''}{r.company ? ` at ${r.company}` : ''} · {r.email}</span>
+          {r.answered_at ? <Badge tone="success">Answered {ago(r.answered_at)}</Badge> : <><Badge tone="warning">Waiting since {ago(r.requested_at)}</Badge><Button size="sm" variant="ghost" onClick={() => remind(r.id)}>Remind</Button></>}</div>
+        {link[r.id] && <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">New link: {link[r.id]}</p>}
+        {r.answered_at && <>
+          {r.ratings && Object.keys(r.ratings).length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{Object.entries(r.ratings).map(([k, v]) => <Badge key={k}>{k}: {v as number}/5</Badge>)}</div>}
+          <dl className="mt-2 space-y-1.5">{Object.entries(r.answers || {}).filter(([, v]) => v).map(([k, v]) => (
+            <div key={k}><dt className="text-xs font-medium text-slate-500 dark:text-slate-400">{({ context: 'How they know them', strengths: 'Strengths', improve: 'To improve', rehire: 'Would work with them again', other: 'Anything else' } as Record<string, string>)[k] || k}</dt><dd className="whitespace-pre-line">{v as string}</dd></div>))}</dl>
+        </>}
+      </li>))}</ul>
+  </>
 }
 
 /** Video with playback speed up to 2x (reviewers skim introductions). */

@@ -1,5 +1,5 @@
 // The job's hiring flow: a block palette, drag-and-drop ordering and the settings of each round.
-import { ArrowDown, ArrowUp, CalendarPlus, ClipboardList, FileCheck2, FileUp, GripVertical, LayoutTemplate, ListChecks, Mic, MonitorPlay, Plus, Save, ShieldCheck, Trash2, UserCheck, Users, Video, Bot, FileText } from 'lucide-react'
+import { ArrowDown, ArrowUp, BookUser, CalendarPlus, ClipboardList, FileCheck2, FileUp, GripVertical, LayoutTemplate, ListChecks, Mic, MonitorPlay, Plus, Save, ShieldCheck, Trash2, UserCheck, Users, Video, Bot, FileText } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Switch, Textarea, cn, toast } from '../../components/ui'
 import { ErrorBox, Loading, useApi } from '../../components/kit'
@@ -11,7 +11,7 @@ import { DatePicker, MINUTE_PRESETS, Stepper, TimePicker } from '../../component
 import { ask } from '../../components/dialogs'
 
 export const ROUND_ICON: Record<RoundType, typeof Bot> = {
-  application: ClipboardList, cv_screening: FileCheck2, test: ListChecks, video_intro: Video, role_task: Mic, practical_task: FileUp, live_task: MonitorPlay,
+  application: ClipboardList, cv_screening: FileCheck2, test: ListChecks, video_intro: Video, role_task: Mic, practical_task: FileUp, live_task: MonitorPlay, reference_check: BookUser,
   ai_interview: Bot, human_interview: Users, manager_approval: UserCheck,
 }
 
@@ -181,6 +181,14 @@ function RoundEditor({ r, meta, team, jobId, canEdit, saved, onChange }: { r: Ro
           </Section>}
           {r.type === 'practical_task' && <PracticalConfig c={c} cfg={cfg} jobId={jobId} roundId={r.id} saved={saved} />}
           {r.type === 'live_task' && <LiveConfig c={c} cfg={cfg} />}
+          {r.type === 'reference_check' && <Section title="Referees">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="At least" htmlFor="rc-min"><Stepper id="rc-min" aria-label="Minimum referees" min={1} max={5} step={1} unit="referees" value={c.min_referees ?? 2} onChange={v => { cfg('min_referees', v); if ((c.max_referees ?? 3) < v) cfg('max_referees', v) }} /></Field>
+              <Field label="At most" htmlFor="rc-max"><Stepper id="rc-max" aria-label="Maximum referees" min={c.min_referees ?? 2} max={5} step={1} unit="referees" value={c.max_referees ?? 3} onChange={v => cfg('max_referees', v)} /></Field>
+            </div>
+            <Switch id="rc-mgr" checked={!!c.require_manager} onChange={v => cfg('require_manager', v)} label="Require a former manager" description="At least one referee must have managed the candidate." />
+            <p className="text-xs text-slate-500 dark:text-slate-400">Each referee rates quality of work, reliability, communication and teamwork (1 to 5) and answers four short questions. The score is the average rating; AI writes the summary and we flag look-alike references (same network as the candidate, forms filled in seconds).</p>
+          </Section>}
           {r.type === 'ai_interview' && <Section title="AI interview">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Language" htmlFor="r-lang"><Select id="r-lang" value={c.language || 'en'} onChange={e => cfg('language', e.target.value)}>{LANGUAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>

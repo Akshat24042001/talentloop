@@ -1247,7 +1247,7 @@ app.include_router(api_portal.router)
 
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
 SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
-              "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
+              "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/ref/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
 
 
 def _spa(rest: str = ""):

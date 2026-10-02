@@ -78,7 +78,7 @@ interface OnePage {
   job: { title: string; department: string }; rounds: { round: string; status: string; score: number | null; reasons?: string[]; stability?: string; ai_gaps?: string[]; sections?: { section: string; pct: number }[]; summary?: string; improvements?: string[]; recommendation?: string; feedback?: { decision: string; rating: number; notes: string }; integrity?: string[] }[]
   notes: string; rating: number | null
 }
-const RT: Record<string, string> = { application: 'Application', cv_screening: 'CV screening', test: 'Test', video_intro: 'Video introduction', role_task: 'Role task', practical_task: 'Practical task', live_task: 'Live task', ai_interview: 'AI interview', human_interview: 'Interview', manager_approval: 'Manager approval' }
+const RT: Record<string, string> = { application: 'Application', cv_screening: 'CV screening', test: 'Test', video_intro: 'Video introduction', role_task: 'Role task', practical_task: 'Practical task', live_task: 'Live task', reference_check: 'Reference check', ai_interview: 'AI interview', human_interview: 'Interview', manager_approval: 'Manager approval' }
 
 function Summary({ d, resumeUrl }: { d: OnePage; resumeUrl?: string }) {
   const c = d.candidate
@@ -137,6 +137,61 @@ export function DecidePage({ token }: { token: string }) {
           </>}
         </Card>
       </div>
+    </Frame>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------- referee form
+interface RefQ { id: string; label: string; kind: 'text' | 'choice'; options?: string[]; required: boolean }
+interface RefPage { org: Brand; candidate: string; job: string; referee: string; relationship: string; company: string; relations: Record<string, string>; ratings: string[]; questions: RefQ[]; answered: boolean; closed: boolean }
+export function RefereePage({ token }: { token: string }) {
+  const { data, error } = useLoad<RefPage>(`/api/ref/${token}`)
+  const [opened] = useState(() => Date.now())
+  const [rel, setRel] = useState(''), [title, setTitle] = useState(''), [rat, setRat] = useState<Record<string, number | 'na'>>({}), [ans, setAns] = useState<Record<string, string>>({})
+  const [err, setErr] = useState(''), [busy, setBusy] = useState(false), [done, setDone] = useState(false)
+  useEffect(() => { if (data) { document.title = `Reference for ${data.candidate}`; setRel(data.relationship || 'other') } }, [data])
+  if (error || !data) return <PageState error={error} loading={!data} />
+  const first = data.candidate.split(' ')[0]
+  if (done || data.answered) return <Frame org={data.org}><Card className="p-8 text-center"><CircleCheck className="mx-auto size-10 text-emerald-500" /><h1 className="mt-3 text-lg font-semibold">Thank you{data.referee ? `, ${data.referee.split(' ')[0]}` : ''}</h1>
+    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Your reference for {data.candidate} has been sent to the {data.org.name} hiring team.</p></Card></Frame>
+  if (data.closed) return <Frame org={data.org}><Alert tone="info" title="This request is closed">{data.candidate}'s application is no longer active. Thank you for your time.</Alert></Frame>
+  const missing = data.questions.filter(q => q.required && !(ans[q.id] || '').trim()).length + data.ratings.filter(r => rat[r] === undefined).length
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setErr('')
+    try { await send(`/api/ref/${token}`, { relationship: rel, title, ratings: rat, answers: ans, opened_at: opened }); setDone(true) } catch (x: any) { setErr(x.message) }
+    setBusy(false)
+  }
+  return (
+    <Frame org={data.org}>
+      <p className="text-sm text-slate-500 dark:text-slate-400">{data.job} · {data.org.name}</p>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reference for {data.candidate}</h1>
+      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{first} named you as a referee. About 5 minutes; no sign-in. Your answers go to the hiring team only; {first} doesn't see them. Please be specific and honest: examples help most.</p>
+      <form onSubmit={submit} className="mt-5 space-y-4">
+        <Card className="grid gap-3 p-5 sm:grid-cols-2">
+          <Field label={`How did you work with ${first}?`} htmlFor="rf-rel"><Select id="rf-rel" value={rel} onChange={e => setRel(e.target.value)}>{Object.entries(data.relations).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+          <Field label="Your job title" htmlFor="rf-title" hint={data.company ? `At ${data.company}` : undefined}><Input id="rf-title" value={title} onChange={e => setTitle(e.target.value)} /></Field>
+        </Card>
+        <Card className="p-5">
+          <div className="mb-1 font-semibold">Ratings</div>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">1 = well below what you'd expect, 3 = solid, 5 = among the best you've worked with. Choose "Can't say" if you didn't see it.</p>
+          <div className="space-y-3">{data.ratings.map(r => (
+            <fieldset key={r} className="flex flex-wrap items-center justify-between gap-2"><legend className="sr-only">{r}</legend><span className="text-sm font-medium">{r}</span>
+              <div className="flex gap-1">{([1, 2, 3, 4, 5, 'na'] as const).map(v => (
+                <button key={v} type="button" aria-pressed={rat[r] === v} aria-label={`${r}: ${v === 'na' ? "can't say" : v}`} onClick={() => setRat({ ...rat, [r]: v })}
+                  className={cn('h-9 rounded-lg px-3 text-sm font-semibold ring-1 ring-inset transition-colors', rat[r] === v ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50 dark:bg-ink-850 dark:text-slate-200 dark:ring-ink-700 dark:hover:bg-ink-800')}>
+                  {v === 'na' ? "Can't say" : v}</button>))}</div></fieldset>))}</div>
+        </Card>
+        <Card className="space-y-4 p-5">{data.questions.map(q => (
+          <Field key={q.id} label={`${q.label}${q.required ? '' : ' (optional)'}`} htmlFor={`rf-${q.id}`}>
+            {q.kind === 'choice' ? <div className="flex gap-2">{q.options!.map(o => (
+              <button key={o} type="button" aria-pressed={ans[q.id] === o} onClick={() => setAns({ ...ans, [q.id]: o })}
+                className={cn('h-9 rounded-lg px-4 text-sm font-semibold ring-1 ring-inset', ans[q.id] === o ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-700 ring-slate-200 dark:bg-ink-850 dark:text-slate-200 dark:ring-ink-700')}>{o}</button>))}</div>
+              : <Textarea id={`rf-${q.id}`} rows={3} value={ans[q.id] || ''} onChange={e => setAns({ ...ans, [q.id]: e.target.value })} />}
+          </Field>))}
+          {err && <Alert tone="danger">{err}</Alert>}
+          <Button type="submit" variant="primary" size="lg" loading={busy} disabled={missing > 0}>{missing ? `${missing} answer${missing === 1 ? '' : 's'} to go` : 'Send reference'}</Button>
+        </Card>
+      </form>
     </Frame>
   )
 }

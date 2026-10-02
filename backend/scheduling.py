@@ -169,7 +169,7 @@ def evidence(s, app: db.Application) -> dict:
                 item["ai_gaps"] = d["ai_report"].get("gaps", [])
         elif rr.round_type == "test":
             item["sections"] = [{"section": x["label"], "pct": x["pct"]} for x in (d.get("result") or {}).get("sections", [])]
-        elif rr.round_type in ("video_intro", "role_task", "practical_task", "live_task"):
+        elif rr.round_type in ("video_intro", "role_task", "practical_task", "live_task", "reference_check"):
             a = d.get("assessment") or {}
             item["summary"] = a.get("summary")
             item["improvements"] = a.get("improvements") or a.get("concerns")

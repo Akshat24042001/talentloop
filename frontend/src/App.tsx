@@ -34,7 +34,7 @@ const Team = lazy(() => import('./app/Team'))
 const CareersPage = named(() => import('./site/Careers'), 'CareersPage'), PublicJobPage = named(() => import('./site/Careers'), 'PublicJobPage')
 const Landing = lazy(() => import('./site/Landing'))
 const RoundPage = lazy(() => import('./portal/RoundPage'))
-const DecidePage = named(() => import('./portal/Pages'), 'DecidePage'), DrivePage = named(() => import('./portal/Pages'), 'DrivePage'), FeedbackPage = named(() => import('./portal/Pages'), 'FeedbackPage'), ResultsPage = named(() => import('./portal/Pages'), 'ResultsPage'), StatusPage = named(() => import('./portal/Pages'), 'StatusPage')
+const DecidePage = named(() => import('./portal/Pages'), 'DecidePage'), RefereePage = named(() => import('./portal/Pages'), 'RefereePage'), DrivePage = named(() => import('./portal/Pages'), 'DrivePage'), FeedbackPage = named(() => import('./portal/Pages'), 'FeedbackPage'), ResultsPage = named(() => import('./portal/Pages'), 'ResultsPage'), StatusPage = named(() => import('./portal/Pages'), 'StatusPage')
 
 type Need = 'manage_jobs' | 'manage_team'
 type Route = [string, (p: Record<string, string>) => ReactNode, string?, Need?]
@@ -112,6 +112,7 @@ function Routes() {
   if ((p = match('/r/:token', path))) return <RoundPage token={p.token!} />
   if ((p = match('/status/:token', path))) return <StatusPage token={p.token!} />
   if ((p = match('/decide/:token', path))) return <DecidePage token={p.token!} />
+  if ((p = match('/ref/:token', path))) return <RefereePage token={p.token!} />
   if ((p = match('/feedback/:token', path))) return <FeedbackPage token={p.token!} />
   if ((p = match('/drive/:code', path))) return <DrivePage code={p.code!} />
   if ((p = match('/results/:code', path))) return <ResultsPage code={p.code!} />

@@ -156,7 +156,7 @@ def _pending() -> tuple[list, list, list]:
                                                                   db.RoundResult.updated_at > now - 7 * 86400).limit(200)
                       if (r.data or {}).get("ai_report_wanted") and not (r.data or {}).get("ai_report") and not (r.data or {}).get("ai_report_failed")][:10]
         scoring = [(r.id, r.round_type) for r in s.query(db.RoundResult).filter(db.RoundResult.status == "submitted",
-                                                                               db.RoundResult.round_type.in_(("video_intro", "role_task", "practical_task", "live_task"))).limit(50)
+                                                                               db.RoundResult.round_type.in_(("video_intro", "role_task", "practical_task", "live_task", "reference_check"))).limit(50)
                    if (r.data or {}).get("scoring") == "queued"][:5]
     return setup_ids, report_ids, scoring
 
@@ -238,8 +238,8 @@ def _deadline(s, rr: db.RoundResult, now: float) -> None:
         return
     d = rr.data or {}
     if rr.status != "booked" and rr.deadline_at < now:
-        if rr.status == "in_progress" and rr.round_type in ("test", "live_task"):
-            return                                # tests and live tasks finish on their own timer (below)
+        if rr.status == "in_progress" and rr.round_type in ("test", "live_task", "reference_check"):
+            return                                # tests and live tasks finish on their own timer; referees may answer late
         rr.status = "expired"
         app.round_status = "expired"
         flows._log(s, app, s.get(db.Job, rr.job_id), None, "round_expired", f"{rr.round_type}: deadline passed")
