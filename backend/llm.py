@@ -203,3 +203,31 @@ async def complete_json(system: str, user: str, model: str, temperature: float =
     if not isinstance(out, dict):
         raise ValueError("model did not return a JSON object")
     return out
+
+
+# Vision (screen review of live tasks). Optional: without VISION_MODEL the screenshots are kept for people to look at
+# and the AI reviews only the submitted work. Use any OpenAI-compatible model that accepts images.
+VISION_MODEL = os.getenv("VISION_MODEL", "").strip()
+
+
+async def complete_json_vision(system: str, text: str, images: list[bytes], model: str | None = None,
+                               max_tokens: int = 1500, timeout: float = 120.0) -> dict:
+    import base64
+    parts = [{"type": "text", "text": text}] + [
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(b).decode()}} for b in images]
+    kwargs = dict(model=model or VISION_MODEL, messages=[{"role": "system", "content": system}, {"role": "user", "content": parts}],
+                  temperature=0.1, max_tokens=max_tokens, timeout=timeout)
+    if JSON_MODE:
+        kwargs["response_format"] = {"type": "json_object"}
+    try:
+        resp = await client().chat.completions.create(**kwargs)
+    except BadRequestError as e:
+        if "response_format" in kwargs and "response_format" in str(e):
+            kwargs.pop("response_format")
+            resp = await client().chat.completions.create(**kwargs)
+        else:
+            raise
+    out = parse_json(resp.choices[0].message.content) if resp.choices else None
+    if not isinstance(out, dict):
+        raise ValueError("vision model did not return a JSON object")
+    return out

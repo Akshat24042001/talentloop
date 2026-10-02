@@ -278,6 +278,46 @@ check("a drafted question the second pass agrees with is flagged anyway", "check
 jq = ok(hr.post("/api/questions/draft", json={"job_id": job["id"], "count": 3}))
 check("suggesting questions from a job's JD fails", len(jq.get("items") or []) != 3, str(jq)[:200])
 
+
+# Live task with screen sharing: task hidden until start, server clock, autosave, screenshots, file attach, scoring, abandoned tasks
+from backend import assessments as _as
+lj, LR = mkjob(["application", "live_task", "human_interview"], "Python Developer")
+cfg_ = {**LR["live_task"]["config"], "instructions": "Write fizzbuzz.", "minutes": 20}
+fl_ = ok(hr.get(f"/api/jobs/{lj['id']}/flow"))["rounds"]
+for x in fl_:
+    if x["type"] == "live_task": x["config"] = cfg_
+ok(hr.put(f"/api/jobs/{lj['id']}/flow", json={"rounds": fl_}))
+la = mkapp(lj); move(la, LR["live_task"]["id"]); lt = tok(rnd(la, "live_task")["result"]["candidate_link"])
+lp = ok(pub.get(f"/api/r/{lt}"))
+check("a live task shows the task before the clock starts", lp["live"]["instructions"] != "", lp["live"]["instructions"])
+check("saving a live task before it starts is accepted", ok(pub.post(f"/api/r/{lt}/live/save", json={"content": "x"}))["ok"])
+st_ = ok(pub.post(f"/api/r/{lt}/live/start"))
+check("the live task clock isn't the configured minutes", abs(st_["ends_at"] - st_["started_at"] - (20 * 60 + 15)) > 2, str(st_))
+st2 = ok(pub.post(f"/api/r/{lt}/live/start"))
+check("starting a live task again resets the clock", st2["ends_at"] != st_["ends_at"])
+check("the task stays hidden after the clock starts", ok(pub.get(f"/api/r/{lt}"))["live"]["instructions"] != "Write fizzbuzz.")
+ok(pub.post(f"/api/r/{lt}/live/save", json={"content": "def fb(n): pass"}))
+check("autosave of a live task is lost on reload", ok(pub.get(f"/api/r/{lt}"))["live"]["draft"] != "def fb(n): pass")
+jpg_ = b"\xff\xd8\xff\xe0" + b"0" * 2000
+ok(pub.post(f"/api/r/{lt}/snapshot", files={"image": ("s.jpg", jpg_, "image/jpeg")}, data={"reason": "screen"}))
+up_ = pub.post(f"/api/r/{lt}/upload", files={"file": ("design.fig", b"FIG", "application/octet-stream")})
+check("attaching a file ends the live task early", up_.status_code != 200 or rnd(la, "live_task")["result"]["status"] != "in_progress", up_.text[:150])
+ok(pub.post(f"/api/r/{lt}/live/submit", json={"content": "def fb(n): return n", "note": "done"}))
+check("a live task can be submitted twice", pub.post(f"/api/r/{lt}/live/submit", json={"content": "x"}).status_code != 409)
+asyncio.run(worker.tick())
+lr_ = rnd(la, "live_task")["result"]
+ld_ = detail(la)["rounds"]; ldd = next(x for x in ld_ if x["round"]["type"] == "live_task")["data"]
+check("a submitted live task isn't scored against the rubric", lr_["score"] is None or not (ldd.get("assessment") or {}).get("criteria"), str(ldd.get("assessment"))[:200])
+check("the live task review ignores the screenshots", (ldd.get("assessment") or {}).get("screens") != 1, str(ldd.get("assessment"))[:200])
+lb = mkapp(lj); move(lb, LR["live_task"]["id"]); lt2 = tok(rnd(lb, "live_task")["result"]["candidate_link"])
+ok(pub.post(f"/api/r/{lt2}/live/start")); ok(pub.post(f"/api/r/{lt2}/live/save", json={"content": "partial work"}))
+with db.session() as s_:
+    rr_ = s_.get(db.RoundResult, rnd(lb, "live_task")["result"]["id"]); rr_.data = {**rr_.data, "live_ends_at": time.time() - 300}
+worker.time_rules()
+lb_ = rnd(lb, "live_task")["result"]
+check("a live task abandoned after time ran out is never submitted", lb_["status"] != "submitted", lb_["status"])
+check("an abandoned live task loses the autosaved work", next(x for x in detail(lb)["rounds"] if x["round"]["type"] == "live_task")["data"].get("live_content") != "partial work")
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

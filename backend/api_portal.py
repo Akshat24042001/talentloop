@@ -73,6 +73,12 @@ def transparency(rnd: dict) -> dict:
     if kind == "practical_task":
         return {"measures": [r.get("criterion") for r in cfg.get("rubric", []) if r.get("criterion")],
                 "how": ["AI reviews your file against these criteria and writes comments."], "human": "The hiring team reviews the work and decides."}
+    if kind == "live_task":
+        return {"measures": [r.get("criterion") for r in cfg.get("rubric", []) if r.get("criterion")],
+                "how": [f"You'll have {cfg.get('minutes', 30)} minutes. The timer starts when you press Start.",
+                        f"You share your entire screen while you work; we keep a screenshot about every {int(cfg.get('snapshot_every_sec') or 30)} seconds.",
+                        "AI reviews your work and how you approached it against these criteria and writes comments."],
+                "human": "The hiring team sees your work, the screenshots and the AI comments, and decides."}
     if kind == "ai_interview":
         return {"measures": ["How well you answer questions about the role and your experience", "How clearly you explain your thinking"],
                 "how": ["You talk to an AI assistant, not a person. The interview is recorded and transcribed.",
@@ -120,6 +126,13 @@ def round_page(token: str, req: Request):
             att = cfg.get("attachment") or {}
             out["task"] = {"instructions": cfg.get("instructions", ""), "file_types": cfg.get("file_types", ""), "attachment": att.get("name") if att else None,
                            "rubric": [r.get("criterion") for r in cfg.get("rubric", [])], "uploaded": d.get("file_name")}
+        elif kind == "live_task":
+            out["live"] = {"instructions": cfg.get("instructions", "") if d.get("live_started_at") else "",   # the task shows once the clock starts
+                           "minutes": round(int(cfg.get("minutes") or 30) * assessments.extra_time_factor(app)),
+                           "deliverable": cfg.get("deliverable", "code"), "language": cfg.get("language", ""), "snapshot_every_sec": int(cfg.get("snapshot_every_sec") or 30),
+                           "rubric": [r.get("criterion") for r in cfg.get("rubric", [])], "started_at": d.get("live_started_at"),
+                           "ends_at": d.get("live_ends_at"), "draft": d.get("live_draft", ""), "submitted": bool(d.get("live_submitted_at")),
+                           "file": d.get("file_name"), "server_now": time.time()}
         elif kind == "ai_interview":
             iid = d.get("interview_id")
             out["interview"] = {"url": f"/interview.html?id={iid}" if iid and rr.status in ("invited", "in_progress") else None,
@@ -336,7 +349,7 @@ async def round_snapshot(token: str, req: Request, image: UploadFile = File(...)
             return {"ok": True, "kept": False}
         integ = dict(rr.integrity or {})
         snaps = integ.get("snapshots", [])
-        if len(snaps) >= 60:
+        if len(snaps) >= (150 if rr.round_type == "live_task" else 60):
             return {"ok": True, "kept": False}
         key = f"{org.id}/rounds/{rr.id}/snap-{len(snaps) + 1:03d}.jpg"
         store.put_file(key, raw, "image/jpeg")
@@ -380,6 +393,67 @@ async def upload_recording(token: str, req: Request, video: UploadFile = File(..
     return {"ok": True}
 
 
+# ---- live task (screen shared, timed, server clock)
+@router.post("/api/r/{token}/live/start")
+@offload
+async def live_start(token: str, req: Request):
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        if rr.round_type != "live_task":
+            raise HTTPException(400, "This link isn't a live task.")
+        _active(rr, app)
+        d = dict(rr.data or {})
+        if d.get("live_submitted_at"):
+            raise HTTPException(409, "You have already submitted this task.")
+        if not d.get("live_started_at"):
+            cfg = (flows.round_of(job, rr.round_id) or {}).get("config") or {}
+            now = time.time()
+            d["live_started_at"], d["live_ends_at"] = now, now + int(cfg.get("minutes") or 30) * 60 * assessments.extra_time_factor(app) + 15
+            rr.started_at, rr.status, app.round_status = rr.started_at or now, "in_progress", "in_progress"
+            rr.data = d
+        return {"started_at": d["live_started_at"], "ends_at": d["live_ends_at"], "server_now": time.time()}
+
+
+@router.post("/api/r/{token}/live/save")
+@offload
+async def live_save(token: str, req: Request):
+    """Autosave of the work in progress (every few seconds), so a refresh or crash loses nothing."""
+    body = await req.json()
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        d = dict(rr.data or {})
+        if rr.round_type != "live_task" or d.get("live_submitted_at") or not d.get("live_started_at"):
+            return {"ok": False}
+        d["live_draft"] = str(body.get("content") or "")[:200000]
+        rr.data = d
+        return {"ok": True}
+
+
+@router.post("/api/r/{token}/live/submit")
+@offload
+async def live_submit(token: str, req: Request):
+    body = await req.json()
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        if rr.round_type != "live_task":
+            raise HTTPException(400, "This link isn't a live task.")
+        d = dict(rr.data or {})
+        if d.get("live_submitted_at"):
+            raise HTTPException(409, "You have already submitted this task.")
+        if not d.get("live_started_at"):
+            raise HTTPException(400, "Start the task first.")
+        now = time.time()
+        late = now > float(d.get("live_ends_at") or now) + 60
+        d.update(live_content=str(body.get("content") or d.get("live_draft") or "")[:200000], note=str(body.get("note") or "")[:2000],
+                 live_submitted_at=now, live_late=late, auto=bool(body.get("auto")), scoring="queued")
+        rr.data = d
+        rr.status, rr.completed_at = "submitted", now
+        app.round_status = "submitted"
+        flows._log(s, app, job, None, "round_submitted", "live task submitted" + (" (time ran out)" if body.get("auto") else ""))
+    worker.kick()
+    return {"ok": True}
+
+
 # ---- practical task
 @router.get("/api/r/{token}/attachment")
 def task_attachment(token: str, req: Request):
@@ -402,10 +476,12 @@ async def task_upload(token: str, req: Request, file: UploadFile = File(...), no
         raise HTTPException(413, "The file is larger than 25 MB.")
     with db.session() as s:
         rr, app, job, org = _by_token(s, token)
-        if rr.round_type != "practical_task":
+        if rr.round_type not in ("practical_task", "live_task"):
             raise HTTPException(400, "This link doesn't take an upload.")
         _active(rr, app)
-        if (rr.data or {}).get("file"):
+        if rr.round_type == "live_task" and (not (rr.data or {}).get("live_started_at") or (rr.data or {}).get("live_submitted_at")):
+            raise HTTPException(400, "Start the task first." if not (rr.data or {}).get("live_submitted_at") else "You have already submitted this task.")
+        if (rr.data or {}).get("file") and rr.round_type != "live_task":
             raise HTTPException(409, "You have already submitted this task.")
         cfg = (flows.round_of(job, rr.round_id) or {}).get("config") or {}
         allowed = [x.strip().lower() for x in str(cfg.get("file_types") or "").split(",") if x.strip()]
@@ -415,6 +491,9 @@ async def task_upload(token: str, req: Request, file: UploadFile = File(...), no
             raise HTTPException(400, f"Please upload one of: {', '.join(allowed)}")
         key = f"{org.id}/rounds/{rr.id}/submission{ext}"
         store.put_file(key, raw, file.content_type or "application/octet-stream")
+        if rr.round_type == "live_task":         # attached to the live task (replaceable); the round ends on /live/submit
+            rr.data = {**(rr.data or {}), "file": key, "file_name": name, "uploaded_at": time.time()}
+            return {"ok": True, "name": name}
         rr.data = {**(rr.data or {}), "file": key, "file_name": name, "note": note[:2000], "scoring": "queued", "uploaded_at": time.time()}
         rr.started_at = rr.started_at or time.time()
         rr.status, rr.completed_at = "submitted", time.time()
@@ -559,7 +638,7 @@ def status_page(token: str, req: Request):
 
 
 def ROUND_FACING(r: dict) -> bool:          # noqa: N802
-    return r["type"] in ("test", "video_intro", "role_task", "practical_task", "ai_interview")
+    return r["type"] in ("test", "video_intro", "role_task", "practical_task", "live_task", "ai_interview")
 
 
 @router.post("/api/status/{token}/accommodation")

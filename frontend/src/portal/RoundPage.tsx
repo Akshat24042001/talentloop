@@ -1,6 +1,7 @@
 // The candidate's page for one round (/r/<token>): a proctored test, a video or role-task recording, a practical
 // task upload, the AI interview start page, or booking a human interview.
-import { AlarmClock, CalendarCheck, CalendarPlus, Camera, CircleCheck, Download, FileUp, Headphones, Maximize, Mic, Phone, RotateCcw, Send, Square, UserRound, Video } from 'lucide-react'
+import { AlarmClock, CalendarCheck, CalendarPlus, Camera, CircleCheck, Download, FileUp, Headphones, Maximize, Mic, MonitorUp, Phone, RotateCcw, Send, Square, UserRound, Video } from 'lucide-react'
+import { ask } from '../components/dialogs'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Modal, Spinner, Textarea, cn, toast } from '../components/ui'
 import { when } from '../lib/format'
@@ -13,6 +14,8 @@ interface Page {
   test?: { sections: { label: string; count: number; minutes: number }[]; negative_marking: number; max_exits: number; require_camera: boolean; started: boolean; sessions_used: number; max_sessions: number; window: { opens_at: number | null; closes_at: number | null; open: boolean; college: string } | null; extra_time: boolean; done?: boolean }
   recording?: { prompt: string; brief: string; max_seconds: number; retakes: number; prepare_seconds: number; uploaded: boolean }
   task?: { instructions: string; file_types: string; attachment: string | null; rubric: string[]; uploaded: string | null }
+  live?: { instructions: string; minutes: number; deliverable: 'code' | 'text' | 'file' | 'none'; language: string; snapshot_every_sec: number; rubric: string[]
+    started_at: number | null; ends_at: number | null; draft: string; submitted: boolean; file: string | null; server_now: number }
   interview?: any
 }
 
@@ -35,6 +38,7 @@ export default function RoundPage({ token }: { token: string }) {
         : data.type === 'test' ? <TestRound p={data} base={base} onDone={reload} />
         : data.type === 'video_intro' || data.type === 'role_task' ? <RecordRound p={data} base={base} onDone={reload} />
         : data.type === 'practical_task' ? <TaskRound p={data} base={base} onDone={reload} />
+        : data.type === 'live_task' ? <LiveRound p={data} base={base} onDone={reload} />
         : data.type === 'ai_interview' ? <AIRound p={data} base={base} reload={reload} />
         : data.type === 'human_interview' ? <BookRound p={data} base={base} reload={reload} />
         : <Alert tone="info">Nothing to do here. <a className="font-semibold underline" href={data.status_link}>See your application status.</a></Alert>}
@@ -320,6 +324,137 @@ function TaskRound({ p, base, onDone }: { p: Page; base: string; onDone: () => v
         <Field label="Anything to add? (optional)" htmlFor="tk-note"><Textarea id="tk-note" className="min-h-0" rows={3} value={note} onChange={e => setNote(e.target.value)} /></Field>
         {err && <Alert tone="danger">{err}</Alert>}
         <Button variant="primary" size="lg" icon={<Send />} loading={busy} disabled={!file} onClick={submit}>Submit</Button>
+      </Card>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------- live task (screen shared)
+const canShare = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia
+function LiveRound({ p, base, onDone }: { p: Page; base: string; onDone: () => void }) {
+  const L = p.live!
+  const [ends, setEnds] = useState<number | null>(L.ends_at), [skew] = useState(() => L.server_now - Date.now() / 1000)
+  const [content, setContent] = useState(L.draft || ''), [note, setNote] = useState(''), [fileName, setFileName] = useState(L.file || '')
+  const [stream, setStream] = useState<MediaStream | null>(null), [consent, setConsent] = useState(!!L.started_at)
+  const [left, setLeft] = useState(0), [busy, setBusy] = useState(false), [err, setErr] = useState(''), [saved, setSaved] = useState(true)
+  const sub = useRef(false), last = useRef(L.draft || ''), cur = useRef(content)
+  cur.current = content
+  const now = () => Date.now() / 1000 + skew
+
+  async function share(): Promise<MediaStream | null> {
+    setErr('')
+    try {
+      const st = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor', frameRate: 5 } as MediaTrackConstraints, audio: false })
+      const tr = st.getVideoTracks()[0]!
+      const surface = (tr.getSettings() as any).displaySurface
+      if (surface && surface !== 'monitor') { st.getTracks().forEach(t => t.stop()); setErr('Please share your entire screen, not a window or a tab, so the review sees all your work.'); return null }
+      tr.addEventListener('ended', () => { setStream(null); send(`${base}/event`, { type: 'screen_share_stopped' }).catch(() => {}) })
+      setStream(st); return st
+    } catch { setErr('Screen sharing was not allowed. You need to share your screen to do this task.'); return null }
+  }
+  async function start() {
+    const st = await share(); if (!st) return
+    setBusy(true)
+    try { const r = await send(`${base}/live/start`); setEnds(r.ends_at); onDone() } catch (e: any) { setErr(e.message); st.getTracks().forEach(t => t.stop()); setStream(null) }
+    setBusy(false)
+  }
+  const submit = useCallback(async (auto = false) => {
+    if (sub.current) return
+    sub.current = true; setBusy(true); setErr('')
+    try { await send(`${base}/live/submit`, { content: cur.current, note, auto }); stream?.getTracks().forEach(t => t.stop()); onDone() }
+    catch (e: any) { setErr(e.message); sub.current = false }
+    setBusy(false)
+  }, [base, note, stream, onDone])
+
+  // countdown on the server clock; submits by itself when time is up
+  useEffect(() => {
+    if (!ends) return
+    const t = setInterval(() => { const l = ends - 15 - now(); setLeft(l); if (l <= 0) submit(true) }, 500)   // the server adds 15 s of grace
+    return () => clearInterval(t)
+  }, [ends, submit])   // eslint-disable-line react-hooks/exhaustive-deps
+  // autosave every 5 seconds when something changed
+  useEffect(() => {
+    if (!ends) return
+    const t = setInterval(async () => { if (cur.current !== last.current) { const v = cur.current; try { await send(`${base}/live/save`, { content: v }); last.current = v; setSaved(true) } catch { /* retried next tick */ } } }, 5000)
+    return () => clearInterval(t)
+  }, [ends, base])
+  // a screenshot of the shared screen at the chosen interval
+  useEffect(() => {
+    if (!stream || !ends) return
+    const snap = async () => { try { const b = await grab(stream, 1280, 0.6); if (b) { const fd = new FormData(); fd.append('image', b, 'screen.jpg'); fd.append('reason', 'screen'); await send(`${base}/snapshot`, undefined, fd) } } catch { /* best effort */ } }
+    snap()
+    const t = setInterval(snap, Math.max(15, L.snapshot_every_sec) * 1000)
+    return () => clearInterval(t)
+  }, [stream, ends, base, L.snapshot_every_sec])
+  useEffect(() => () => { stream?.getTracks().forEach(t => t.stop()) }, [stream])
+  useEffect(() => {
+    if (!ends) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn)
+  }, [ends])
+
+  if (L.submitted || p.finished) return <Done title="Your work is submitted" link={p.status_link}>The hiring team will review your work and how you approached it.</Done>
+  async function upload(f: File) {
+    setBusy(true); setErr('')
+    try { const fd = new FormData(); fd.append('file', f); const r = await send(`${base}/upload`, undefined, fd); setFileName(r.name || f.name); toast('File attached') } catch (e: any) { setErr(e.message) }
+    setBusy(false)
+  }
+  function tab(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key !== 'Tab' || L.deliverable !== 'code') return
+    e.preventDefault()
+    const el = e.currentTarget, a = el.selectionStart, b = el.selectionEnd
+    const v = content.slice(0, a) + '    ' + content.slice(b)
+    setContent(v); setSaved(false)
+    requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = a + 4 })
+  }
+
+  if (!ends) return (
+    <div className="space-y-4">
+      <Card className="p-5 text-sm">
+        <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400"><MonitorUp className="size-5" /></span>
+          <div><div className="font-semibold">A {L.minutes}-minute live task, done while sharing your screen</div>
+            <p className="mt-1 text-slate-600 dark:text-slate-300">You'll see the task when you press Start. Work in any tool you like ({L.deliverable === 'code' ? `your editor or IDE; ${L.language || 'any language'}` : L.deliverable === 'file' ? 'design or office software' : 'any app'}), then hand in your work on this page.</p></div></div>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-slate-600 dark:text-slate-300">
+          <li>Use a laptop or desktop with Chrome or Edge. Phones can't share a screen.</li>
+          <li>Share your <b>entire screen</b> when asked. A screenshot is kept about every {L.snapshot_every_sec} seconds for the hiring team.</li>
+          <li>Close anything private (chats, email, other tabs) before you start.</li>
+          <li>The timer runs on our server. If you close this page, it keeps running and what you typed is saved every few seconds.</li>
+        </ul>
+      </Card>
+      <HowItWorks t={p.transparency} />
+      {!canShare ? <Alert tone="warning" title="This device can't share its screen">Please open this link on a laptop or desktop in Chrome or Edge.</Alert> : <>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 size-4 accent-brand-600" checked={consent} onChange={e => setConsent(e.target.checked)} />
+          <span>I agree to share my screen and for screenshots to be kept for the hiring team.</span></label>
+        {err && <Alert tone="danger">{err}</Alert>}
+        <Button variant="primary" size="lg" icon={<MonitorUp />} disabled={!consent} loading={busy} onClick={start}>Share my screen and start</Button>
+      </>}
+    </div>
+  )
+
+  const low = left < 300
+  return (
+    <div className="space-y-4">
+      <div className="sticky top-2 z-10 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white/90 p-3 shadow-sm ring-1 ring-slate-200 backdrop-blur dark:bg-ink-900/90 dark:ring-ink-700">
+        <span className={cn('tabular flex items-center gap-1.5 text-lg font-bold', low && 'text-red-600 dark:text-red-400')}><AlarmClock className="size-5" />{fmtClock(left)}</span>
+        {stream ? <Badge tone="success" icon={<MonitorUp />}>Sharing your screen</Badge> : <Badge tone="danger" icon={<MonitorUp />}>Not sharing</Badge>}
+        <span className="text-xs text-slate-500 dark:text-slate-400">{saved ? 'Saved' : 'Saving…'}</span>
+      </div>
+      {!stream && <Alert tone="warning" title="Your screen isn't being shared">The hiring team can't see your work until you share again. <Button className="mt-2" size="sm" icon={<MonitorUp />} onClick={share}>Share my screen</Button></Alert>}
+      <Card className="p-5"><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">The task</div><p className="whitespace-pre-line text-sm">{L.instructions || 'Follow the instructions from the hiring team.'}</p>
+        {L.rubric.length > 0 && <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Reviewed on: {L.rubric.join(', ')}</p>}</Card>
+      <Card className="space-y-3 p-5">
+        {(L.deliverable === 'code' || L.deliverable === 'text') && <Field label={L.deliverable === 'code' ? `Your code${L.language ? ` (${L.language})` : ''}` : 'Your answer'} htmlFor="lv-work"
+          hint={L.deliverable === 'code' ? 'Write here or paste from your editor before time runs out. Tab inserts spaces.' : undefined}>
+          <Textarea id="lv-work" rows={16} spellCheck={L.deliverable !== 'code'} value={content} onKeyDown={tab} onChange={e => { setContent(e.target.value); setSaved(false) }}
+            className={cn(L.deliverable === 'code' && 'font-mono text-[13px] leading-relaxed')} /></Field>}
+        {L.deliverable === 'file' && <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 p-5 hover:border-brand-300 dark:border-ink-700">
+          <FileUp className="size-6 text-brand-500" /><span className="min-w-0 flex-1 text-sm"><span className="block font-semibold">{fileName ? `Attached: ${fileName}` : 'Attach your file'}</span><span className="text-slate-500 dark:text-slate-400">{fileName ? 'Choose again to replace it. ' : ''}Max 25 MB.</span></span>
+          <input type="file" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) upload(f) }} /></label>}
+        <Field label="Notes for the reviewer (optional)" htmlFor="lv-note" hint="Assumptions, what you'd do with more time."><Textarea id="lv-note" className="min-h-0" rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
+        {err && <Alert tone="danger">{err}</Alert>}
+        <Button variant="primary" size="lg" icon={<Send />} loading={busy}
+          disabled={L.deliverable === 'file' ? !fileName : (L.deliverable === 'code' || L.deliverable === 'text') ? !content.trim() : false}
+          onClick={async () => { if (await ask('Submit your work now? You can\'t change it after this.', { confirm: 'Submit' })) submit(false) }}>Submit</Button>
       </Card>
     </div>
   )

@@ -1,5 +1,5 @@
 // The job's hiring flow: a block palette, drag-and-drop ordering and the settings of each round.
-import { ArrowDown, ArrowUp, CalendarPlus, ClipboardList, FileCheck2, FileUp, GripVertical, LayoutTemplate, ListChecks, Mic, Plus, Save, ShieldCheck, Trash2, UserCheck, Users, Video, Bot, FileText } from 'lucide-react'
+import { ArrowDown, ArrowUp, CalendarPlus, ClipboardList, FileCheck2, FileUp, GripVertical, LayoutTemplate, ListChecks, Mic, MonitorPlay, Plus, Save, ShieldCheck, Trash2, UserCheck, Users, Video, Bot, FileText } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Switch, Textarea, cn, toast } from '../../components/ui'
 import { ErrorBox, Loading, useApi } from '../../components/kit'
@@ -11,7 +11,7 @@ import { DatePicker, MINUTE_PRESETS, Stepper, TimePicker } from '../../component
 import { ask } from '../../components/dialogs'
 
 export const ROUND_ICON: Record<RoundType, typeof Bot> = {
-  application: ClipboardList, cv_screening: FileCheck2, test: ListChecks, video_intro: Video, role_task: Mic, practical_task: FileUp,
+  application: ClipboardList, cv_screening: FileCheck2, test: ListChecks, video_intro: Video, role_task: Mic, practical_task: FileUp, live_task: MonitorPlay,
   ai_interview: Bot, human_interview: Users, manager_approval: UserCheck,
 }
 
@@ -180,6 +180,7 @@ function RoundEditor({ r, meta, team, jobId, canEdit, saved, onChange }: { r: Ro
             </div>
           </Section>}
           {r.type === 'practical_task' && <PracticalConfig c={c} cfg={cfg} jobId={jobId} roundId={r.id} saved={saved} />}
+          {r.type === 'live_task' && <LiveConfig c={c} cfg={cfg} />}
           {r.type === 'ai_interview' && <Section title="AI interview">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Language" htmlFor="r-lang"><Select id="r-lang" value={c.language || 'en'} onChange={e => cfg('language', e.target.value)}>{LANGUAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
@@ -233,7 +234,6 @@ function TestConfig({ c, cfg, meta }: { c: Record<string, any>; cfg: (k: string,
 }
 
 function PracticalConfig({ c, cfg, jobId, roundId, saved }: { c: Record<string, any>; cfg: (k: string, v: unknown) => void; jobId: string; roundId: string; saved: boolean }) {
-  const rub: { criterion: string; weight: number }[] = c.rubric || []
   const [busy, setBusy] = useState(false), [uploaded, setUploaded] = useState('')
   const fileName = uploaded || c.attachment?.name
   async function upload(f: File) {
@@ -250,12 +250,37 @@ function PracticalConfig({ c, cfg, jobId, roundId, saved }: { c: Record<string, 
             <input type="file" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) upload(f) }} /></label></div>
       </Field>
       <Field label="Accepted file types" htmlFor="p-ft"><Input id="p-ft" value={c.file_types || ''} onChange={e => cfg('file_types', e.target.value)} placeholder=".xlsx,.pdf" /></Field>
-      <div className="text-sm font-semibold">Rubric</div>
-      {rub.map((x, i) => (
-        <div key={i} className="flex gap-2"><Input aria-label="Criterion" className="flex-1" value={x.criterion} onChange={e => cfg('rubric', rub.map((y, j) => j === i ? { ...y, criterion: e.target.value } : y))} />
-          <Input aria-label="Weight" type="number" className="w-20" min={1} max={100} value={x.weight} onChange={e => cfg('rubric', rub.map((y, j) => j === i ? { ...y, weight: +e.target.value } : y))} />
-          <Button variant="ghost" aria-label="Remove criterion" icon={<Trash2 />} onClick={() => cfg('rubric', rub.filter((_, j) => j !== i))} /></div>))}
-      <Button size="sm" icon={<Plus />} onClick={() => cfg('rubric', [...rub, { criterion: '', weight: 25 }])}>Add criterion</Button>
+      <Rubric c={c} cfg={cfg} />
+    </Section>
+  )
+}
+
+function Rubric({ c, cfg }: { c: Record<string, any>; cfg: (k: string, v: unknown) => void }) {
+  const rub: { criterion: string; weight: number }[] = c.rubric || []
+  return <>
+    <div className="text-sm font-semibold">Rubric</div>
+    {rub.map((x, i) => (
+      <div key={i} className="flex gap-2"><Input aria-label="Criterion" className="flex-1" value={x.criterion} onChange={e => cfg('rubric', rub.map((y, j) => j === i ? { ...y, criterion: e.target.value } : y))} />
+        <Input aria-label="Weight" type="number" className="w-20" min={1} max={100} value={x.weight} onChange={e => cfg('rubric', rub.map((y, j) => j === i ? { ...y, weight: +e.target.value } : y))} />
+        <Button variant="ghost" aria-label="Remove criterion" icon={<Trash2 />} onClick={() => cfg('rubric', rub.filter((_, j) => j !== i))} /></div>))}
+    <Button size="sm" icon={<Plus />} onClick={() => cfg('rubric', [...rub, { criterion: '', weight: 25 }])}>Add criterion</Button>
+  </>
+}
+
+function LiveConfig({ c, cfg }: { c: Record<string, any>; cfg: (k: string, v: unknown) => void }) {
+  return (
+    <Section title="Live task">
+      <Alert tone="info">The candidate shares their entire screen and works in any tool (code editor, Figma, Excel). We keep a screenshot every {c.snapshot_every_sec || 30} seconds; AI reviews the result and how they got there against your rubric.</Alert>
+      <Field label="Task" htmlFor="l-ins" hint="Exactly what to build or solve. Include inputs, constraints and what 'done' looks like."><Textarea id="l-ins" rows={5} value={c.instructions || ''} onChange={e => cfg('instructions', e.target.value)}
+        placeholder="Write a function that groups a list of orders by customer and returns the top 3 customers by spend. Handle empty input." /></Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Time" htmlFor="l-min"><Stepper id="l-min" aria-label="Time" max={180} value={c.minutes ?? 30} onChange={v => cfg('minutes', v)} presets={MINUTE_PRESETS} /></Field>
+        <Field label="What they hand in" htmlFor="l-del"><Select id="l-del" value={c.deliverable || 'code'} onChange={e => cfg('deliverable', e.target.value)}>
+          <option value="code">Code (typed or pasted on the page)</option><option value="text">Written answer</option><option value="file">A file (design, sheet, zip)</option><option value="none">Nothing: judge from the screen only</option></Select></Field>
+        {c.deliverable !== 'file' && c.deliverable !== 'none' && <Field label={c.deliverable === 'text' ? 'Format hint' : 'Language'} htmlFor="l-lang"><Input id="l-lang" value={c.language || ''} onChange={e => cfg('language', e.target.value)} placeholder={c.deliverable === 'text' ? 'Bullet points' : 'Python'} /></Field>}
+        <Field label="Screenshot every" htmlFor="l-snap"><Stepper id="l-snap" aria-label="Screenshot interval" min={15} max={120} step={15} unit="s" value={c.snapshot_every_sec ?? 30} onChange={v => cfg('snapshot_every_sec', v)} /></Field>
+      </div>
+      <Rubric c={c} cfg={cfg} />
     </Section>
   )
 }

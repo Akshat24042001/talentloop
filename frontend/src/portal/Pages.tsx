@@ -78,7 +78,7 @@ interface OnePage {
   job: { title: string; department: string }; rounds: { round: string; status: string; score: number | null; reasons?: string[]; stability?: string; ai_gaps?: string[]; sections?: { section: string; pct: number }[]; summary?: string; improvements?: string[]; recommendation?: string; feedback?: { decision: string; rating: number; notes: string }; integrity?: string[] }[]
   notes: string; rating: number | null
 }
-const RT: Record<string, string> = { application: 'Application', cv_screening: 'CV screening', test: 'Test', video_intro: 'Video introduction', role_task: 'Role task', practical_task: 'Practical task', ai_interview: 'AI interview', human_interview: 'Interview', manager_approval: 'Manager approval' }
+const RT: Record<string, string> = { application: 'Application', cv_screening: 'CV screening', test: 'Test', video_intro: 'Video introduction', role_task: 'Role task', practical_task: 'Practical task', live_task: 'Live task', ai_interview: 'AI interview', human_interview: 'Interview', manager_approval: 'Manager approval' }
 
 function Summary({ d, resumeUrl }: { d: OnePage; resumeUrl?: string }) {
   const c = d.candidate

@@ -128,9 +128,9 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
             <div className="flex flex-wrap gap-2 pt-1">
               {res.candidate_link && ['invited', 'in_progress', 'booked', 'expired', 'pending'].includes(res.status) && <LinkActions url={res.candidate_link} label="Candidate link" copied="Candidate link copied" to={d.candidate}
                 subject={`${r.round.name}: ${d.job.title}`} message={`Hi ${d.candidate.name.split(' ')[0]}, here is your link for the ${r.round.name} step of your application for ${d.job.title}:`} />}
-              {['test', 'video_intro', 'role_task', 'practical_task', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
+              {['test', 'video_intro', 'role_task', 'practical_task', 'live_task', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
                 <Button size="sm" icon={<RefreshCw />} onClick={() => act('resend', r.round.type === 'manager_approval' ? 'Approval request sent again' : 'Link sent again')}>Resend</Button>}
-              {['test', 'video_intro', 'role_task', 'practical_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={async () => await ask('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
+              {['test', 'video_intro', 'role_task', 'practical_task', 'live_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={async () => await ask('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
               {res.score != null || ['submitted', 'on_hold', 'passed', 'failed'].includes(res.status) ? (score == null ? <Button size="sm" variant="ghost" onClick={() => setScore(String(res.score ?? ''))}>Change score</Button>
                 : <span className="flex items-center gap-1.5"><Input aria-label="New score" type="number" min={0} max={100} className="h-8 w-20" value={score} onChange={e => setScore(e.target.value)} /><Button size="sm" variant="primary" onClick={saveScore}>Save</Button><Button size="sm" variant="ghost" onClick={() => setScore(null)}>Cancel</Button></span>) : null}
               {res.manager_link && <LinkActions url={res.manager_link} icon={<Link2 className="size-3.5" />} label={r.round.type === 'human_interview' ? 'Interviewer feedback link' : 'Decision link'}
@@ -191,6 +191,26 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
       {a.note && <Alert tone="info">{a.note}</Alert>}{a.error && <Alert tone="warning">{a.error}</Alert>}
     </>
   }
+  if (type === 'live_task') {
+    const a = data.assessment || {}
+    if (!data.live_started_at) return <p className="text-slate-500">Not started yet.</p>
+    if (!data.live_submitted_at) return <p className="text-slate-500">Working on it now (started {ago(data.live_started_at)}). Screenshots appear under Integrity.</p>
+    const mins = Math.round((data.live_submitted_at - data.live_started_at) / 60)
+    return <>
+      <p className="text-xs text-slate-500">Took {mins} min{data.auto ? ' · submitted automatically when the time ran out' : ''}{data.live_late ? ' · late' : ''}</p>
+      {data.live_content && <div><H>Submitted work</H><pre className="max-h-80 overflow-auto rounded-xl bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">{data.live_content}</pre></div>}
+      {data.file && <Button size="sm" icon={<Download />} href={`/api/round-results/${res.id}/file`} target="_blank">{data.file_name}</Button>}
+      {data.note && <p className="italic text-slate-600 dark:text-slate-300">"{data.note}"</p>}
+      {data.scoring && data.scoring !== 'done' && <p className="flex items-center gap-1.5 text-slate-500"><Spinner className="size-3.5" />Reviewing…</p>}
+      {a.criteria?.length > 0 && <table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th className="py-1">Criterion</th><th>Weight</th><th>Score</th><th>Comment</th></tr></thead>
+        <tbody>{a.criteria.map((x: any) => <tr key={x.criterion} className="border-t border-slate-100 align-top dark:border-ink-800"><td className="py-1 pr-2 font-medium">{x.criterion}</td><td className="tabular">{x.weight}</td><td className="tabular font-semibold">{x.score ?? '-'}/10</td><td className="text-slate-600 dark:text-slate-300">{x.comment}</td></tr>)}</tbody></table>}
+      {a.summary && <p>{a.summary}</p>}
+      {a.process?.length > 0 && <div><H>How they worked (from {a.screens_reviewed} screenshots)</H><ol className="list-decimal space-y-0.5 pl-5 text-slate-600 dark:text-slate-300">{a.process.map((x: string, i: number) => <li key={i}>{x}</li>)}</ol></div>}
+      {a.integrity?.length > 0 && <Alert tone="warning" title="Seen on screen, worth checking">{a.integrity.join('; ')}</Alert>}
+      {a.concerns?.length > 0 && <Alert tone="warning" title="Concerns">{a.concerns.join('; ')}</Alert>}
+      {a.note && <Alert tone="info">{a.note}</Alert>}{a.error && <Alert tone="warning">{a.error}</Alert>}
+    </>
+  }
   if (type === 'ai_interview') return <>
     {res.status === 'setting_up' && <p className="flex items-center gap-1.5 text-slate-500"><Spinner className="size-3.5" />Preparing the interview…</p>}
     {data.summary && <p>{data.summary}</p>}
@@ -233,7 +253,7 @@ function Player({ src }: { src: string }) {
 }
 
 const INTEG_LABEL: Record<string, string> = { exits: 'Left the screen', copy_paste: 'Copy / paste', no_face: 'No face seen', faces_multi: 'More than one face', phone_seen: 'Phone seen',
-  looking_away: 'Looking away', virtual_camera: 'Virtual camera', second_voice: 'Second voice', devtools: 'Developer tools', photo_mismatch: 'Photo mismatch', warnings: 'Warnings' }
+  looking_away: 'Looking away', virtual_camera: 'Virtual camera', second_voice: 'Second voice', devtools: 'Developer tools', photo_mismatch: 'Photo mismatch', screen_stopped: 'Stopped sharing the screen', warnings: 'Warnings' }
 function Integrity({ res, hasPhoto }: { res: RoundSummary; hasPhoto: boolean }) {
   const g = res.integrity, snaps: { t: number; reason: string }[] = g.snapshots || []
   const counts = Object.entries(INTEG_LABEL).filter(([k]) => typeof g[k] === 'number' && g[k] > 0)

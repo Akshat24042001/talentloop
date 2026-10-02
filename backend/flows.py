@@ -36,6 +36,8 @@ ROUND_TYPES = {
                   "description": "A short recorded task after reading a brief, such as pitching a product."},
     "practical_task": {"label": "Practical task (Excel, take-home)", "stage": "screening", "candidate": True,
                        "description": "Upload-based practical work, reviewed by AI against your rubric."},
+    "live_task": {"label": "Live task with screen sharing (coding, design, any software)", "stage": "screening", "candidate": True,
+                  "description": "A timed task done live while sharing the screen: write code, design, build a sheet. AI reviews the work and how it was done."},
     "ai_interview": {"label": "AI first-round interview", "stage": "interview", "candidate": True,
                      "description": "AI voice interview with a scorecard and recommendation."},
     "human_interview": {"label": "Human interview", "stage": "interview", "candidate": True,
@@ -61,6 +63,9 @@ DEFAULT_CONFIG = {
                     "max_seconds": 120, "retakes": 1, "prepare_seconds": 30},
     "role_task": {"brief": "", "prompt": "Pitch this offering to a potential customer as if you were on a sales call.",
                   "max_seconds": 120, "retakes": 1, "prepare_seconds": 60},
+    "live_task": {"instructions": "", "minutes": 30, "deliverable": "code", "language": "Python", "snapshot_every_sec": 30,
+                  "rubric": [{"criterion": "Correctness", "weight": 50}, {"criterion": "Approach and problem solving", "weight": 30},
+                             {"criterion": "Code quality and clarity", "weight": 20}]},
     "practical_task": {"instructions": "", "rubric": [{"criterion": "Correctness", "weight": 50}, {"criterion": "Clarity and presentation", "weight": 25},
                                                         {"criterion": "Efficiency (formulas, structure)", "weight": 25}],
                        "file_types": ".xlsx,.xls,.csv,.docx,.pdf,.zip,.txt", "attachment": None},
@@ -69,7 +74,7 @@ DEFAULT_CONFIG = {
     "manager_approval": {"approvers": []},
 }
 DEFAULT_RULE = {"cv_screening": {"mode": "top_n", "value": 25}, "test": {"mode": "min_score", "value": 50}, "video_intro": {"mode": "hr_review", "value": 0},
-                "role_task": {"mode": "hr_review", "value": 0}, "practical_task": {"mode": "hr_review", "value": 0},
+                "role_task": {"mode": "hr_review", "value": 0}, "practical_task": {"mode": "hr_review", "value": 0}, "live_task": {"mode": "hr_review", "value": 0},
                 "ai_interview": {"mode": "hr_review", "value": 0}, "human_interview": {"mode": "hr_review", "value": 0},
                 "manager_approval": {"mode": "hr_review", "value": 0}, "application": {"mode": "auto_pass", "value": 0}}
 
@@ -92,6 +97,9 @@ TEMPLATES = {
     "sales_fresher": ("Sales fresher", "Aptitude test, video introduction, sales pitch, approval, final round",
                       lambda: [new_round("application"), new_round("test"), new_round("video_intro"), new_round("role_task", "Sales pitch"),
                                new_round("manager_approval"), new_round("human_interview", "Final round")]),
+    "developer": ("Software developer", "AI CV screening, coding test, live coding task with screen sharing, AI first round, panel, approval",
+                  lambda: [new_round("application"), new_round("cv_screening"), new_round("test", "Coding and aptitude test"), new_round("live_task", "Live coding task"),
+                           new_round("ai_interview"), new_round("human_interview", "Technical panel"), new_round("manager_approval")]),
     "admin_executive": ("Admin executive", "AI CV screening, Excel task, interview, approval",
                         lambda: [new_round("application"), new_round("cv_screening"), new_round("practical_task", "Excel task"),
                                  new_round("human_interview", "HR round"), new_round("manager_approval")]),
@@ -172,6 +180,7 @@ ROUND_INVITE = {
     "video_intro": "Your next step is a short video introduction{name}. Record it in your browser; it takes about 5 minutes.",
     "role_task": "Your next step is a short recorded role task{name}. You'll read a brief, then record your answer.",
     "practical_task": "Your next step is a practical task{name}. Download the instructions and upload your work.",
+    "live_task": "Your next step is a live task{name}, about {minutes} minutes. Use a laptop or desktop: you'll share your screen while you work.",
     "ai_interview": "Your next step is a first-round interview with our AI interviewer{name}. It is a voice conversation in your browser, about {minutes} minutes, available any time.",
     "human_interview": "You're invited to an interview{name}. Please pick a time that suits you.",
 }
@@ -310,7 +319,7 @@ def _start(s, app, job, rnd, rr, notify):
     rr.status = "invited"
     if notify:
         cfg = rnd.get("config") or {}
-        minutes = sum(int(x.get("minutes") or 0) for x in cfg.get("sections", [])) if kind == "test" else cfg.get("duration_min", 15)
+        minutes = sum(int(x.get("minutes") or 0) for x in cfg.get("sections", [])) if kind == "test" else cfg.get("minutes", 30) if kind == "live_task" else cfg.get("duration_min", 15)
         text = ROUND_INVITE.get(kind, "Your next step is ready{name}.").format(name=f" ({rnd['name']})" if rnd["name"] != ROUND_TYPES[kind]["label"] else "",
                                                                                  minutes=minutes or 15)
         if rr.deadline_at:
