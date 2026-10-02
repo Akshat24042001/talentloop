@@ -49,6 +49,11 @@ export function installLinkInterceptor() {
     const a = (e.target as HTMLElement).closest('a')
     if (!a || a.target || a.hasAttribute('download') || a.origin !== location.origin) return
     const href = a.pathname + a.search
+    if (a.hash && href === location.pathname + location.search) {      // a link to a section of this page
+      const el = document.getElementById(decodeURIComponent(a.hash.slice(1)))
+      if (el) { e.preventDefault(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+      return
+    }
     if (!isAppPath(href)) return
     e.preventDefault()
     navigate(href + (a.hash || ''))

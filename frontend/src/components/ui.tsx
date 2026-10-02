@@ -1,8 +1,9 @@
 import * as Dialog from '@radix-ui/react-dialog'
+import * as RSelect from '@radix-ui/react-select'
 import * as RTooltip from '@radix-ui/react-tooltip'
 import clsx from 'clsx'
-import { LoaderCircle, X } from 'lucide-react'
-import { forwardRef, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Check, ChevronDown, ChevronUp, LoaderCircle, X } from 'lucide-react'
+import { Children, Fragment, forwardRef, isValidElement, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Tone } from '../lib/format'
 
 export const cn = clsx
@@ -66,9 +67,64 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...p }, ref) {
   return <textarea ref={ref} className={cn(FIELD, 'min-h-28 resize-y leading-relaxed', className)} {...p} />
 })
-export function Select({ className, children, ...p }: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={cn(FIELD, 'pr-9', className)} {...p}>{children}</select>
+// Dropdowns: a styled listbox (Radix Select) with the same props as a native <select> and <option> children,
+// so every form keeps `value` + `onChange={e => ...e.target.value}`. Keyboard, screen readers and `required`
+// in forms work as before; only the look changes.
+type Opt = { value: string; label: ReactNode; text: string; disabled?: boolean }
+const EMPTY = '__tl_empty__'                       // Radix reserves "" for "nothing selected"
+const textOf = (n: ReactNode): string => typeof n === 'string' || typeof n === 'number' ? String(n)
+  : Array.isArray(n) ? n.map(textOf).join('') : isValidElement(n) ? textOf((n.props as { children?: ReactNode }).children) : ''
+function optionsOf(children: ReactNode): Opt[] {
+  const out: Opt[] = []
+  Children.forEach(children, ch => {
+    if (!isValidElement(ch)) return
+    const props = ch.props as { value?: string | number; children?: ReactNode; disabled?: boolean }
+    if (ch.type === 'option') out.push({ value: String(props.value ?? textOf(props.children)), label: props.children, text: textOf(props.children), disabled: props.disabled })
+    else if (ch.type === Fragment || ch.type === 'optgroup') out.push(...optionsOf(props.children))
+  })
+  return out
 }
+type SelectProps = Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> & { onChange?: (e: { target: { value: string }; currentTarget: { value: string } }) => void }
+export function Select({ className, children, value, defaultValue, onChange, id, required, disabled, name, ...rest }: SelectProps) {
+  const opts = optionsOf(children)
+  const [inner, setInner] = useState(String(defaultValue ?? opts[0]?.value ?? ''))
+  const cur = value !== undefined ? String(value) : inner
+  const toR = (v: string) => (v === '' ? EMPTY : v)
+  const fromR = (v: string) => (v === EMPTY ? '' : v)
+  const known = opts.some(o => o.value === cur)
+  const isPh = (o: Opt) => o.value === '' && /(…|\.\.\.)$/.test(o.text)       // "Select…" is a hint, not a choice
+  const phOpt = opts.find(isPh)
+  const placeholder = cur === '' || !known
+  const rootValue = !known ? '' : cur === '' ? (phOpt ? '' : EMPTY) : cur
+  return (
+    <RSelect.Root value={rootValue} disabled={disabled} required={required} name={name}
+      onValueChange={v => { const x = fromR(v); if (value === undefined) setInner(x); onChange?.({ target: { value: x }, currentTarget: { value: x } }) }}>
+      <RSelect.Trigger id={id} aria-label={rest['aria-label']} title={rest.title}
+        className={cn(TRIGGER, placeholder && 'text-slate-400 dark:text-slate-500', className)}>
+        <span className="min-w-0 flex-1 truncate"><RSelect.Value placeholder={opts.find(o => o.value === '')?.label ?? 'Select…'} /></span>
+        <RSelect.Icon><ChevronDown className="size-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" /></RSelect.Icon>
+      </RSelect.Trigger>
+      <RSelect.Portal>
+        <RSelect.Content position="popper" sideOffset={6} collisionPadding={12}
+          className="z-[70] max-h-[min(var(--radix-select-content-available-height),340px)] min-w-[var(--radix-select-trigger-width)] max-w-[min(92vw,30rem)] overflow-hidden rounded-xl bg-white p-1 text-sm text-slate-800 shadow-xl shadow-slate-900/10 ring-1 ring-slate-200 animate-rise dark:bg-ink-850 dark:text-slate-100 dark:shadow-black/40 dark:ring-ink-700">
+          <RSelect.ScrollUpButton className="grid h-6 place-items-center text-slate-400"><ChevronUp className="size-4" /></RSelect.ScrollUpButton>
+          <RSelect.Viewport>
+            {opts.filter(o => !isPh(o)).map(o => (
+              <RSelect.Item key={o.value} value={toR(o.value)} disabled={o.disabled} textValue={o.text}
+                className={cn('relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-3 pr-8 outline-none',
+                  'data-[highlighted]:bg-brand-50 data-[highlighted]:text-brand-800 dark:data-[highlighted]:bg-brand-500/20 dark:data-[highlighted]:text-white',
+                  'data-[state=checked]:font-semibold data-[disabled]:pointer-events-none data-[disabled]:opacity-40', o.value === '' && 'text-slate-500 dark:text-slate-400')}>
+                <RSelect.ItemText>{o.label}</RSelect.ItemText>
+                <RSelect.ItemIndicator className="absolute right-2.5 text-brand-600 dark:text-brand-300"><Check className="size-4" /></RSelect.ItemIndicator>
+              </RSelect.Item>))}
+          </RSelect.Viewport>
+          <RSelect.ScrollDownButton className="grid h-6 place-items-center text-slate-400"><ChevronDown className="size-4" /></RSelect.ScrollDownButton>
+        </RSelect.Content>
+      </RSelect.Portal>
+    </RSelect.Root>
+  )
+}
+const TRIGGER = 'group flex h-10 w-full items-center gap-2 rounded-xl border-0 bg-white px-3.5 text-left text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-200 hover:ring-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 data-[state=open]:ring-2 data-[state=open]:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-ink-850 dark:text-slate-100 dark:ring-ink-700 dark:hover:ring-ink-600'
 export function Field({ label, hint, htmlFor, action, children, className }: { label: ReactNode; hint?: ReactNode; htmlFor?: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <div className={className}>

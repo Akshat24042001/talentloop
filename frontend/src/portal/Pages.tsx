@@ -39,7 +39,7 @@ export function StatusPage({ token }: { token: string }) {
             <li key={i} className="flex items-start gap-3">
               {done ? <CircleCheck className="mt-0.5 size-5 text-emerald-500" /> : s.current ? <CircleDot className="mt-0.5 size-5 text-brand-500" /> : bad ? <X className="mt-0.5 size-5 text-red-500" /> : <Circle className="mt-0.5 size-5 text-slate-300" />}
               <div className="min-w-0 flex-1"><div className={cn('text-sm font-semibold', !s.current && !done && 'text-slate-500')}>{s.name}</div><div className="text-xs text-slate-500">{s.label}</div>
-                {s.current && s.transparency && <details className="mt-1"><summary className="cursor-pointer text-xs font-medium text-brand-600">How this step works</summary><HowItWorks className="mt-2" t={s.transparency} /></details>}</div>
+                {s.current && s.transparency && <details className="mt-1"><summary className="cursor-pointer text-xs font-medium text-brand-600 dark:text-brand-400">How this step works</summary><HowItWorks className="mt-2" t={s.transparency} /></details>}</div>
               {s.link && <Button size="sm" href={s.link}>Open</Button>}
             </li>)
         })}</ol>
@@ -159,7 +159,7 @@ export function FeedbackPage({ token }: { token: string }) {
   return (
     <Frame org={data.org} wide>
       <p className="text-sm text-slate-500">{data.round} · {data.job.title}</p><h1 className="text-2xl font-semibold tracking-tight">{data.candidate.name}</h1>
-      {data.booking && <p className="mb-5 mt-1 text-sm text-slate-600 dark:text-slate-300">{when(data.booking.starts_at)}{data.booking.location ? ` · ${data.booking.location}` : ''}{data.booking.meeting_url && <> · <a className="font-medium text-brand-600 hover:underline" href={data.booking.meeting_url} target="_blank" rel="noopener">Meeting link</a></>}</p>}
+      {data.booking && <p className="mb-5 mt-1 text-sm text-slate-600 dark:text-slate-300">{when(data.booking.starts_at)}{data.booking.location ? ` · ${data.booking.location}` : ''}{data.booking.meeting_url && <> · <a className="font-medium text-brand-600 dark:text-brand-400 hover:underline" href={data.booking.meeting_url} target="_blank" rel="noopener">Meeting link</a></>}</p>}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-5">
           <Card className="p-5"><div className="mb-2 flex items-center gap-2 font-semibold"><ClipboardList className="size-4 text-brand-500" />Prep kit</div>

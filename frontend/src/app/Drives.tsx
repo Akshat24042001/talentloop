@@ -56,7 +56,7 @@ function DriveList({ drives, onEdit, reload, showJob }: { drives: Drive[]; onEdi
         <Card key={d.id}><CardBody className="space-y-3">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{d.college}</span><Badge tone={d.status === 'open' ? 'success' : 'neutral'}>{d.status === 'open' ? 'Open' : 'Closed'}</Badge></div>
-              {showJob && d.job && <a href={`/app/jobs/${d.job.ref}?tab=pipeline`} className="text-sm text-brand-600 hover:underline">{d.job.title}</a>}
+              {showJob && d.job && <a href={`/app/jobs/${d.job.ref}?tab=pipeline`} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">{d.job.title}</a>}
               <div className="text-xs text-slate-500">{d.registered ?? 0} registered · test window {d.opens_at ? when(d.opens_at) : 'any time'} to {d.closes_at ? when(d.closes_at) : 'open-ended'}</div></div>
             <Button size="sm" icon={<QrCode />} onClick={() => setQr(d)}>QR code</Button>
           </div>

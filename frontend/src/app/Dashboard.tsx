@@ -45,13 +45,13 @@ export default function Dashboard() {
                   <h2 className="text-lg font-semibold">Welcome to TalentLoop</h2>
                   <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Three steps to your first shortlist. Or load sample data to explore a full pipeline right now.</p>
                   <ol className="mt-4 space-y-2 text-sm">
-                    <li className="flex items-center gap-2"><Briefcase className="size-4 text-brand-600" /><a className="font-medium hover:underline" href="/app/jobs/new">Create a job</a> <span className="text-slate-500">(only 7 fields are required)</span></li>
-                    <li className="flex items-center gap-2"><Users className="size-4 text-brand-600" /><a className="font-medium hover:underline" href="/app/candidates?upload=1">Upload resumes</a> <span className="text-slate-500">or share your careers page</span></li>
-                    <li className="flex items-center gap-2"><UserPlus className="size-4 text-brand-600" /><a className="font-medium hover:underline" href="/app/team">Invite your team</a> <span className="text-slate-500">HR and hiring managers</span></li>
+                    <li className="flex items-center gap-2"><Briefcase className="size-4 text-brand-600 dark:text-brand-400" /><a className="font-medium hover:underline" href="/app/jobs/new">Create a job</a> <span className="text-slate-500">(only 7 fields are required)</span></li>
+                    <li className="flex items-center gap-2"><Users className="size-4 text-brand-600 dark:text-brand-400" /><a className="font-medium hover:underline" href="/app/candidates?upload=1">Upload resumes</a> <span className="text-slate-500">or share your careers page</span></li>
+                    <li className="flex items-center gap-2"><UserPlus className="size-4 text-brand-600 dark:text-brand-400" /><a className="font-medium hover:underline" href="/app/team">Invite your team</a> <span className="text-slate-500">HR and hiring managers</span></li>
                   </ol>
                 </div>
                 <div className="flex flex-col justify-center gap-2 rounded-xl bg-white/70 p-5 ring-1 ring-white dark:bg-ink-900/60 dark:ring-ink-700">
-                  <Database className="size-5 text-brand-600" />
+                  <Database className="size-5 text-brand-600 dark:text-brand-400" />
                   <div className="font-semibold">Load sample data</div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">6 jobs across tech, sales, support and HR, and 40 realistic resumes. Remove them any time from Settings.</p>
                   <Button variant="primary" size="sm" className="mt-1 self-start" loading={seeding} onClick={seed} icon={<Sparkles />}>Load samples</Button>

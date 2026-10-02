@@ -15,6 +15,8 @@ DEFAULT_SETTINGS = {
     "logo_url": "", "brand_color": "#2848e6", "careers_enabled": True, "careers_headline": "",
     "default_currency": "INR", "eeo_statement": "",
     "match_top_n": 5, "ai_reports_per_run": 25,
+    # A candidate's "best-fit jobs" list only shows open jobs they score at least this on (0-100) and are not screened out of
+    "best_fit_min_score": 55,
     "match_weights": {"skills": 45, "experience": 20, "relevance": 20, "location": 10, "logistics": 5},
     "interview_defaults": {"max_warnings": 2, "enforce_focus": True, "block_multi_monitor": True, "require_screen_share": False,
                            "duration_min": 15},
@@ -24,6 +26,8 @@ DEFAULT_SETTINGS = {
                            "current_company": False, "linkedin": False, "resume": True},
     # HR-approved answers the AI interviewer may give when a candidate asks about the company (nothing else)
     "faq": [],
+    # The benefits this company offers (picked per job in the JD editor). Each company builds its own list.
+    "benefits": [],
     # Columns for the HROne employee import export: header in HROne's template -> TalentLoop field
     "hrone_columns": [],
     # Delete recordings, snapshots and uploads of closed candidates (rejected, withdrawn, hired) after this many days; 0 = keep
@@ -361,6 +365,35 @@ def remove_member(mid: str, req: Request):
 # ---------------------------------------------------------------------------
 # company settings
 # ---------------------------------------------------------------------------
+def clean_benefits(v) -> list[str]:
+    out = []
+    for x in v or []:
+        x = " ".join(str(x).split())[:80]
+        if x and x.lower() not in {y.lower() for y in out}:
+            out.append(x)
+    return out[:60]
+
+
+@router.post("/api/org/benefits")
+async def org_benefits(req: Request):
+    """HR adds a benefit to the company's list (from the JD editor) or removes one. Jobs keep what they already list."""
+    body = await req.json()
+    with db.session() as s:
+        ctx = auth.current(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "change the company's benefits")
+        org = s.get(db.Org, auth.require_org(ctx))
+        cur = list((org.settings or {}).get("benefits") or [])
+        add, remove = " ".join(str(body.get("add") or "").split())[:80], str(body.get("remove") or "").strip().lower()
+        if add:
+            cur.append(add)
+        if remove:
+            cur = [x for x in cur if x.lower() != remove]
+        cur = clean_benefits(cur)
+        org.settings = {**(org.settings or {}), "benefits": cur}
+        log_activity(s, ctx, "settings_updated", f"Benefits: {'added ' + add if add else 'removed ' + remove}")
+        return {"benefits": cur}
+
+
 @router.get("/api/org")
 def get_org(req: Request):
     with db.session() as s:
@@ -387,6 +420,8 @@ async def update_org(req: Request):
                 continue
             if k == "match_top_n":
                 v = max(1, min(50, int(v or 5)))
+            if k == "best_fit_min_score":
+                v = max(0, min(100, int(v or 0)))
             if k == "ai_reports_per_run":
                 v = max(0, min(500, int(v or 0)))
             if k in ("retention_days", "recording_retention_days"):
@@ -394,6 +429,8 @@ async def update_org(req: Request):
             if k == "faq":
                 v = [{"q": str(x.get("q") or "").strip()[:300], "a": str(x.get("a") or "").strip()[:1500]} for x in (v or [])
                      if isinstance(x, dict) and str(x.get("q") or "").strip() and str(x.get("a") or "").strip()][:40]
+            if k == "benefits":
+                v = clean_benefits(v)
             if k == "hrone_columns":
                 v = [{"header": str(x.get("header") or "").strip()[:80], "field": str(x.get("field") or "").strip()[:40]} for x in (v or [])
                      if isinstance(x, dict) and str(x.get("header") or "").strip()][:80]

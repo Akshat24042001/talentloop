@@ -9,10 +9,6 @@ SENIORITY = ["Intern", "Entry level", "Associate", "Mid level", "Senior", "Lead 
 EMPLOYMENT = ["Full-time", "Part-time", "Contract", "Internship", "Temporary", "Freelance"]
 WORKPLACE = ["On-site", "Hybrid", "Remote"]
 CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"]
-BENEFITS = ["Health insurance", "Family health cover", "Life insurance", "Provident fund (PF)", "Gratuity", "Paid time off", "Paid sick leave",
-            "Parental leave", "Flexible hours", "Work from home allowance", "Learning & development budget", "Internet reimbursement",
-            "Meal allowance", "Transport / cab", "Gym or wellness", "Annual bonus", "Joining bonus", "Relocation assistance", "Stock options (ESOP)",
-            "Laptop provided", "Team offsites"]
 EDUCATION = ["No requirement", "High school", "Diploma", "Bachelor's degree", "Master's degree", "MBA", "PhD", "Professional certification (CA, CS, etc.)"]
 STAGES = ["Application review", "AI screening interview", "Technical / skills round", "Hiring manager round", "HR & offer"]
 
@@ -54,7 +50,8 @@ SECTIONS = [
         F(key="show_salary", label="Show the salary range on the job post", type="toggle", default=True),
         F(key="variable_pay", label="Variable pay / incentives", type="text", placeholder="Up to 15% annual bonus"),
         F(key="equity", label="Equity", type="select", options=["None", "Stock options (ESOP)", "RSUs", "Phantom stock"]),
-        F(key="benefits", label="Benefits", type="multiselect", options=BENEFITS),
+        F(key="benefits", label="Benefits", type="benefits",
+          help="Your company's benefits list. Add the ones you offer; they're saved for your other jobs too."),
         F(key="perks", label="Other perks", type="textarea", rows=2),
     ]),
     F(id="role", title="About the role", description="What the person will actually do.", fields=[
@@ -104,7 +101,7 @@ SECTIONS = [
 ]
 FIELDS = {f["key"]: f for sec in SECTIONS for f in sec["fields"]}
 REQUIRED_TO_PUBLISH = [k for k, f in FIELDS.items() if f.get("required") or f.get("required_unless")]
-LIST_TYPES = ("tags", "skills", "list", "multiselect")
+LIST_TYPES = ("tags", "skills", "list", "multiselect", "benefits")
 
 
 def defaults() -> dict:
@@ -144,6 +141,8 @@ def clean(raw: dict) -> dict:
                 items = [skills.canonical(x) for x in items]
             if t == "multiselect":
                 items = [x for x in items if x in f["options"]]
+            if t == "benefits":                     # free text from the company's own list
+                items = [x[:80] for x in items][:40]
             v = list(dict.fromkeys(items))[:60]
         elif t == "questions":
             qs = []

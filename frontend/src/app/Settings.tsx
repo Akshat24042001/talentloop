@@ -1,7 +1,7 @@
 import { CircleCheck, Copy, Database, KeyRound, Save, Server, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, copyText, toast } from '../components/ui'
-import { Loading, PageHeader, Tabs } from '../components/kit'
+import { Loading, PageHeader, Tabs, TagInput } from '../components/kit'
 import { api } from '../lib/api'
 import { healthProblems, useHealth } from '../lib/health'
 import { navigate, useLocation } from '../lib/router'
@@ -58,6 +58,8 @@ function OrgSettings({ tab }: { tab: string }) {
             <Field label="Default currency" htmlFor="s-cur"><Select id="s-cur" value={s.default_currency || 'INR'} onChange={e => set('default_currency', e.target.value)}>{['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'].map(x => <option key={x}>{x}</option>)}</Select></Field>
           </div>
           <Field label="About the company" htmlFor="s-about" hint="Shown on your careers page and at the end of every job description."><Textarea id="s-about" value={s.about || ''} onChange={e => set('about', e.target.value)} /></Field>
+          <Field label="Benefits you offer" htmlFor="s-ben" hint="Your own list, picked per job in the job description editor. Removing one here doesn't change jobs that already list it.">
+            <TagInput id="s-ben" value={s.benefits || []} onChange={v => set('benefits', v)} placeholder="Type a benefit and press Enter" /></Field>
           <Field label="Equal opportunity statement" htmlFor="s-eeo"><Textarea id="s-eeo" className="min-h-0" rows={2} value={s.eeo_statement || ''} onChange={e => set('eeo_statement', e.target.value)} /></Field>
         </>}
         {tab === 'careers' && <>
@@ -73,6 +75,7 @@ function OrgSettings({ tab }: { tab: string }) {
         {tab === 'matching' && <>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Default shortlist size per job" htmlFor="s-topn" hint="New jobs start with this. Each job can override it."><Input id="s-topn" type="number" min={1} max={50} value={s.match_top_n} onChange={e => set('match_top_n', +e.target.value)} /></Field>
+            <Field label="Best-fit minimum score" htmlFor="s-fit" hint="A candidate's Best-fit jobs tab lists only open jobs they score at least this on (0 to 100). Below it, no job is shown."><Input id="s-fit" type="number" min={0} max={100} value={s.best_fit_min_score ?? 55} onChange={e => set('best_fit_min_score', +e.target.value)} /></Field>
             <Field label="AI reports per run (cost cap)" htmlFor="s-budget" hint="The most AI match reports one click can write. 0 turns AI reports off."><Input id="s-budget" type="number" min={0} max={500} value={s.ai_reports_per_run} onChange={e => set('ai_reports_per_run', +e.target.value)} /></Field>
           </div>
           <div>

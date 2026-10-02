@@ -378,8 +378,10 @@ def run(s, org_id: str, weights: dict, default_top_n: int, job_ids: list[str] | 
     return stats
 
 
-def jobs_for_candidate(s, org_id: str, cand: db.Candidate, weights: dict, default_top_n: int, limit: int = 10) -> list[dict]:
-    """Reverse view: the open jobs this candidate fits best (stage 1 only, free)."""
+def jobs_for_candidate(s, org_id: str, cand: db.Candidate, weights: dict, default_top_n: int, limit: int = 10,
+                      min_score: float = 0) -> list[dict]:
+    """Reverse view: the open jobs this candidate fits best (stage 1 only, free).
+    With min_score, only jobs the candidate is not screened out of and scores at least min_score on."""
     cands, idx = load_pool(s, org_id)
     me = next((i for i, c in enumerate(cands) if c.id == cand.id), None)
     if me is None:
@@ -392,6 +394,8 @@ def jobs_for_candidate(s, org_id: str, cand: db.Candidate, weights: dict, defaul
         sc, bd, ko = score_one(jf, cands[me], (raw.get(me, 0) / top) if top else 0, weights)
         out.append({"job_id": j.id, "job_ref": refs.job_ref(j), "title": j.title, "department": j.department, "status": j.status, "score": sc,
                     "breakdown": bd, "knocked_out": ko})
+    if min_score:
+        out = [m for m in out if not m["knocked_out"] and m["score"] >= min_score]
     out.sort(key=lambda m: (bool(m["knocked_out"]), -m["score"]))
     return out[:limit]
 

@@ -540,7 +540,8 @@ def candidate_detail(cid: str, req: Request):
         apps = [{"id": a.id, "job_id": j.id, "job_ref": refs.job_ref(j), "job": j.title, "stage": a.stage, "interview_ref": iv_refs.get(a.interview_id), "stage_label": STAGE_LABEL.get(a.stage, a.stage), "created_at": a.created_at,
                  "rating": a.rating, "knockout_failed": a.knockout_failed, "interview_id": a.interview_id, "answers": a.answers}
                 for a, j in s.query(db.Application, db.Job).join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.candidate_id == c.id)]
-        best = matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=8)
+        best = matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=8,
+                                           min_score=st["best_fit_min_score"])
         vis = auth.visible_job_ids(s, ctx)
         if vis is not None:
             best = [b for b in best if b["job_id"] in vis]
@@ -548,7 +549,7 @@ def candidate_detail(cid: str, req: Request):
         for b in best:
             b["ai_report"] = reports.get(b["job_id"])
         return {**cand_summary(c), "profile": c.profile or {}, "parsed": c.parsed or {}, "resume_text": (c.resume_text or "")[:20000],
-                "applications": apps, "best_jobs": best,
+                "applications": apps, "best_jobs": best, "best_fit_min_score": st["best_fit_min_score"],
                 "activity": activity_rows(s, s.query(db.Activity).filter(db.Activity.candidate_id == c.id), 30)}
 
 
@@ -646,7 +647,10 @@ def candidate_jobs(cid: str, req: Request):
         ctx = ctx_of(req, s)
         c = get_candidate(s, ctx, cid)
         st = org_settings(s.get(db.Org, c.org_id))
-        return matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=20)
+        best = matching.jobs_for_candidate(s, c.org_id, c, st["match_weights"], st["match_top_n"], limit=20,
+                                           min_score=st["best_fit_min_score"])
+        vis = auth.visible_job_ids(s, ctx)
+        return best if vis is None else [b for b in best if b["job_id"] in vis]
 
 
 # ---------------------------------------------------------------------------

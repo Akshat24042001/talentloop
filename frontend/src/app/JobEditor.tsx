@@ -1,10 +1,10 @@
-import { Check, FileUp, Save, Send, Sparkles, Trash2, Wand2 } from 'lucide-react'
+import { Check, FileUp, Plus, Save, Send, Sparkles, Trash2, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Select, Switch, Textarea, cn, toast } from '../components/ui'
 import { BackLink, ErrorBox, ListInput, Loading, PageHeader, TagInput } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate } from '../lib/router'
-import { useMe } from '../lib/session'
+import { useMe, useSession } from '../lib/session'
 
 interface FieldDef {
   key: string; label: string; type: string; required?: boolean; required_unless?: Record<string, unknown>; show_if?: Record<string, unknown>
@@ -29,6 +29,18 @@ export default function JobEditor({ id }: { id?: string }) {
   const [err, setErr] = useState(''), [saving, setSaving] = useState(''), [touched, setTouched] = useState(false), [aiBusy, setAiBusy] = useState(false)
   const [active, setActive] = useState('basics')
   const fileRef = useRef<HTMLInputElement>(null)
+  const pinned = useRef(0)
+  // The section list follows the form as you scroll (a click pins its choice while the page scrolls there).
+  useEffect(() => {
+    if (!meta || !v) return
+    const obs = new IntersectionObserver(entries => {
+      if (Date.now() - pinned.current < 900) return
+      const top = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+      if (top) setActive(top.target.id.replace(/^sec-/, ''))
+    }, { rootMargin: '-15% 0px -70% 0px' })
+    meta.sections.forEach(s => { const el = document.getElementById(`sec-${s.id}`); if (el) obs.observe(el) })
+    return () => obs.disconnect()
+  }, [meta, !!v])                                           // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     loadMeta().then(async m => {
@@ -101,7 +113,8 @@ export default function JobEditor({ id }: { id?: string }) {
           <div className="sticky top-6 space-y-1">
             {meta.sections.map(s => {
               const miss = s.fields.filter(f => missing.includes(f)).length
-              return <a key={s.id} href={`#sec-${s.id}`} onClick={() => setActive(s.id)} className={cn('flex items-center justify-between rounded-lg px-3 py-2 text-sm', active === s.id ? 'bg-white font-semibold shadow-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300')}>
+              return <a key={s.id} href={`#sec-${s.id}`} aria-current={active === s.id ? 'true' : undefined}
+                onClick={e => { e.preventDefault(); setActive(s.id); pinned.current = Date.now(); document.getElementById(`sec-${s.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} className={cn('flex items-center justify-between rounded-lg px-3 py-2 text-sm', active === s.id ? 'bg-white font-semibold shadow-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300')}>
                 {s.title}{miss ? <span className="grid size-5 place-items-center rounded-full bg-red-100 text-[11px] font-bold text-red-700 dark:bg-red-500/20 dark:text-red-300">{miss}</span> : <Check className="size-3.5 text-emerald-500" />}</a>
             })}
             <div className="mt-4 rounded-xl bg-white p-3 text-xs ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700">
@@ -138,7 +151,7 @@ export default function JobEditor({ id }: { id?: string }) {
 
 function FieldInput({ f, value, onChange, req, invalid, skills }: { f: FieldDef; value: any; onChange: (v: any) => void; req: boolean; invalid: boolean; skills: string[] }) {
   const id = `f-${f.key}`
-  const wide = ['textarea', 'list', 'questions', 'multiselect', 'skills', 'tags'].includes(f.type) || f.key === 'title'
+  const wide = ['textarea', 'list', 'questions', 'multiselect', 'skills', 'tags', 'benefits'].includes(f.type) || f.key === 'title'
   const label = <>{f.label}{req && <span className="text-red-500"> *</span>}</>
   const ring = invalid ? 'ring-2 ring-red-400' : ''
   let input
@@ -163,10 +176,53 @@ function FieldInput({ f, value, onChange, req, invalid, skills }: { f: FieldDef;
           className={cn('rounded-full px-3 py-1.5 text-[13px] font-medium ring-1 ring-inset transition-colors', on ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 dark:bg-ink-850 dark:text-slate-300 dark:ring-ink-700')}>{on && <Check className="mr-1 inline size-3" />}{o}</button>) })}</div>; break
     case 'questions':
       input = <Questions value={value || []} onChange={onChange} />; break
+    case 'benefits':
+      input = <Benefits value={value || []} onChange={onChange} />; break
     default:
       input = <Input id={id} className={ring} placeholder={f.placeholder} maxLength={f.max} value={value ?? ''} onChange={e => onChange(e.target.value)} />
   }
   return <Field className={wide ? 'sm:col-span-2' : ''} label={label} htmlFor={id} hint={f.help}>{input}</Field>
+}
+
+/** The company's own benefits list: pick the ones this job offers, add new ones (saved for the company), remove old ones. */
+function Benefits({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const me = useMe(), { refresh } = useSession()
+  const [list, setList] = useState<string[]>(me.org?.settings?.benefits || []), [text, setText] = useState(''), [busy, setBusy] = useState(false)
+  const canManage = me.can.manage_jobs
+  const all = [...list, ...value.filter(x => !list.some(y => y.toLowerCase() === x.toLowerCase()))]
+  const on = (x: string) => value.some(y => y.toLowerCase() === x.toLowerCase())
+  async function add() {
+    const x = text.trim().replace(/\s+/g, ' ')
+    if (!x) return
+    if (!on(x)) onChange([...value, x])
+    setText('')
+    if (!canManage || list.some(y => y.toLowerCase() === x.toLowerCase())) return
+    setBusy(true)
+    try { const r = await api('/api/org/benefits', { json: { add: x } }); setList(r.benefits); refresh() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  async function remove(x: string) {
+    if (!confirm(`Remove "${x}" from your company's benefits list? Jobs that already list it keep it until you edit them.`)) return
+    try { const r = await api('/api/org/benefits', { json: { remove: x } }); setList(r.benefits); refresh() } catch (e: any) { toast(e.message) }
+  }
+  return (
+    <div className="space-y-2.5">
+      {all.length ? <div className="flex flex-wrap gap-2">{all.map(x => (
+        <span key={x} className={cn('inline-flex items-center rounded-full text-[13px] font-medium ring-1 ring-inset transition-colors',
+          on(x) ? 'bg-brand-600 text-white ring-brand-600 dark:bg-brand-500 dark:ring-brand-400' : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50 dark:bg-ink-850 dark:text-slate-200 dark:ring-ink-700 dark:hover:bg-ink-800')}>
+          <button type="button" aria-pressed={on(x)} onClick={() => onChange(on(x) ? value.filter(y => y.toLowerCase() !== x.toLowerCase()) : [...value, x])} className="py-1.5 pl-3 pr-2">
+            {on(x) && <Check className="mr-1 inline size-3" />}{x}</button>
+          {canManage && list.includes(x) && <button type="button" aria-label={`Remove ${x} from the company list`} onClick={() => remove(x)}
+            className={cn('mr-1.5 grid size-5 place-items-center rounded-full', on(x) ? 'hover:bg-white/20' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-ink-700 dark:hover:text-white')}><X className="size-3" /></button>}
+        </span>))}</div>
+        : <p className="text-sm text-slate-500 dark:text-slate-400">No benefits yet. Add the ones your company offers; they're saved for your other jobs.</p>}
+      <div className="flex gap-2">
+        <Input aria-label="New benefit" placeholder="Add a benefit, e.g. Health insurance" value={text} maxLength={80} onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add() } }} />
+        <Button type="button" icon={<Plus />} loading={busy} disabled={!text.trim()} onClick={add}>Add</Button>
+      </div>
+    </div>
+  )
 }
 
 function Questions({ value, onChange }: { value: Q[]; onChange: (v: Q[]) => void }) {

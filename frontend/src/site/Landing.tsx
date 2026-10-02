@@ -89,7 +89,7 @@ export default function Landing() {
         <div className="mt-14 overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 to-violet-600 px-6 py-12 text-center text-white sm:px-12">
           <h2 className="text-3xl font-semibold tracking-tight">Hire your next person faster</h2>
           <p className="mx-auto mt-2 max-w-xl text-brand-100">Set up your workspace in two minutes. Load sample data to see a full pipeline right away.</p>
-          <Button size="lg" href={me ? '/app' : '/signup'} className="mt-6 bg-white !text-brand-700 hover:bg-brand-50" icon={<Wand2 />}>{me ? 'Open workspace' : 'Start free'}</Button>
+          <Button size="lg" href={me ? '/app' : '/signup'} className="mt-6 bg-white !text-brand-700 hover:bg-brand-50 dark:bg-white dark:hover:bg-brand-50" icon={<Wand2 />}>{me ? 'Open workspace' : 'Start free'}</Button>
         </div>
       </section>
 

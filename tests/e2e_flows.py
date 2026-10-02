@@ -13,7 +13,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from tests.e2e_browser import free_port_wait
+from tests.e2e_browser import free_port_wait, pick
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = 8799
@@ -117,8 +117,8 @@ def main():
             expect(st.get_by_role("heading", name="Customer Support Specialist")).to_be_visible()
             st.fill("#dv-n", "Sana Student"); st.fill("#dv-e", "sana@student.test"); st.fill("#dv-p", "+91 98000 11111")
             st.fill("#dv-d", "BCA"); st.fill("#dv-y", "2026")
-            for sel in st.locator("select[id^=dq-]").all():
-                sel.select_option("yes")
+            for sel in st.locator("button[id^=dq-]").all():
+                pick(st, sel, "Yes")
             for inp in st.locator("input[id^=dq-]").all():
                 inp.fill("30")
             st.get_by_role("button", name="Open camera").click()
@@ -163,7 +163,7 @@ def main():
             expect(hr.get_by_alt_text("At the start")).to_be_visible()
             expect(hr.get_by_alt_text("Registration photo")).to_be_visible()
             shot(hr, "f07-drawer-test")
-            hr.get_by_role("combobox", name="Move to round").select_option(label="Video introduction")
+            pick(hr, hr.get_by_role("combobox", name="Move to round"), "Video introduction")
             expect(hr.get_by_text("Done", exact=True)).to_be_visible()
             hr.keyboard.press("Escape")
 
@@ -186,7 +186,7 @@ def main():
             expect(hr.get_by_role("button", name="Video introduction", exact=False).first).to_be_visible()
             expect(hr.locator("video").first).to_be_visible()
             hr.get_by_role("button", name="2×").click()
-            hr.get_by_role("combobox", name="Move to round").select_option(label="Manager approval")
+            pick(hr, hr.get_by_role("combobox", name="Move to round"), "Manager approval")
             expect(hr.get_by_text("Done", exact=True)).to_be_visible()
             hr.keyboard.press("Escape")
             det = api(hr, f"/api/applications/{app['id']}")
@@ -244,7 +244,7 @@ def main():
             hr.get_by_role("button", name="Add a question").click()
             hr.get_by_label("Question 1").fill("Is this role hybrid?"); hr.get_by_label("Answer 1").fill("Yes, three days a week in the office.")
             hr.get_by_role("button", name="Add column").click()
-            hr.get_by_label("HROne header 1").fill("Employee Name"); hr.get_by_label("Field for column 1").select_option("full_name")
+            hr.get_by_label("HROne header 1").fill("Employee Name"); pick(hr, hr.get_by_role("combobox", name="Field for column 1"), "Full name")
             hr.get_by_role("button", name="Save", exact=True).click()
             expect(hr.get_by_text("Settings saved")).to_be_visible()
             r = hr.request.get(f"{BASE}/api/exports/hrone.xlsx?job={job['id']}")

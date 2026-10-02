@@ -187,7 +187,7 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
   if (type === 'human_interview') {
     const b = data.booking, fb = data.feedback
     return <>
-      {b ? <p><b>{when(b.starts_at)}</b>{b.interviewer ? ` with ${b.interviewer}` : ''}{b.location ? ` · ${b.location}` : ''}{b.meeting_url && <> · <a className="text-brand-600 hover:underline" href={b.meeting_url} target="_blank" rel="noopener">meeting link</a></>}</p>
+      {b ? <p><b>{when(b.starts_at)}</b>{b.interviewer ? ` with ${b.interviewer}` : ''}{b.location ? ` · ${b.location}` : ''}{b.meeting_url && <> · <a className="text-brand-600 dark:text-brand-400 hover:underline" href={b.meeting_url} target="_blank" rel="noopener">meeting link</a></>}</p>
         : <p className="text-slate-500">{res.status === 'invited' ? 'Waiting for the candidate to pick a slot.' : 'Not booked.'}</p>}
       {data.reschedules ? <p className="text-xs text-slate-500">Rescheduled {data.reschedules} time(s).</p> : null}
       {fb && <div className="rounded-xl bg-slate-50 p-3 dark:bg-ink-850"><H>Feedback from {fb.by}</H>
@@ -301,7 +301,7 @@ function Messages({ msgs, onRetry }: { msgs: Msg[]; onRetry: () => void }) {
         <li key={m.id} className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-ink-850">
           <div className="flex items-center gap-2 text-sm">{m.channel === 'whatsapp' ? <MessageCircle className="size-4 text-emerald-600" /> : <Mail className="size-4 text-slate-400" />}
             <span className="min-w-0 flex-1 truncate font-medium">{m.subject || m.template}</span><Badge tone={MSG_TONE[m.status] || 'neutral'}>{MSG_LABEL[m.status] || m.status}</Badge>
-            {['failed', 'not_configured'].includes(m.status) && <button className="text-xs font-semibold text-brand-600" onClick={() => retry(m.id)}>Retry</button>}</div>
+            {['failed', 'not_configured'].includes(m.status) && <button className="text-xs font-semibold text-brand-600 dark:text-brand-400" onClick={() => retry(m.id)}>Retry</button>}</div>
           <div className="text-xs text-slate-500">{m.to} · {ago(m.created_at)}{m.error ? ` · ${m.error}` : ''}</div>
         </li>))}</ul>
     </div>

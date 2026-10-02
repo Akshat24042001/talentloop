@@ -61,7 +61,7 @@ function GroupCard({ title, rows, label, empty }: { title: string; rows: Group[]
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([body], { type: 'text/csv' })); a.download = `${title.toLowerCase().replace(/\s+/g, '-')}.csv`; a.click()
   }
   return (
-    <Card><CardHeader title={title} action={rows.length > 0 && <button className="inline-flex items-center gap-1 text-sm font-medium text-brand-600" onClick={csv}><Download className="size-4" />CSV</button>} />
+    <Card><CardHeader title={title} action={rows.length > 0 && <button className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 dark:text-brand-400" onClick={csv}><Download className="size-4" />CSV</button>} />
       <CardBody className="overflow-x-auto">{!rows.length ? <p className="text-sm text-slate-500">{empty || 'No data.'}</p> : (
         <table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Name</th><th>Applied</th><th>Interviewed</th><th>Selected</th><th>Rate</th><th>Avg score</th></tr></thead>
           <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{rows.map(r => <tr key={r.name}><td className="max-w-48 truncate py-2 font-medium">{label(r.name)}</td><td className="tabular">{r.applications}</td><td className="tabular">{r.interviewed}</td>
@@ -87,7 +87,7 @@ export function AuditLog() {
         <Card className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm"><thead className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-ink-800"><tr><th className="px-4 py-2.5">When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
           <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{data.items.map(a => (
             <tr key={a.id} className="align-top"><td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{when(a.at)}</td><td className="py-2.5 pr-3">{actor(a)}</td><td className="py-2.5 pr-3 font-medium">{ACTION_LABEL[a.action] || a.action}</td>
-              <td className="py-2.5 pr-4">{a.detail}{a.job && a.job_ref && <> · <a className="text-brand-600 hover:underline" href={`/app/jobs/${a.job_ref}`}>{a.job}</a></>}</td></tr>))}</tbody></table></Card>
+              <td className="py-2.5 pr-4">{a.detail}{a.job && a.job_ref && <> · <a className="text-brand-600 dark:text-brand-400 hover:underline" href={`/app/jobs/${a.job_ref}`}>{a.job}</a></>}</td></tr>))}</tbody></table></Card>
         <Pager page={page} total={data.total} limit={100} onPage={setPage} />
       </>}
     </>

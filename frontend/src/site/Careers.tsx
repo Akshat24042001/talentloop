@@ -25,7 +25,7 @@ function OrgHeader({ org, children }: { org: Org; children?: ReactNode }) {
   )
 }
 const Foot = () => <footer className="py-10 text-center text-xs text-slate-500"><a href="/" className="inline-flex items-center gap-2">Hiring with <Logo compact /> TalentLoop</a></footer>
-function NotFound({ msg }: { msg: string }) { return <div className="grid min-h-screen place-items-center p-6 text-center"><div><Briefcase className="mx-auto size-8 text-slate-400" /><h1 className="mt-3 text-lg font-semibold">{msg}</h1><a className="mt-2 inline-block text-sm text-brand-600 hover:underline" href="/">TalentLoop</a></div></div> }
+function NotFound({ msg }: { msg: string }) { return <div className="grid min-h-screen place-items-center p-6 text-center"><div><Briefcase className="mx-auto size-8 text-slate-400" /><h1 className="mt-3 text-lg font-semibold">{msg}</h1><a className="mt-2 inline-block text-sm text-brand-600 dark:text-brand-400 hover:underline" href="/">TalentLoop</a></div></div> }
 
 export function CareersPage({ slug }: { slug: string }) {
   const [d, setD] = useState<{ org: Org; jobs: JobItem[] } | null>(null), [err, setErr] = useState('')
@@ -86,7 +86,7 @@ export function PublicJobPage({ slug, id }: { slug: string; id: string }) {
         <a href={`/careers/${slug}`} className="mt-6 inline-flex items-center gap-1 text-sm text-white/80 hover:text-white"><ArrowLeft className="size-4" />All jobs</a>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">{j.jd.title}</h1>
         <div className="mt-3 flex flex-wrap gap-2">{j.jd.facts.map(f => <span key={f} className="rounded-full bg-white/15 px-3 py-1 text-sm">{f}</span>)}</div>
-        <Button className="mt-6 bg-white !text-slate-900 hover:bg-slate-100" onClick={() => formRef.current?.scrollIntoView({ behavior: 'smooth' })} icon={<Send />}>Apply now</Button>
+        <Button className="mt-6 bg-white !text-slate-900 hover:bg-slate-100 dark:bg-white dark:hover:bg-slate-100" onClick={() => formRef.current?.scrollIntoView({ behavior: 'smooth' })} icon={<Send />}>Apply now</Button>
       </OrgHeader>
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
         <Card className="p-6 sm:p-8">

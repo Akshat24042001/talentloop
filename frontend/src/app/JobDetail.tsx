@@ -208,7 +208,7 @@ function TeamAccess({ job, reload, canManage }: { job: Job; reload: () => void; 
       </Card>
       {canManage && (
         <Card><CardHeader title="Give access" /><CardBody className="space-y-3">
-          {!candidates.length ? <p className="text-sm text-slate-500 dark:text-slate-400">Invite hiring managers from the <a className="font-medium text-brand-600 hover:underline" href="/app/team">Team</a> page first.</p> : <>
+          {!candidates.length ? <p className="text-sm text-slate-500 dark:text-slate-400">Invite hiring managers from the <a className="font-medium text-brand-600 dark:text-brand-400 hover:underline" href="/app/team">Team</a> page first.</p> : <>
             <Field label="Person"><Select value={uid} onChange={e => setUid(e.target.value)}><option value="">Choose…</option>{candidates.map(m => <option key={m.user_id} value={m.user_id}>{m.name || m.email}{m.title ? ` (${m.title})` : ''}</option>)}</Select></Field>
             <Field label="Access" hint={perm === 'editor' ? 'Can write and update the JD, move candidates, see matches. Cannot publish or delete.' : 'Can see the job, candidates and matches, rate and leave notes.'}>
               <Select value={perm} onChange={e => setPerm(e.target.value)}><option value="editor">Can edit the JD</option><option value="reviewer">Can review candidates</option></Select></Field>

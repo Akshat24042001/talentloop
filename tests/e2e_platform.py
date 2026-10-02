@@ -12,7 +12,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from tests.e2e_browser import free_port_wait
+from tests.e2e_browser import free_port_wait, pick
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = 8798
@@ -94,7 +94,7 @@ def main():
             pg.get_by_role("button", name="Publish").click()
             expect(pg.get_by_text("Fill in before publishing")).to_be_visible()
             shot(pg, "08-job-editor")
-            pg.select_option("#f-department", "Design")
+            pick(pg, "#f-department", "Design")
             pg.locator("#f-locations").fill("Bengaluru"); pg.locator("#f-locations").press("Enter")
             pg.locator("#f-must_have_skills").fill("Figma"); pg.locator("#f-must_have_skills").press("Enter")
             pg.locator("#f-must_have_skills").fill("User Research"); pg.locator("#f-must_have_skills").press("Enter")
@@ -127,7 +127,7 @@ def main():
 
             # ------------------------------------------------ team: a sales manager edits only the sales JD
             pg.goto(BASE + "/app/team")
-            pg.fill("#inv-email", "sam@acme.test"); pg.select_option("#inv-role", "hiring_manager"); pg.fill("#inv-title", "Sales Manager")
+            pg.fill("#inv-email", "sam@acme.test"); pick(pg, "#inv-role", "Hiring manager"); pg.fill("#inv-title", "Sales Manager")
             pg.get_by_role("button", name="Create invite link").click()
             link = pg.locator("span.break-all").inner_text(timeout=10000).strip()
             assert "/invite/" in link, link
@@ -144,7 +144,7 @@ def main():
             expect(mgr.get_by_text("No jobs assigned to you yet")).to_be_visible()
             pg.reload()
             pg.get_by_role("tab", name="Team access").click()
-            pg.get_by_role("combobox").filter(has_text="Choose").select_option(label="Sam Sales (Sales Manager)")
+            pick(pg, pg.get_by_role("combobox").filter(has_text="Choose"), "Sam Sales (Sales Manager)")
             pg.get_by_role("button", name="Give access").click()
             expect(pg.get_by_text("Can edit JD")).to_be_visible()
             mgr.reload()
@@ -172,7 +172,7 @@ def main():
             expect(cand.get_by_text("Phone *")).to_be_visible()
             cand.fill("#ap-sum", "Support specialist with two years on chat and email.")
             cand.get_by_placeholder("Job title").fill("Support Associate"); cand.get_by_placeholder("Company").first.fill("Helio Health")
-            cand.select_option("#q-auth", "yes"); cand.fill("#q-notice", "30")
+            pick(cand, "#q-auth", "Yes"); cand.fill("#q-notice", "30")
             cand.locator("input[type=checkbox][required]").check()
             shot(cand, "16-apply")
             cand.get_by_role("button", name="Submit application").click()

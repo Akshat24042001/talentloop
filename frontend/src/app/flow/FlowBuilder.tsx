@@ -225,7 +225,7 @@ function TestConfig({ c, cfg, meta }: { c: Record<string, any>; cfg: (k: string,
       <Switch id="t-cam" checked={c.require_camera !== false} onChange={v => cfg('require_camera', v)} label="Camera snapshots" description="A photo at the start and every few minutes, for HR review." />
       <Switch id="t-shuf" checked={c.shuffle_options !== false} onChange={v => cfg('shuffle_options', v)} label="Shuffle options" />
       <Switch id="t-show" checked={!!c.show_score} onChange={v => cfg('show_score', v)} label="Show candidates their score" />
-      <p className="text-xs text-slate-500">Every candidate gets a different random paper from the <a className="font-medium text-brand-600 hover:underline" href="/app/questions">question bank</a>.</p>
+      <p className="text-xs text-slate-500">Every candidate gets a different random paper from the <a className="font-medium text-brand-600 dark:text-brand-400 hover:underline" href="/app/questions">question bank</a>.</p>
     </Section>
   )
 }

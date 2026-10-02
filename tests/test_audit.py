@@ -187,6 +187,15 @@ check("a reviewer can't rate", hiring_manager.patch(f"/api/applications/{a}", js
 qs = ok(viewer.get("/api/questions"))["items"]
 check("answer keys are visible to non-HR roles", any("answer" in q for q in qs))
 
+# best-fit jobs: a candidate who fits no job is shown no job; the minimum score is a company setting
+fitc = ok(hr.post("/api/candidates", json={"name": "Fit Nobody", "email": "fitn@m.test", "resume_text": "Pastry chef, croissants, 4 years"}))
+d = ok(hr.get(f"/api/candidates/{fitc['id']}"))
+check("a candidate with no good fit still lists every open job as best fit", bool(d["best_jobs"]), str([(b["title"], b["score"]) for b in d["best_jobs"]]))
+ok(hr.patch("/api/org", json={"settings": {"best_fit_min_score": 0}}))
+d = ok(hr.get(f"/api/candidates/{fitc['id']}"))
+check("best-fit minimum score setting is ignored", not d["best_jobs"] or d["best_fit_min_score"] != 0, str(d.get("best_fit_min_score")))
+ok(hr.patch("/api/org", json={"settings": {"best_fit_min_score": 55}}))
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

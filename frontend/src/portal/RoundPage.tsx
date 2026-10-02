@@ -38,7 +38,7 @@ export default function RoundPage({ token }: { token: string }) {
         : data.type === 'ai_interview' ? <AIRound p={data} base={base} reload={reload} />
         : data.type === 'human_interview' ? <BookRound p={data} base={base} reload={reload} />
         : <Alert tone="info">Nothing to do here. <a className="font-semibold underline" href={data.status_link}>See your application status.</a></Alert>}
-      {data.status_link && <p className="mt-8 text-center text-sm"><a className="font-medium text-brand-600 hover:underline" href={data.status_link}>Your application status, accommodations and help</a></p>}
+      {data.status_link && <p className="mt-8 text-center text-sm"><a className="font-medium text-brand-600 dark:text-brand-400 hover:underline" href={data.status_link}>Your application status, accommodations and help</a></p>}
     </Frame>
   )
 }
@@ -337,7 +337,7 @@ function AIRound({ p, base, reload }: { p: Page; base: string; reload: () => voi
   return (
     <div className="space-y-4">
       <Card className="p-5 text-sm">
-        <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15"><Headphones className="size-5" /></span>
+        <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:text-brand-400 dark:bg-brand-500/15"><Headphones className="size-5" /></span>
           <div><div className="font-semibold">A {iv.duration_min}-minute voice interview with an AI interviewer</div>
             <p className="mt-1 text-slate-600 dark:text-slate-300">You will talk to an AI assistant, not a person. It starts with a short practice question, then asks about the role and your experience. Language: {LANG[iv.language] || iv.language}.</p></div></div>
         <ul className="mt-3 list-disc space-y-1 pl-5 text-slate-600 dark:text-slate-300"><li>Use a quiet room, a laptop or phone with a camera and microphone, and Chrome, Edge or Safari.</li>
@@ -351,7 +351,7 @@ function AIRound({ p, base, reload }: { p: Page; base: string; reload: () => voi
         : <Alert tone="info">The interview link isn't ready. Please check back shortly or contact the hiring team.</Alert>}
       {calling && <Alert tone="success" title="We're calling you now">Answer the call from an unknown number. If you miss it, you can try again later or use the browser.</Alert>}
       {asked ? <Alert tone="info" icon={<UserRound />}>You asked for an interview with a person. The hiring team will reply; you can still take the AI interview if you prefer.</Alert>
-        : <button className="text-sm font-medium text-brand-600 hover:underline" onClick={() => setHuman(true)}>I'd prefer to be interviewed by a person</button>}
+        : <button className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline" onClick={() => setHuman(true)}>I'd prefer to be interviewed by a person</button>}
       <Modal open={human} onOpenChange={setHuman} title="Ask for a human interviewer" description="The hiring team decides and will get back to you. Tell them anything that helps (optional)."
         footer={<><Button onClick={() => setHuman(false)}>Cancel</Button><Button variant="primary" onClick={askHuman}>Send request</Button></>}>
         <Textarea className="mt-4" rows={3} value={note} onChange={e => setNote(e.target.value)} aria-label="Note" placeholder="For example: I have a speech difference, or I'm not comfortable with AI interviews." />

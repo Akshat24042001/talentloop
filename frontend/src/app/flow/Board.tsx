@@ -102,7 +102,7 @@ export default function Board({ jobId }: { jobId: string }) {
           <Field label="College" htmlFor="f-col"><Select id="f-col" value={f.college} onChange={e => setF({ ...f, college: e.target.value })}><option value="">Any</option>{colleges.map(c => <option key={c}>{c}</option>)}</Select></Field>
           <Field label="Round status" htmlFor="f-st"><Select id="f-st" value={f.status} onChange={e => setF({ ...f, status: e.target.value })}><option value="">Any</option>{Object.entries(data.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
           <div className="flex flex-col justify-end gap-2"><label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={f.flagged} onChange={e => setF({ ...f, flagged: e.target.checked })} />Integrity flags only</label>
-            <button className="text-left text-sm font-medium text-brand-600" onClick={() => setF({ q: f.q, minScore: '', location: '', maxNotice: '', college: '', status: '', flagged: false, closed: f.closed })}>Clear filters</button></div>
+            <button className="text-left text-sm font-medium text-brand-600 dark:text-brand-400" onClick={() => setF({ q: f.q, minScore: '', location: '', maxNotice: '', college: '', status: '', flagged: false, closed: f.closed })}>Clear filters</button></div>
         </Card>
       )}
       {sel.size > 0 && canEdit && (

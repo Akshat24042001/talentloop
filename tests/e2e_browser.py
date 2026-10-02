@@ -433,3 +433,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def pick(page, trigger, label):
+    """Choose `label` in one of our styled dropdowns (a Radix listbox, not a native <select>)."""
+    if isinstance(trigger, str):
+        trigger = page.locator(trigger)
+    trigger.click()
+    page.get_by_role("option", name=label, exact=True).click()
