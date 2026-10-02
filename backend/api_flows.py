@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func
 
-from . import assessments, auth, db, flows, messages, refs, scheduling, store, worker
+from . import assessments, auth, calibration, db, flows, messages, refs, scheduling, similarity, store, worker
 from .offload import offload
 from .api_accounts import log_activity, org_settings
 from .api_hiring import STAGE_LABEL, cand_summary, ctx_of, get_job, LIST_COLS
@@ -156,6 +156,24 @@ def delete_template(tid: str, req: Request):
 # ---------------------------------------------------------------------------
 # pipeline board
 # ---------------------------------------------------------------------------
+@router.get("/api/jobs/{job_id}/integrity-scan")
+def integrity_scan(job_id: str, req: Request):
+    """Pairs of candidates whose answers look copied from each other (see similarity.py)."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        job, perm = get_job(s, ctx, job_id)
+        return similarity.scan(s, job)
+
+
+@router.get("/api/jobs/{job_id}/calibration")
+def job_calibration(job_id: str, req: Request):
+    """How often people's decisions agree with the AI, per round (see calibration.py)."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        job, perm = get_job(s, ctx, job_id)
+        return calibration.job_report(s, job)
+
+
 @router.get("/api/jobs/{job_id}/pipeline")
 def pipeline(job_id: str, req: Request):
     with db.session() as s:

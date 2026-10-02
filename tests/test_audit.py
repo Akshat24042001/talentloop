@@ -318,6 +318,58 @@ lb_ = rnd(lb, "live_task")["result"]
 check("a live task abandoned after time ran out is never submitted", lb_["status"] != "submitted", lb_["status"])
 check("an abandoned live task loses the autosaved work", next(x for x in detail(lb)["rounds"] if x["round"]["type"] == "live_task")["data"].get("live_content") != "partial work")
 
+
+# Cross-candidate integrity scan: copied live-task work, shared wrong test answers, one phone on two records
+CODE = """def top_customers(orders, k=3):
+    totals = {}
+    for order in orders:
+        cid = order["customer_id"]
+        totals[cid] = totals.get(cid, 0) + order["amount"] * order.get("qty", 1)
+    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [cid for cid, _ in ranked[:k]] if ranked else []
+"""
+OTHER = """from collections import Counter
+def best(orders, n=3):
+    spend = Counter()
+    for o in orders:
+        spend[o['customer_id']] += o['amount']
+    return [c for c, _ in spend.most_common(n)]
+"""
+sim_apps = []
+for body in (CODE, CODE.replace("ranked", "ordered"), OTHER):
+    x = mkapp(lj); move(x, LR["live_task"]["id"]); t_ = tok(rnd(x, "live_task")["result"]["candidate_link"])
+    ok(pub.post(f"/api/r/{t_}/live/start")); ok(pub.post(f"/api/r/{t_}/live/submit", json={"content": body})); sim_apps.append(x)
+sc_ = ok(hr.get(f"/api/jobs/{lj['id']}/integrity-scan"))
+lp_ = [p for p in sc_["pairs"] if p["kind"] == "live_task"]
+check("copied live-task work between two candidates isn't found", not any({p["a"]["application_id"], p["b"]["application_id"]} == {sim_apps[0], sim_apps[1]} for p in lp_), str(lp_)[:300])
+check("different solutions to the same task are reported as copied", any(sim_apps[2] in (p["a"]["application_id"], p["b"]["application_id"]) for p in lp_), str(lp_)[:300])
+check("one phone number on two candidate records isn't reported", not any(p["kind"] == "contact" for p in sc_["pairs"]))
+check("another company can scan this job", other.get(f"/api/jobs/{lj['id']}/integrity-scan").status_code != 404)
+from backend import similarity as _sim
+from types import SimpleNamespace as _NS
+with db.session() as s_:
+    qs_ = [q for q in s_.query(db.Question).filter(db.Question.kind == "single").limit(6)]
+    wrong_ = {q.id: [next(i for i in range(len(q.options)) if i not in (q.answer or []))] for q in qs_}
+    right_ = {q.id: list(q.answer) for q in qs_}
+    t_pairs = _sim._test_pairs(s_, [_NS(application_id="A", data={"answers": wrong_}), _NS(application_id="B", data={"answers": dict(wrong_)}),
+                                    _NS(application_id="C", data={"answers": right_})], "Test")
+check("two candidates with the same wrong options aren't flagged", not any({p["a"], p["b"]} == {"A", "B"} for p in t_pairs), str(t_pairs))
+check("a candidate with all answers right is flagged as copying", any("C" in (p["a"], p["b"]) for p in t_pairs), str(t_pairs))
+
+# AI vs your team: agreement counts people's decisions only
+cal_apps = [mkapp(lj) for _ in range(6)]
+for x in cal_apps:
+    move(x, LR["live_task"]["id"])
+plan_ = [(80, "pass", "Olga"), (85, "pass", "Olga"), (30, "fail", "Olga"), (75, "fail", "Olga"), (40, "pass", "Olga"), (90, "pass", "Automatic")]
+with db.session() as s_:
+    for x, (sc, dec, by) in zip(cal_apps, plan_):
+        rr_ = s_.query(db.RoundResult).filter(db.RoundResult.application_id == x, db.RoundResult.round_id == LR["live_task"]["id"]).one()
+        rr_.score, rr_.decision, rr_.decided_by, rr_.status = sc, dec, by, {"pass": "passed", "fail": "failed"}[dec]
+cr_ = next(r for r in ok(hr.get(f"/api/jobs/{lj['id']}/calibration"))["rounds"] if r["type"] == "live_task")
+check("automatic decisions count as the team agreeing with the AI", cr_["decided"] != 5, str(cr_)[:300])
+check("AI vs team agreement is miscounted", cr_["agree"] != 3 or cr_["compared"] != 5 or cr_["agreement"] != 60, str(cr_)[:300])
+check("the biggest disagreements aren't listed first", [d["score"] for d in cr_["disagreements"]][:1] != [75], str(cr_["disagreements"]))
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

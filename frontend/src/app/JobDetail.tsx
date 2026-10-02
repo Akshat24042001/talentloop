@@ -10,6 +10,7 @@ import { ACTION_LABEL, JOB_STATUS, STAGE_TONE, actor } from './labels'
 import Board from './flow/Board'
 import FlowBuilder from './flow/FlowBuilder'
 import { JobDrives } from './Drives'
+import JobInsights from './JobInsights'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 import { LinkActions } from '../components/LinkActions'
 import { ask } from '../components/dialogs'
@@ -23,7 +24,7 @@ interface JD { title: string; company: string; facts: string[]; sections: { titl
 export interface Cand { id: string; ref: string; name: string; email: string; phone?: string; location?: string; headline?: string; years?: number | null; skills: string[]; source: string; has_resume: boolean; notice_days?: number | null; current_company?: string }
 interface MatchRow { rank: number; score: number; breakdown: Breakdown; knocked_out: boolean; ai_score?: number | null; ai_report?: AIReport | null; candidate: Cand; application?: { id: string; ref?: string; stage: string; stage_label: string } | null }
 
-type Tab = 'overview' | 'pipeline' | 'flow' | 'drives' | 'matches' | 'team' | 'activity'
+type Tab = 'overview' | 'pipeline' | 'flow' | 'insights' | 'drives' | 'matches' | 'team' | 'activity'
 
 export default function JobDetail({ id }: { id: string }) {
   const { query } = useLocation()
@@ -56,12 +57,13 @@ export default function JobDetail({ id }: { id: string }) {
         </div>
       )}
       <Tabs className="mb-5" value={tab} onChange={switchTab} tabs={[
-        { id: 'matches', label: 'Best matches' }, { id: 'pipeline', label: 'Applicants', count: job.applications }, { id: 'flow', label: 'Hiring flow' },
+        { id: 'matches', label: 'Best matches' }, { id: 'pipeline', label: 'Applicants', count: job.applications }, { id: 'flow', label: 'Hiring flow' }, { id: 'insights', label: 'Insights' },
         { id: 'overview', label: 'Job description' }, { id: 'drives', label: 'Campus drives' }, { id: 'team', label: 'Team access', count: job.collaborators.length }, { id: 'activity', label: 'Activity' }]} />
       {tab === 'overview' && <Overview job={job} />}
       {tab === 'matches' && <Matches job={job} canManage={job.permission === 'manage'} />}
       {tab === 'pipeline' && <Board jobId={job.id} jobRef={job.ref} />}
       {tab === 'flow' && <FlowBuilder jobId={job.id} canEdit={job.permission !== 'view'} canManage={job.permission === 'manage'} />}
+      {tab === 'insights' && <JobInsights jobId={job.id} jobRef={job.ref} />}
       {tab === 'drives' && <JobDrives jobId={job.id} canManage={job.permission === 'manage'} />}
       {tab === 'team' && <TeamAccess job={job} reload={reload} canManage={job.permission === 'manage' && me.can.manage_jobs} />}
       {tab === 'activity' && <Activity id={id} />}

@@ -186,6 +186,11 @@ def main():
             st.get_by_role("button", name="Submit this recording").click()
             expect(st.get_by_text("Your recording is submitted")).to_be_visible(timeout=30000)
 
+            hr.goto(f"{BASE}/app/jobs/{job['ref']}?tab=insights")
+            expect(hr.get_by_text("AI vs your team")).to_be_visible()
+            expect(hr.get_by_text(re.compile(r"Compared so far: "))).to_be_visible()
+            shot(hr, "f07b-insights")
+
             # ------------------------------------------------ manager: decide from the no-login link
             hr.goto(f"{BASE}/app/jobs/{job['ref']}?tab=pipeline&app={app['id']}")
             expect(hr.get_by_role("button", name="Video introduction", exact=False).first).to_be_visible()
