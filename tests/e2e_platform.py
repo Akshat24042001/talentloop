@@ -96,7 +96,9 @@ def main():
             expect(pg.get_by_text("Fill in before publishing")).to_be_visible()
             shot(pg, "08-job-editor")
             pick(pg, "#f-department", "Design")
+            pg.locator("nav button", has_text="Location & work model").click()          # the editor shows one section at a time
             pg.locator("#f-locations").fill("Bengaluru"); pg.locator("#f-locations").press("Enter")
+            pg.locator("nav button", has_text="Requirements").click()
             pg.locator("#f-must_have_skills").fill("Figma"); pg.locator("#f-must_have_skills").press("Enter")
             pg.locator("#f-must_have_skills").fill("User Research"); pg.locator("#f-must_have_skills").press("Enter")
             pg.get_by_role("button", name="Publish").click()
@@ -153,6 +155,7 @@ def main():
             expect(mgr.get_by_text("Senior Backend Engineer")).to_have_count(0)
             mgr.get_by_text("Enterprise Account Executive").click()
             mgr.get_by_role("link", name="Edit JD").click()
+            mgr.locator("nav button", has_text="About the role").click()
             mgr.fill("#f-summary", "Win and grow our largest enterprise customers across India.")
             mgr.get_by_role("button", name="Save changes").click()
             expect(mgr.get_by_role("tab", name="Best matches")).to_be_visible(timeout=15000)

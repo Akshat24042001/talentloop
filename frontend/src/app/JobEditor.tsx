@@ -1,4 +1,4 @@
-import { Check, FileUp, Plus, Save, Send, Sparkles, Trash2, Wand2, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, FileUp, Plus, Save, Send, Sparkles, Trash2, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Select, Switch, Textarea, cn, toast } from '../components/ui'
 import { BackLink, ErrorBox, ListInput, Loading, PageHeader, TagInput } from '../components/kit'
@@ -30,19 +30,6 @@ export default function JobEditor({ id }: { id?: string }) {
   const [err, setErr] = useState(''), [saving, setSaving] = useState(''), [touched, setTouched] = useState(false), [aiBusy, setAiBusy] = useState(false)
   const [active, setActive] = useState('basics')
   const fileRef = useRef<HTMLInputElement>(null)
-  const pinned = useRef(0)
-  // The section list follows the form as you scroll (a click pins its choice while the page scrolls there).
-  useEffect(() => {
-    if (!meta || !v) return
-    const obs = new IntersectionObserver(entries => {
-      if (Date.now() - pinned.current < 900) return
-      const top = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
-      if (top) setActive(top.target.id.replace(/^sec-/, ''))
-    }, { rootMargin: '-15% 0px -70% 0px' })
-    meta.sections.forEach(s => { const el = document.getElementById(`sec-${s.id}`); if (el) obs.observe(el) })
-    return () => obs.disconnect()
-  }, [meta, !!v])                                           // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     loadMeta().then(async m => {
       setMeta(m)
@@ -55,11 +42,17 @@ export default function JobEditor({ id }: { id?: string }) {
 
   const missing = useMemo(() => !meta || !v ? [] : meta.sections.flatMap(s => s.fields).filter(f => isRequired(f, v) && empty(v[f.key]) && !(f.type === 'number' && v[f.key] === 0)), [meta, v])
   const set = (k: string, x: unknown) => setV(o => ({ ...o!, [k]: x }))
+  // One section at a time (tabs), so the form never turns into one long scroll.
+  const go = (sid: string) => { setActive(sid); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
   async function save(publish: boolean) {
     setTouched(true); setErr('')
     if (!v?.title) { setErr('A job title is required.'); return }
-    if (publish && missing.length) { setErr('Fill in before publishing: ' + missing.map(f => f.label).join(', ')); return }
+    if (publish && missing.length) {
+      setErr('Fill in before publishing: ' + missing.map(f => f.label).join(', '))
+      const first = meta?.sections.find(sec => sec.fields.some(f => missing.includes(f))); if (first) go(first.id)
+      return
+    }
     setSaving(publish ? 'publish' : 'save')
     try {
       const fields = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Array.isArray(x) ? x.filter(y => typeof y !== 'string' || y.trim()) : x]))
@@ -114,9 +107,9 @@ export default function JobEditor({ id }: { id?: string }) {
           <div className="sticky top-6 space-y-1">
             {meta.sections.map(s => {
               const miss = s.fields.filter(f => missing.includes(f)).length
-              return <a key={s.id} href={`#sec-${s.id}`} aria-current={active === s.id ? 'true' : undefined}
-                onClick={e => { e.preventDefault(); setActive(s.id); pinned.current = Date.now(); document.getElementById(`sec-${s.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} className={cn('flex items-center justify-between rounded-lg px-3 py-2 text-sm', active === s.id ? 'bg-white font-semibold shadow-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300')}>
-                {s.title}{miss ? <span className="grid size-5 place-items-center rounded-full bg-red-100 text-[11px] font-bold text-red-700 dark:bg-red-500/20 dark:text-red-300">{miss}</span> : <Check className="size-3.5 text-emerald-500" />}</a>
+              return <button type="button" key={s.id} aria-current={active === s.id ? 'step' : undefined}
+                onClick={() => go(s.id)} className={cn('flex items-center justify-between rounded-lg px-3 py-2 text-sm', active === s.id ? 'bg-white font-semibold shadow-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300')}>
+                {s.title}{miss ? <span className="grid size-5 place-items-center rounded-full bg-red-100 text-[11px] font-bold text-red-700 dark:bg-red-500/20 dark:text-red-300">{miss}</span> : <Check className="size-3.5 text-emerald-500" />}</button>
             })}
             <div className="mt-4 rounded-xl bg-white p-3 text-xs ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700">
               {missing.length ? <><b className="text-slate-800 dark:text-slate-100">{missing.length} required left</b><p className="mt-1 text-slate-500">{missing.map(f => f.label).join(', ')}</p></>
@@ -124,13 +117,25 @@ export default function JobEditor({ id }: { id?: string }) {
             </div>
           </div>
         </nav>
-        <div className="min-w-0 space-y-5 pb-28">
-          {meta.sections.map(s => (
-            <Card key={s.id} id={`sec-${s.id}`} className="scroll-mt-6 p-5 sm:p-6" onFocusCapture={() => setActive(s.id)}>
-              <h2 className="text-base font-semibold">{s.title}</h2>
-              <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{s.description}</p>
+        <div className="min-w-0 pb-28">
+          <div className="no-print -mx-1 mb-4 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:hidden" role="tablist" aria-label="Sections">
+            {meta.sections.map(s => { const miss = s.fields.filter(f => missing.includes(f)).length
+              return <button key={s.id} type="button" role="tab" aria-selected={active === s.id} onClick={() => go(s.id)}
+                className={cn('flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium ring-1 ring-inset', active === s.id ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-slate-600 ring-slate-200 dark:bg-ink-850 dark:text-slate-300 dark:ring-ink-700')}>
+                {s.title}{miss > 0 && <span className={cn('grid size-4 place-items-center rounded-full text-[10px] font-bold', active === s.id ? 'bg-white/25' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300')}>{miss}</span>}</button> })}
+          </div>
+          {meta.sections.map((s, i) => s.id !== active ? null : (
+            <Card key={s.id} id={`sec-${s.id}`} className="p-5 sm:p-6 animate-rise">
+              <div className="flex items-start justify-between gap-3"><div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Step {i + 1} of {meta.sections.length}</div>
+                <h2 className="mt-1 text-base font-semibold">{s.title}</h2>
+                <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{s.description}</p></div></div>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
                 {s.fields.filter(f => visible(f, v)).map(f => <FieldInput key={f.key} f={f} value={v[f.key]} onChange={x => set(f.key, x)} req={isRequired(f, v)} invalid={touched && missing.includes(f)} skills={meta.skills} />)}
+              </div>
+              <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-ink-800">
+                {i > 0 ? <Button variant="ghost" icon={<ChevronLeft />} onClick={() => go(meta.sections[i - 1].id)}>{meta.sections[i - 1].title}</Button> : <span />}
+                {i < meta.sections.length - 1 && <Button variant="primary" onClick={() => go(meta.sections[i + 1].id)}>Next: {meta.sections[i + 1].title}<ChevronRight className="size-4" /></Button>}
               </div>
             </Card>
           ))}
