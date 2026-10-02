@@ -515,7 +515,16 @@ def purge_job(s, job: db.Job) -> list[str]:
     for a in s.query(db.Application).filter(db.Application.job_id == job.id):
         prefixes += purge_application(s, a)
     s.query(db.Slot).filter(db.Slot.job_id == job.id).delete(synchronize_session=False)
-    s.query(db.Drive).filter(db.Drive.job_id == job.id).delete(synchronize_session=False)
+    # Drives: a single-role drive goes with its job; a multi-role drive just loses this role.
+    for d in s.query(db.Drive).filter(db.Drive.org_id == job.org_id).all():
+        extra = [x for x in ((d.settings or {}).get("job_ids") or []) if x != job.id]
+        if d.job_id == job.id:
+            if extra:
+                d.job_id, d.settings = extra[0], {**(d.settings or {}), "job_ids": extra[1:]}
+            else:
+                s.delete(d)
+        elif len(extra) != len((d.settings or {}).get("job_ids") or []):
+            d.settings = {**(d.settings or {}), "job_ids": extra}
     prefixes.append(f"{job.org_id}/jobs/{job.id}")
     return prefixes
 

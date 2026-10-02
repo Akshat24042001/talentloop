@@ -717,12 +717,27 @@ def load_sample_questions(req: Request):
 # ---------------------------------------------------------------------------
 # campus drives
 # ---------------------------------------------------------------------------
+def drive_job_ids(d: db.Drive) -> list[str]:
+    """A drive can cover several roles: the first job plus settings["job_ids"]."""
+    extra = [x for x in ((d.settings or {}).get("job_ids") or []) if isinstance(x, str)]
+    return list(dict.fromkeys([d.job_id, *extra]))
+
+
+def drive_jobs(s, d: db.Drive) -> list[db.Job]:
+    ids = drive_job_ids(d)
+    found = {j.id: j for j in s.query(db.Job).filter(db.Job.id.in_(ids))}
+    return [found[i] for i in ids if i in found]
+
+
 def drive_json(d: db.Drive, s=None) -> dict:
-    out = {"id": d.id, "job_id": d.job_id, "college": d.college, "code": d.code, "share_code": d.share_code, "opens_at": d.opens_at,
+    out = {"id": d.id, "job_id": d.job_id, "job_ids": drive_job_ids(d), "college": d.college, "code": d.code, "share_code": d.share_code, "opens_at": d.opens_at,
            "closes_at": d.closes_at, "status": d.status, "settings": d.settings or {}, "created_at": d.created_at,
            "link": f"{flows.base_url()}/drive/{d.code}", "results_link": f"{flows.base_url()}/results/{d.share_code}"}
     if s is not None:
-        out["registered"] = s.query(func.count(db.Application.id)).filter(db.Application.drive_id == d.id).scalar()
+        per = dict(s.query(db.Application.job_id, func.count(db.Application.id)).filter(db.Application.drive_id == d.id).group_by(db.Application.job_id).all())
+        out["registered"] = s.query(func.count(func.distinct(db.Application.candidate_id))).filter(db.Application.drive_id == d.id).scalar()
+        out["jobs"] = [{"id": j.id, "ref": refs.job_ref(j), "title": j.title, "status": j.status, "registered": per.get(j.id, 0)} for j in drive_jobs(s, d)]
+        out["job"] = out["jobs"][0] if out["jobs"] else None
     return out
 
 
@@ -731,12 +746,13 @@ def all_drives(req: Request):
     """Every campus drive in the company (or in the jobs this person can see), newest first."""
     with db.session() as s:
         ctx = ctx_of(req, s)
-        q = s.query(db.Drive, db.Job).join(db.Job, db.Job.id == db.Drive.job_id).filter(db.Drive.org_id == ctx.org_id)
         vis = auth.visible_job_ids(s, ctx)
-        if vis is not None:
-            q = q.filter(db.Drive.job_id.in_(vis or [""]))
-        return [{**drive_json(d, s), "job": {"id": j.id, "ref": refs.job_ref(j), "title": j.title}}
-                for d, j in q.order_by(db.Drive.created_at.desc()).limit(300)]
+        out = []
+        for d in s.query(db.Drive).filter(db.Drive.org_id == ctx.org_id).order_by(db.Drive.created_at.desc()).limit(300):
+            if vis is not None and not set(drive_job_ids(d)) & set(vis):
+                continue
+            out.append(drive_json(d, s))
+        return out
 
 
 @router.get("/api/jobs/{job_id}/drives")
@@ -744,7 +760,8 @@ def list_drives(job_id: str, req: Request):
     with db.session() as s:
         ctx = ctx_of(req, s)
         job, _ = get_job(s, ctx, job_id)
-        return [drive_json(d, s) for d in s.query(db.Drive).filter(db.Drive.job_id == job.id).order_by(db.Drive.created_at.desc())]
+        return [drive_json(d, s) for d in s.query(db.Drive).filter(db.Drive.org_id == job.org_id).order_by(db.Drive.created_at.desc())
+                if job.id in drive_job_ids(d)]
 
 
 def _drive_fields(d: db.Drive, body: dict):
@@ -762,21 +779,50 @@ def _drive_fields(d: db.Drive, body: dict):
         d.status = body["status"]
     if "settings" in body:
         st = body["settings"] or {}
-        d.settings = {"require_photo": st.get("require_photo", True) is not False, "show_scores": bool(st.get("show_scores")),
+        d.settings = {**(d.settings or {}), "require_photo": st.get("require_photo", True) is not False, "show_scores": bool(st.get("show_scores")),
                       "placement_officer": str(st.get("placement_officer") or "")[:200], "officer_email": str(st.get("officer_email") or "")[:320]}
+
+
+def _set_drive_jobs(s, ctx, d: db.Drive, keys) -> None:
+    """The roles a drive covers (job ids or URL tokens). HR must be able to manage every one of them."""
+    jobs = []
+    for k in keys or []:
+        job, _ = get_job(s, ctx, str(k), "manage")
+        if job.status == "closed":
+            raise HTTPException(400, f"{job.title} is closed. Reopen it to add it to a drive.")
+        if job.id not in [j.id for j in jobs]:
+            jobs.append(job)
+    if not jobs:
+        raise HTTPException(400, "Pick at least one role for the drive.")
+    if len(jobs) > 20:
+        raise HTTPException(400, "A drive can cover up to 20 roles.")
+    d.job_id = jobs[0].id
+    d.settings = {**(d.settings or {}), "job_ids": [j.id for j in jobs[1:]]}
 
 
 @router.post("/api/jobs/{job_id}/drives")
 async def create_drive(job_id: str, req: Request):
     body = await req.json()
+    return _create_drive(req, body, [job_id, *(body.get("job_ids") or [])])
+
+
+@router.post("/api/drives")
+async def create_drive_multi(req: Request):
+    """One drive for a campus, covering one or more roles."""
+    body = await req.json()
+    return _create_drive(req, body, body.get("job_ids") or [])
+
+
+def _create_drive(req: Request, body: dict, keys: list) -> dict:
     with db.session() as s:
         ctx = ctx_of(req, s)
-        job, _ = get_job(s, ctx, job_id, "manage")
-        d = db.Drive(org_id=ctx.org_id, job_id=job.id, college="x", code=secrets.token_urlsafe(8).replace("-", "x").replace("_", "y"),
+        auth.require(ctx, auth.MANAGE_JOBS, "create campus drives")
+        d = db.Drive(org_id=ctx.org_id, job_id="", college="x", code=secrets.token_urlsafe(8).replace("-", "x").replace("_", "y"),
                      share_code=secrets.token_urlsafe(12), created_by=ctx.user_id, settings={"require_photo": True})
+        _set_drive_jobs(s, ctx, d, keys)
         _drive_fields(d, {"settings": {}, **body})
         s.add(d)
-        log_activity(s, ctx, "drive_created", d.college, job_id=job.id)
+        log_activity(s, ctx, "drive_created", f"{d.college} ({len(drive_job_ids(d))} role{'s' if len(drive_job_ids(d)) > 1 else ''})", job_id=d.job_id)
         s.flush()
         return drive_json(d, s)
 
@@ -789,7 +835,17 @@ async def update_drive(did: str, req: Request):
         d = s.get(db.Drive, did)
         if not d or d.org_id != ctx.org_id:
             raise HTTPException(404, "Drive not found")
-        get_job(s, ctx, d.job_id, "manage")
+        for jid in drive_job_ids(d):
+            if s.get(db.Job, jid):
+                get_job(s, ctx, jid, "manage")
+        if "job_ids" in body:
+            keep = {a for (a,) in s.query(db.Application.job_id).filter(db.Application.drive_id == d.id).distinct()}
+            new_keys = list(body.get("job_ids") or [])
+            _set_drive_jobs(s, ctx, d, new_keys)
+            dropped = keep - set(drive_job_ids(d))
+            if dropped:
+                names = ", ".join(j.title for j in s.query(db.Job).filter(db.Job.id.in_(dropped)))
+                raise HTTPException(400, f"Students already registered for {names}. Close the drive instead of removing that role.")
         _drive_fields(d, body)
         return drive_json(d, s)
 
@@ -801,7 +857,9 @@ def delete_drive(did: str, req: Request):
         d = s.get(db.Drive, did)
         if not d or d.org_id != ctx.org_id:
             raise HTTPException(404, "Drive not found")
-        get_job(s, ctx, d.job_id, "manage")
+        for jid in drive_job_ids(d):
+            if s.get(db.Job, jid):
+                get_job(s, ctx, jid, "manage")
         if s.query(db.Application).filter(db.Application.drive_id == d.id).count():
             raise HTTPException(400, "Students have registered through this drive. Close it instead of deleting it.")
         s.delete(d)

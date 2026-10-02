@@ -218,23 +218,37 @@ function RecordingInput({ value, onChange }: { value: Blob | null; onChange: (b:
 }
 
 // ---------------------------------------------------------------------------------------------- campus drive registration
-interface DriveInfo { org: Brand; college: string; job: { title: string; facts: string[]; summary: string }; opens_at: number | null; closes_at: number | null; registration_open: boolean; test_open: boolean; require_photo: boolean; questions: { id: string; question: string; kind: string; required: boolean }[] }
+type DQ = { id: string; question: string; kind: string; required: boolean }
+interface DriveRole { key: string; title: string; facts: string[]; summary: string; questions: DQ[] }
+interface DriveInfo { org: Brand; college: string; job: { title: string; facts: string[]; summary: string }; roles?: DriveRole[]; opens_at: number | null; closes_at: number | null; registration_open: boolean; test_open: boolean; require_photo: boolean; questions: DQ[] }
 export function DrivePage({ code }: { code: string }) {
   const { data, error } = useLoad<DriveInfo>(`/api/drive/${code}`)
   const [f, setF] = useState({ name: '', email: '', phone: '', degree: '', branch: '', graduation_year: '', cgpa: '' })
-  const [answers, setAnswers] = useState<Record<string, string>>({}), [consent, setConsent] = useState(false), [resume, setResume] = useState<File | null>(null)
+  const [answers, setAnswers] = useState<Record<string, Record<string, string>>>({}), [picked, setPicked] = useState<string[]>([]), [consent, setConsent] = useState(false), [resume, setResume] = useState<File | null>(null)
   const [photo, setPhoto] = useState<Blob | null>(null), [camOn, setCamOn] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState('')
-  const [done, setDone] = useState<{ next_link: string | null; status_link: string } | null>(null)
+  const [done, setDone] = useState<{ next_link: string | null; status_link: string; roles?: { role: string; next_link: string | null; status_link: string }[]; already?: string[] } | null>(null)
   const cam = useCamera(camOn)
-  useEffect(() => { if (data) document.title = `${data.job.title} · ${data.college}` }, [data])
+  useEffect(() => { if (data) document.title = `${data.college} campus drive · ${data.org.name}` }, [data])
+  useEffect(() => { if (data?.roles?.length === 1) setPicked([data.roles[0]!.key]) }, [data])
   if (error || !data) return <PageState error={error} loading={!data} />
+  const roles: DriveRole[] = data.roles?.length ? data.roles : [{ key: '', title: data.job.title, facts: data.job.facts, summary: data.job.summary, questions: data.questions }]
+  const multi = roles.length > 1
+  const chosen = roles.filter(r => !multi || picked.includes(r.key))
+  const setAns = (role: string, q: string, v: string) => setAnswers(a => ({ ...a, [role]: { ...(a[role] || {}), [q]: v } }))
+  // The same question asked by several chosen roles is shown once and answered for all of them.
+  const merged: { q: DQ; required: boolean; targets: [string, string][] }[] = []
+  for (const r of chosen) for (const q of r.questions) {
+    const hit = merged.find(m => m.q.question.trim().toLowerCase() === q.question.trim().toLowerCase() && m.q.kind === q.kind)
+    if (hit) { hit.targets.push([r.key, q.id]); hit.required ||= q.required } else merged.push({ q, required: q.required, targets: [[r.key, q.id]] })
+  }
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(v => ({ ...v, [k]: e.target.value }))
   async function snap() { if (cam.stream) { setPhoto(await grab(cam.stream, 640, 0.85)); setCamOn(false) } }
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr('')
+    if (multi && !picked.length) { setErr('Choose at least one role to apply for.'); requestAnimationFrame(() => document.getElementById('dv-roles')?.scrollIntoView({ behavior: 'smooth', block: 'center' })); return }
     if (data!.require_photo && !photo) { setErr('Please take a live photo with your camera.'); return }
     setBusy(true)
-    const fd = new FormData(); fd.append('data', JSON.stringify({ ...f, answers, consent }))
+    const fd = new FormData(); fd.append('data', JSON.stringify({ ...f, consent, roles: chosen.map(r => r.key).filter(Boolean), answers: multi ? answers : (answers[roles[0]!.key] || {}) }))
     if (resume) fd.append('resume', resume); if (photo) fd.append('photo', photo, 'photo.jpg')
     try { setDone(await send(`/api/drive/${code}/register`, undefined, fd)); window.scrollTo(0, 0) }
     catch (e: any) { setErr(e.message); requestAnimationFrame(() => document.getElementById('dv-err')?.scrollIntoView({ behavior: 'smooth', block: 'center' })) }
@@ -243,16 +257,29 @@ export function DrivePage({ code }: { code: string }) {
   if (done) return (
     <Frame org={data.org}><Card className="p-8 text-center"><CircleCheck className="mx-auto size-10 text-emerald-500" /><h1 className="mt-3 text-xl font-semibold">You're registered</h1>
       <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">We also emailed you the links below.</p>
-      <div className="mt-4 flex flex-wrap justify-center gap-2">{done.next_link && <Button variant="primary" href={done.next_link}>{data.test_open ? 'Start the test' : 'Your test page'}</Button>}<Button href={done.status_link}>Your application status</Button></div>
+      {(done.roles?.length ?? 0) > 1 ? <ul className="mx-auto mt-4 max-w-md space-y-2 text-left">{done.roles!.map(r => (
+        <li key={r.role} className="flex flex-wrap items-center justify-between gap-2 rounded-xl p-3 ring-1 ring-slate-200 dark:ring-ink-700"><span className="font-medium">{r.role}</span>
+          <span className="flex gap-2">{r.next_link && <Button size="sm" variant="primary" href={r.next_link}>{data.test_open ? 'Start the test' : 'Test page'}</Button>}<Button size="sm" href={r.status_link}>Status</Button></span></li>))}</ul> : null}
+      {!!done.already?.length && <p className="mt-3 text-sm text-slate-500">You had already registered for: {done.already.join(', ')}.</p>}
+      <div className="mt-4 flex flex-wrap justify-center gap-2">{(done.roles?.length ?? 0) <= 1 && done.next_link && <Button variant="primary" href={done.next_link}>{data.test_open ? 'Start the test' : 'Your test page'}</Button>}<Button href={done.status_link}>Your application status</Button></div>
       {!data.test_open && data.opens_at && <p className="mt-3 text-sm text-slate-500">The test opens {when(data.opens_at)}.</p>}</Card></Frame>)
   return (
     <Frame org={data.org}>
-      <p className="text-sm text-slate-500">{data.college} campus drive</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">{data.job.title}</h1>
-      <div className="mt-2 flex flex-wrap gap-1.5">{data.job.facts.map(x => <Badge key={x}>{x}</Badge>)}</div>
-      {data.job.summary && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{data.job.summary}</p>}
+      <p className="text-sm text-slate-500">{data.org.name} · campus drive</p>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight">{multi ? data.college : roles[0]!.title}</h1>
+      {multi ? <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{roles.length} roles open for students of {data.college}. Pick the ones you want; you'll get a separate test link for each.</p>
+        : <><p className="mt-0.5 text-sm text-slate-500">{data.college}</p><div className="mt-2 flex flex-wrap gap-1.5">{roles[0]!.facts.map(x => <Badge key={x}>{x}</Badge>)}</div>
+          {roles[0]!.summary && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{roles[0]!.summary}</p>}</>}
       {(data.opens_at || data.closes_at) && <p className="mt-2 text-sm">Test window: {data.opens_at ? when(data.opens_at) : 'now'} to {data.closes_at ? when(data.closes_at) : 'open'}</p>}
       {!data.registration_open ? <Alert className="mt-5" tone="warning">Registration for this drive is closed.</Alert> : (
         <Card className="mt-5 p-5 sm:p-6"><form onSubmit={submit} className="space-y-4">
+          {multi && <fieldset id="dv-roles"><legend className="mb-2 text-[13px] font-semibold">Roles you're applying for *</legend>
+            <div className="grid gap-2 sm:grid-cols-2">{roles.map(r => { const on = picked.includes(r.key); return (
+              <label key={r.key} className={cn('flex cursor-pointer gap-3 rounded-xl p-3 ring-1 transition-colors', on ? 'bg-brand-50 ring-2 ring-brand-500 dark:bg-brand-500/15' : 'ring-slate-200 hover:bg-slate-50 dark:ring-ink-700 dark:hover:bg-ink-850')}>
+                <input type="checkbox" className="mt-1" checked={on} onChange={() => setPicked(p => on ? p.filter(x => x !== r.key) : [...p, r.key])} />
+                <span className="min-w-0"><span className="block font-semibold">{r.title}</span><span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{r.facts.slice(0, 3).join(' · ')}</span>
+                  {r.summary && <span className="mt-1 line-clamp-2 block text-xs text-slate-600 dark:text-slate-300">{r.summary}</span>}</span>
+              </label>) })}</div></fieldset>}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name *" htmlFor="dv-n"><Input id="dv-n" required autoComplete="name" value={f.name} onChange={set('name')} /></Field>
             <Field label="Email *" htmlFor="dv-e"><Input id="dv-e" type="email" required autoComplete="email" value={f.email} onChange={set('email')} /></Field>
@@ -263,10 +290,11 @@ export function DrivePage({ code }: { code: string }) {
             <Field label="CGPA / %" htmlFor="dv-c"><Input id="dv-c" value={f.cgpa} onChange={set('cgpa')} /></Field>
             <Field label="Resume (optional)" htmlFor="dv-r"><input id="dv-r" type="file" accept=".pdf,.docx,.txt" className="block w-full text-sm" onChange={e => setResume(e.target.files?.[0] || null)} /></Field>
           </div>
-          {data.questions.map(q => (
-            <Field key={q.id} label={<>{q.question}{q.required && ' *'}</>} htmlFor={`dq-${q.id}`}>
-              {q.kind === 'yes_no' ? <Select id={`dq-${q.id}`} required={q.required} value={answers[q.id] || ''} onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })}><option value="">Select…</option><option value="yes">Yes</option><option value="no">No</option></Select>
-                : <Input id={`dq-${q.id}`} type={q.kind === 'number' ? 'number' : 'text'} required={q.required} value={answers[q.id] || ''} onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />}</Field>))}
+          {merged.length > 0 && <div className="space-y-3">{multi && <div className="border-t border-slate-100 pt-3 text-sm font-semibold dark:border-ink-800">A few questions{chosen.length > 1 ? ` for ${chosen.map(r => r.title).join(' and ')}` : ''}</div>}
+          {merged.map(m => { const [rk, qid] = m.targets[0]!, val = answers[rk]?.[qid] || '', setV = (v: string) => m.targets.forEach(([r, q]) => setAns(r, q, v)), q = m.q, id = `dq-${rk}-${qid}`; return (
+            <Field key={id} label={<>{q.question}{m.required && ' *'}</>} htmlFor={id}>
+              {q.kind === 'yes_no' ? <Select id={id} required={m.required} value={val} onChange={e => setV(e.target.value)}><option value="">Select…</option><option value="yes">Yes</option><option value="no">No</option></Select>
+                : <Input id={id} type={q.kind === 'number' ? 'number' : 'text'} required={m.required} value={val} onChange={e => setV(e.target.value)} />}</Field>) })}</div>}
           {data.require_photo && <Field label="Live photo *" hint="Used to confirm it's you during the test. Look at the camera in good light.">
             {photo ? <div className="flex items-center gap-3"><img src={URL.createObjectURL(photo)} alt="Your photo" className="h-24 rounded-lg" /><Button type="button" size="sm" icon={<RotateCcw />} onClick={() => { setPhoto(null); setCamOn(true) }}>Retake</Button></div>
               : camOn ? <div className="space-y-2">{cam.error ? <Alert tone="danger">{cam.error}</Alert> : <Preview stream={cam.stream} className="aspect-[4/3] w-full max-w-xs" />}<Button type="button" icon={<Camera />} disabled={!cam.stream} onClick={snap}>Take photo</Button></div>
@@ -274,14 +302,14 @@ export function DrivePage({ code }: { code: string }) {
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e => setConsent(e.target.checked)} required />
             <span>I agree that {data.org.name} may store and process my details, photo and test results to consider me for this role. I can ask for them to be deleted at any time.</span></label>
           <div id="dv-err" aria-live="assertive">{err && <Alert tone="danger" title="Not registered yet">{err}</Alert>}</div>
-          <Button type="submit" variant="primary" size="lg" loading={busy}>Register</Button>
+          <Button type="submit" variant="primary" size="lg" loading={busy}>{multi && picked.length > 1 ? `Register for ${picked.length} roles` : 'Register'}</Button>
         </form></Card>)}
     </Frame>
   )
 }
 
 // ---------------------------------------------------------------------------------------------- placement officer results
-interface Results { org: Brand; college: string; job: string; show_scores: boolean; summary: { registered: number; tested: number; progressed: number }; students: { name: string; stage: string; round: string; round_status: string; test_score: number | null; test_taken: boolean }[] }
+interface Results { org: Brand; college: string; job: string; roles?: string[]; show_scores: boolean; summary: { registered: number; tested: number; progressed: number }; students: { name: string; role?: string; stage: string; round: string; round_status: string; test_score: number | null; test_taken: boolean }[] }
 export function ResultsPage({ code }: { code: string }) {
   const { data, error } = useLoad<Results>(`/api/results/${code}`)
   const [q, setQ] = useState('')
@@ -294,8 +322,8 @@ export function ResultsPage({ code }: { code: string }) {
       <div className="mt-4 grid grid-cols-3 gap-3">{([['Registered', data.summary.registered], ['Took the test', data.summary.tested], ['Moved ahead', data.summary.progressed]] as const).map(([k, v]) =>
         <Card key={k} className="p-4"><div className="text-sm text-slate-500">{k}</div><div className="tabular text-2xl font-semibold">{v}</div></Card>)}</div>
       <Input type="search" aria-label="Search students" className="mt-4 max-w-xs" placeholder="Search students" value={q} onChange={e => setQ(e.target.value)} />
-      <Card className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-ink-800"><tr><th className="px-4 py-2.5">Student</th><th>Status</th><th>Current step</th>{data.show_scores && <th>Test score</th>}</tr></thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{rows.map((s, i) => <tr key={i}><td className="px-4 py-2.5 font-medium">{s.name}</td><td>{s.stage}</td><td className="text-slate-500">{s.round}{s.round_status ? ` · ${s.round_status}` : ''}</td>
+      <Card className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-ink-800"><tr><th className="px-4 py-2.5">Student</th>{(data.roles?.length ?? 0) > 1 && <th>Role</th>}<th>Status</th><th>Current step</th>{data.show_scores && <th>Test score</th>}</tr></thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{rows.map((s, i) => <tr key={i}><td className="px-4 py-2.5 font-medium">{s.name}</td>{(data.roles?.length ?? 0) > 1 && <td>{s.role}</td>}<td>{s.stage}</td><td className="text-slate-500">{s.round}{s.round_status ? ` · ${s.round_status}` : ''}</td>
           {data.show_scores && <td className="tabular">{s.test_score != null ? `${s.test_score}%` : s.test_taken ? '-' : 'Not taken'}</td>}</tr>)}</tbody></table></Card>
       <p className="mt-3 text-xs text-slate-500">This page updates as students move through the process. Share it only with your placement team.</p>
     </Frame>

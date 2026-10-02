@@ -243,6 +243,28 @@ pdf_ = hr.get(f"/api/jobs/{job['id']}/match/{mc['id']}?format=pdf")
 check("the match report PDF download fails", pdf_.status_code != 200 or not pdf_.content.startswith(b"%PDF"), str(pdf_.status_code))
 check("another company can read a match report", other.get(f"/api/jobs/{job['id']}/match/{mc['id']}").status_code != 404)
 
+# campus drive covering several roles: one link, students pick roles, one application per role
+j2 = ok(hr.post("/api/jobs", json={"fields": {**F, "title": "Sales Trainee"}, "status": "open"}))
+j3 = ok(hr.post("/api/jobs", json={"fields": {**F, "title": "Ops Trainee"}, "status": "open"}))
+dr = ok(hr.post("/api/drives", json={"college": "COEP Pune", "job_ids": [j2["id"], j3["id"]], "settings": {"require_photo": False}}))
+check("a drive can't cover several roles", len(dr.get("jobs") or []) != 2, str(dr.get("jobs")))
+pg_ = ok(pub.get(f"/api/drive/{dr['code']}"))
+check("the drive page doesn't list every role", [r["title"] for r in pg_.get("roles", [])] != ["Sales Trainee", "Ops Trainee"], str(pg_.get("roles")))
+stu = {"name": "Kiran Patil", "email": "kiran.multi@coep.test", "phone": "9822000009", "degree": "B.E.", "graduation_year": "2026", "consent": True,
+       "location": "Pune", "expected_salary": 300000, "notice_days": 0}
+r_ = pub.post(f"/api/drive/{dr['code']}/register", data={"data": json.dumps(stu)})
+check("a multi-role drive accepts a registration with no role picked", r_.status_code != 400, r_.text[:150])
+reg_ = pub.post(f"/api/drive/{dr['code']}/register", data={"data": json.dumps({**stu, "roles": [r["key"] for r in pg_["roles"]]})})
+check("registering for two roles doesn't create two applications", reg_.status_code != 200 or len(reg_.json().get("roles") or []) != 2, reg_.text[:200])
+again = pub.post(f"/api/drive/{dr['code']}/register", data={"data": json.dumps({**stu, "roles": [r["key"] for r in pg_["roles"]]})})
+check("registering again for the same roles is allowed", again.status_code != 409, str(again.status_code))
+res_ = ok(pub.get(f"/api/results/{dr['share_code']}"))
+check("drive results count a student twice", res_["summary"]["registered"] != 1 or res_["summary"].get("applications") != 2, str(res_["summary"]))
+lst = ok(hr.get("/api/drives"))
+check("the drives list doesn't show the role count", next(x for x in lst if x["id"] == dr["id"]).get("registered") != 1)
+ok(hr.delete(f"/api/jobs/{j2['id']}"))
+check("deleting one role deletes the whole multi-role drive", not any(x["id"] == dr["id"] for x in ok(hr.get("/api/drives"))))
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

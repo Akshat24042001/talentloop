@@ -744,19 +744,27 @@ async def interviewer_feedback(token: str, req: Request, data: str = Form(...), 
 def drive_page(code: str, req: Request):
     _limit(req, "drive", 300)
     with db.session() as s:
+        from .api_flows import drive_jobs
         d = s.query(db.Drive).filter_by(code=code).first()
         if not d:
             raise HTTPException(404, "This drive link is not valid.")
-        job, org = s.get(db.Job, d.job_id), s.get(db.Org, d.org_id)
-        if not job or not org or org.disabled:
+        org = s.get(db.Org, d.org_id)
+        jobs = [j for j in drive_jobs(s, d) if j.status != "closed"]
+        if not org or org.disabled or not drive_jobs(s, d):
             raise HTTPException(404, "This drive link is not valid.")
-        jd = jd_schema.compose(job.fields or {}, org.name, org_settings(org), public=True)
+        st = org_settings(org)
+        roles = []
+        for j in jobs:
+            jd = jd_schema.compose(j.fields or {}, org.name, st, public=True)
+            roles.append({"key": refs.job_ref(j), "title": j.title, "facts": jd["facts"], "summary": (j.fields or {}).get("summary", ""),
+                          "questions": [{k: q.get(k) for k in ("id", "question", "kind", "required")} for q in (j.fields or {}).get("screening_questions") or []]})
         now = time.time()
-        return {"org": brand(org), "college": d.college, "job": {"title": job.title, "facts": jd["facts"], "summary": (job.fields or {}).get("summary", "")},
-                "opens_at": d.opens_at, "closes_at": d.closes_at, "registration_open": d.status == "open" and job.status != "closed" and (not d.closes_at or now <= d.closes_at),
+        first = roles[0] if roles else {"title": drive_jobs(s, d)[0].title, "facts": [], "summary": "", "questions": []}
+        return {"org": brand(org), "college": d.college, "roles": roles,
+                "job": {k: first[k] for k in ("title", "facts", "summary")}, "questions": first["questions"],   # single-role pages and old clients
+                "opens_at": d.opens_at, "closes_at": d.closes_at, "registration_open": d.status == "open" and bool(roles) and (not d.closes_at or now <= d.closes_at),
                 "test_open": d.status == "open" and (not d.opens_at or now >= d.opens_at) and (not d.closes_at or now <= d.closes_at),
-                "require_photo": (d.settings or {}).get("require_photo", True),
-                "questions": [{k: q.get(k) for k in ("id", "question", "kind", "required")} for q in (job.fields or {}).get("screening_questions") or []]}
+                "require_photo": (d.settings or {}).get("require_photo", True)}
 
 
 @router.post("/api/drive/{code}/register")
@@ -767,16 +775,22 @@ async def drive_register(code: str, req: Request, data: str = Form(...), resume:
         d = json.loads(data or "{}")
     except json.JSONDecodeError:
         raise HTTPException(400, "Bad form data")
+    from .api_flows import drive_jobs
     with db.session() as s:
         drive = s.query(db.Drive).filter_by(code=code).first()
         if not drive or drive.status != "open" or (drive.closes_at and time.time() > drive.closes_at):
             raise HTTPException(404, "Registration for this drive is closed.")
-        job = s.get(db.Job, drive.job_id)
-        if not job or job.status == "closed":
+        open_jobs = {refs.job_ref(j): j for j in drive_jobs(s, drive) if j.status != "closed"}
+        if not open_jobs:
             raise HTTPException(404, "Registration for this drive is closed.")
+        picked = [str(k) for k in (d.get("roles") or [])] or (list(open_jobs)[:1] if len(open_jobs) == 1 else [])
+        if not picked:
+            raise HTTPException(400, "Choose at least one role to apply for.")
+        if any(k not in open_jobs for k in picked):
+            raise HTTPException(400, "One of the roles you picked is no longer open. Refresh the page and choose again.")
         need_photo = (drive.settings or {}).get("require_photo", True)
         drive_id, org_id, college = drive.id, drive.org_id, drive.college
-        questions = (job.fields or {}).get("screening_questions") or []
+        targets = [(k, open_jobs[k].id, open_jobs[k].title, (open_jobs[k].fields or {}).get("screening_questions") or []) for k in dict.fromkeys(picked)]
     profile = clean_profile({**d, "college": college})
     for k, label in (("name", "Name"), ("email", "Email"), ("phone", "Phone"), ("degree", "Degree"), ("graduation_year", "Year of passing")):
         if not profile.get(k):
@@ -795,10 +809,15 @@ async def drive_register(code: str, req: Request, data: str = Form(...), resume:
         raise HTTPException(400, "Please take a live photo with your camera.")
     if pic and (len(pic) > MAX_PHOTO_BYTES or not pic.startswith(b"\xff\xd8")):
         raise HTTPException(400, "The photo must be a JPEG under 3 MB.")
-    answers = {str(k): v for k, v in (d.get("answers") or {}).items()}
-    missing, failed = evaluate_knockouts(questions, answers)
-    if missing:
-        raise HTTPException(400, "Please answer: " + "; ".join(missing))
+    raw_answers = d.get("answers") or {}
+    per_role = {}
+    for key, _jid, title, questions in targets:
+        a_ = raw_answers.get(key) if isinstance(raw_answers.get(key), dict) else raw_answers   # per role, or one set (single role)
+        answers = {str(k): v for k, v in (a_ or {}).items() if not isinstance(v, dict)}
+        missing, failed = evaluate_knockouts(questions, answers)
+        if missing:
+            raise HTTPException(400, (f"For {title}, please answer: " if len(targets) > 1 else "Please answer: ") + "; ".join(missing))
+        per_role[key] = (answers, failed)
     full = (text + "\n" + resumes.profile_text(profile) + f"\n{profile.get('degree', '')} {d.get('branch', '')} {college}").strip()
     with db.session() as s:
         cand, created = upsert_candidate(s, org_id, text=full, parsed=resumes.parse(full), profile={**profile, "branch": str(d.get("branch") or "")[:120],
@@ -808,19 +827,24 @@ async def drive_register(code: str, req: Request, data: str = Form(...), resume:
             key = f"{org_id}/candidates/{cand.id}/photo.jpg"
             store.put_file(key, pic, "image/jpeg")
             cand.photo_file = key
-        if s.query(db.Application).filter_by(job_id=job.id, candidate_id=cand.id).first():
-            raise HTTPException(409, "You have already registered for this drive.")
-        app = db.Application(org_id=org_id, job_id=job.id, candidate_id=cand.id, answers=answers, knockout_failed=failed, stage="applied",
-                             source="campus", drive_id=drive_id)
-        s.add(app)
-        s.flush()
-        flows.on_applied(s, app, s.get(db.Job, job.id), knockout_failed=failed)
-        s.query(db.Job).filter_by(id=job.id).update({db.Job.matched_at: None})
-        rr = flows.get_result(s, app, app.round_id) if app.round_id else None
-        nxt = flows.invite_link(s, rr) if rr and rr.status == "invited" and rr.data and rr.data.get("t") else None
-        status = flows.status_link(app)
+        fresh = [t_ for t_ in targets if not s.query(db.Application).filter_by(job_id=t_[1], candidate_id=cand.id).first()]
+        if not fresh:
+            raise HTTPException(409, "You have already registered for " + ("this drive." if len(targets) == 1 else "these roles."))
+        results = []
+        for key, jid, title, _q in fresh:
+            answers, failed = per_role[key]
+            app = db.Application(org_id=org_id, job_id=jid, candidate_id=cand.id, answers=answers, knockout_failed=failed, stage="applied",
+                                 source="campus", drive_id=drive_id)
+            s.add(app)
+            s.flush()
+            flows.on_applied(s, app, s.get(db.Job, jid), knockout_failed=failed)
+            s.query(db.Job).filter_by(id=jid).update({db.Job.matched_at: None})
+            rr = flows.get_result(s, app, app.round_id) if app.round_id else None
+            results.append({"role": title, "next_link": flows.invite_link(s, rr) if rr and rr.status == "invited" and rr.data and rr.data.get("t") else None,
+                            "status_link": flows.status_link(app)})
+        skipped = [t_[2] for t_ in targets if t_ not in fresh]
     worker.kick()
-    return {"ok": True, "next_link": nxt, "status_link": status}
+    return {"ok": True, "next_link": results[0]["next_link"], "status_link": results[0]["status_link"], "roles": results, "already": skipped}
 
 
 @router.get("/api/results/{share_code}")
@@ -830,21 +854,24 @@ def drive_results(share_code: str, req: Request):
         d = s.query(db.Drive).filter_by(share_code=share_code).first()
         if not d:
             raise HTTPException(404, "This results link is not valid.")
-        job, org = s.get(db.Job, d.job_id), s.get(db.Org, d.org_id)
-        if not job or not org:
+        from .api_flows import drive_jobs
+        org = s.get(db.Org, d.org_id)
+        jobs = {j.id: j for j in drive_jobs(s, d)}
+        if not jobs or not org:
             raise HTTPException(404, "This results link is not valid.")
         show = (d.settings or {}).get("show_scores")
-        flow = {r["id"]: r for r in flows.flow_of(job)}
+        flow = {r["id"]: r for j in jobs.values() for r in flows.flow_of(j)}
         rows = s.query(db.Application, db.Candidate).join(db.Candidate, db.Candidate.id == db.Application.candidate_id).filter(db.Application.drive_id == d.id).all()
         tests = {rr.application_id: rr for rr in s.query(db.RoundResult).filter(db.RoundResult.application_id.in_([a.id for a, _ in rows] or [""]),
                                                                                 db.RoundResult.round_type == "test")}
         out = []
         for a, c in rows:
             t = tests.get(a.id)
-            out.append({"name": c.name, "stage": CAND_STAGE.get(a.stage, a.stage), "round": (flow.get(a.round_id) or {}).get("name", ""),
+            out.append({"name": c.name, "role": jobs[a.job_id].title if a.job_id in jobs else "", "stage": CAND_STAGE.get(a.stage, a.stage), "round": (flow.get(a.round_id) or {}).get("name", ""),
                         "round_status": flows.STATUS_LABEL.get(a.round_status, a.round_status or ""), "test_score": t.score if (t and show) else None,
                         "test_taken": bool(t and t.status in ("submitted", "passed", "failed", "on_hold"))})
         out.sort(key=lambda x: (-(x["test_score"] or -1), x["name"]))
-        return {"org": brand(org), "college": d.college, "job": job.title, "students": out, "show_scores": bool(show),
-                "summary": {"registered": len(out), "tested": sum(1 for x in out if x["test_taken"]),
+        return {"org": brand(org), "college": d.college, "job": " · ".join(j.title for j in jobs.values()), "roles": [j.title for j in jobs.values()],
+                "students": out, "show_scores": bool(show),
+                "summary": {"registered": len({c.id for _, c in rows}), "applications": len(out), "tested": sum(1 for x in out if x["test_taken"]),
                             "progressed": sum(1 for x in out if x["stage"] in ("Being assessed", "Shortlisted", "Interviews", "Selected", "Hired") and x["test_taken"])}}
