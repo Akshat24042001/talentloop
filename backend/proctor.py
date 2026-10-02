@@ -32,13 +32,15 @@ LABELS = {
     "identity_mismatch": "Face did not match the registration photo", "person_changed": "A different face than at the start",
     "identity_check_unavailable": "Face match could not run", "answer_timing": "Answer timing",
     "answer_pattern": "Long silences before long, fluent answers (possible reading)", "second_voice": "Possible second voice in the room",
+    "quick_switch": "Looked away from the interview briefly (tab or app)", "looking_away": "Head turned away from the screen for a while",
+    "client_silent": "Interview page stopped reporting while the call went on (hidden, blocked or tampered)",
 }
 HIGH = {"integrity_warning", "disqualified", "multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",
         "screen_share_not_monitor", "camera_off", "devtools_suspected", "speaker_voice_while_muted", "virtual_camera",
-        "identity_mismatch", "person_changed"}
+        "identity_mismatch", "person_changed", "client_silent"}
 MEDIUM = {"tab_hidden", "window_blur", "fullscreen_exit", "copy", "cut", "shortcut", "multi_monitor", "print_screen",
           "face_missing_start", "ip_changed", "call_dropped", "reconnect_denied", "mute_on", "window_small",
-          "context_menu", "mic_off", "liveness_failed", "answer_pattern", "second_voice"}
+          "context_menu", "mic_off", "liveness_failed", "answer_pattern", "second_voice", "quick_switch", "looking_away"}
 PAIRS = {"tab_hidden": "tab_visible", "window_blur": "window_focus", "mute_on": "mute_off",
          "face_missing_start": "face_missing_end", "screen_share_stopped": "screen_share_started",
          "network_offline": "network_online"}

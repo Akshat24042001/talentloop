@@ -6,6 +6,7 @@ interviewer from drifting, skipping questions or running over time.
 """
 import asyncio
 import copy
+from collections import deque
 import json
 import logging
 import os
@@ -30,6 +31,21 @@ TURN_TIMEOUT = float(os.getenv("TURN_TIMEOUT_SEC", "8"))
 END_BUFFER_SEC = 40          # below this remaining time, wrap up
 MAX_SESSIONS = int(os.getenv("MAX_RECONNECTS", "3")) + 1
 QUESTION_TYPES = ("warmup", "hr_mandatory", "resume_probe", "jd_skill", "behavioral")
+DEEP_TYPES = ("resume_probe", "jd_skill", "behavioral")     # questions that deserve a real answer before moving on
+GENERIC_PROBE = {
+    "resume_probe": "Could you walk me through one specific example of that, what you did yourself and how it turned out?",
+    "jd_skill": "Can you make that concrete for me, a real situation where you used it and what you did?",
+    "behavioral": "Could you take me through one real situation, what happened, what you did, and the result?",
+}
+# Recent live turns (timestamp, ok, ms) so the platform admin sees when the interviewer's model is failing.
+TURN_STATS: deque = deque(maxlen=500)
+
+
+def turn_health(window_sec: int = 3600) -> dict:
+    now = time.time()
+    rows = [r for r in TURN_STATS if now - r[0] <= window_sec]
+    failed = sum(1 for r in rows if not r[1])
+    return {"turns": len(rows), "failed": failed, "avg_ms": round(sum(r[2] for r in rows) / len(rows)) if rows else 0}
 RECOMMENDATIONS = ("strong_yes", "yes", "maybe", "no")
 
 
@@ -88,6 +104,17 @@ def normalize_plan(plan: dict, duration_min: int | None = None) -> dict:
         q["time_budget_sec"] = max(45, min(420, _int(q.get("time_budget_sec"), 150)))
         if q.get("competency_id") not in comp_ids:  # otherwise the score silently drops out of the overall
             q["competency_id"] = comps[0]["id"]
+    # Fit the per-question budgets into the interview length. Budgets steer follow-ups: an over-full plan would
+    # spend its time on early follow-ups and then have to skip later questions in a rush.
+    avail = plan["duration_min"] * 60 - END_BUFFER_SEC - 30
+    total = sum(q["time_budget_sec"] for q in qs)
+    if total > avail:
+        flex = [q for q in qs if q["type"] != "hr_mandatory"]
+        fixed = total - sum(q["time_budget_sec"] for q in flex)
+        room = max(avail - fixed, 60 * len(flex))
+        k = room / max(1, sum(q["time_budget_sec"] for q in flex))
+        for q in flex:
+            q["time_budget_sec"] = max(45 if q["type"] == "warmup" else 60, int(q["time_budget_sec"] * k))
     plan["questions"] = qs
     plan["keyterms"] = [str(k)[:50] for k in (plan.get("keyterms") or []) if str(k).strip()][:50]
     plan.setdefault("company_facts", [])
@@ -381,8 +408,14 @@ VIOLATION_WHAT = {
     "tab_hidden": "left the interview screen",
     "window_blur": "switched to another window",
     "multi_monitor": "connected a second screen",
-    "fullscreen_exit": "left full screen",
+    "fullscreen_exit": "left full screen and didn't come back",
+    "quick_switches": "kept switching away from the interview screen",
+    "left_camera": "stepped out of the camera view",
+    "multiple_people": "had someone else in view of the camera",
 }
+STAY = {"left_camera": "Please stay in view of the camera until we finish.",
+        "multiple_people": "Please make sure you're alone for the rest of the interview."}
+_ORD = {2: "second", 3: "third", 4: "fourth", 5: "fifth"}
 
 
 def integrity_message(plan: dict, kind: str, n: int, max_warnings: int, question: str = "") -> tuple[str, bool]:
@@ -397,10 +430,10 @@ def integrity_message(plan: dict, kind: str, n: int, max_warnings: int, question
         return (f"{name}, you {what}{after}. I'm sorry, but I have to stop the interview here. "
                 f"The hiring team will be informed, and {END_PHRASE}."), True
     if n == max_warnings:
-        lead = f"{name}, you {what}." if n == 1 else f"{name}, you {what}. That's the second time."
+        lead = f"{name}, you {what}." if n == 1 else f"{name}, you {what}. That's the {_ORD.get(n, f'{n}th')} warning."
         return (f"{lead} This is your final warning. If it happens once more, "
-                f"I'll have to end the interview. Please stay on this screen.{again}"), False
-    return (f"{name}, I noticed you {what} just now. Please stay on this interview screen until we finish. "
+                f"I'll have to end the interview. {STAY.get(kind, 'Please stay on this screen.')}{again}"), False
+    return (f"{name}, I noticed you {what} just now. {STAY.get(kind, 'Please stay on this interview screen until we finish.')} "
             f"This has been noted for the hiring team.{again}"), False
 
 
@@ -671,12 +704,32 @@ async def judge_turn(prep: dict, plan: dict) -> tuple[dict, int, bool]:
             raise ValueError("judge returned non-object")
     except Exception as e:  # never let the interview stall on an LLM failure
         failed = True
-        if _looks_cut_off(prep["said"]) and "invite_continue" in prep["allowed"]:
-            d = {"action": "invite_continue"}
-        else:
-            d = {"action": prep["progress"], "ack": "Thank you."}
+        d = _fallback(prep, plan)
         log.warning("judge failed (%s); falling back to %s", e, d["action"])
-    return d, int((time.time() - t0) * 1000), failed
+    ms = int((time.time() - t0) * 1000)
+    TURN_STATS.append((time.time(), not failed, ms))
+    return d, ms, failed
+
+
+def _fallback(prep: dict, plan: dict) -> dict:
+    """What to do when the live model fails or times out. Moving on is the LAST resort: a failing model must
+    not turn into an interviewer that races through the questions."""
+    st, said, allowed = prep["st"], prep["said"], prep["allowed"]
+    q = plan["questions"][st["q_idx"]]
+    words = len(said.split())
+    if re.search(r"\b(repeat|say that again|didn'?t (get|catch|understand)|pardon|sorry\?)", said, re.I) and "clarify_repeat" in allowed:
+        return {"action": "clarify_repeat", "rephrase": "Sure. " + q["ask"]}
+    if _looks_cut_off(said) and "invite_continue" in allowed:
+        return {"action": "invite_continue", "reply": "Please go on, I'm listening."}
+    if q["type"] in DEEP_TYPES and words < 40 and "follow_up" in allowed and not _gives_up(said):
+        return {"action": "follow_up", "followup": GENERIC_PROBE[q["type"]], "note": "Short answer; probed (live AI unavailable)."}
+    if words < 6 and "invite_continue" in allowed and st["stall"] < 1 and not _gives_up(said):
+        return {"action": "invite_continue", "reply": "Take your time. Could you tell me a bit more?"}
+    return {"action": prep["progress"], "ack": "Thank you, that's helpful."}
+
+
+def _gives_up(said: str) -> bool:
+    return bool(re.search(r"\b(don'?t know|not sure|no idea|skip|pass|haven'?t (done|worked)|no experience|move on|next question)\b", said, re.I))
 
 
 def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) -> str:
@@ -704,6 +757,16 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
     action = d.get("action") if d.get("action") in allowed else progress
     if action == "follow_up" and not _clean(d.get("followup")):
         action = progress
+    # Don't rush: a short answer to a substantive question, given in a fraction of its time, gets one probe
+    # (or a nudge) before the interview moves on. This also covers a candidate cut off by end-of-speech detection.
+    q_time = active - st.get("q_started_active", active)
+    words = len(said.split())
+    if action == "next_question" and q["type"] in DEEP_TYPES and not _gives_up(said) and q_time < q["time_budget_sec"] * 0.4 \
+            and (words < 20 or (failed and words < 40)):
+        if "follow_up" in allowed:
+            action, d = "follow_up", {**d, "followup": _clean(d.get("followup")) or GENERIC_PROBE[q["type"]]}
+        elif "invite_continue" in allowed and st["stall"] < 1 and words < 12:
+            action, d = "invite_continue", {**d, "reply": "Take your time. Is there anything you'd like to add?"}
     ack = _clean(d.get("ack")) or "Thank you."
 
     if action == "next_question":
@@ -728,9 +791,10 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
         say = _clean(d.get("reply")) or ("Let's stay with the interview. " + q["ask"])
         st["stall"] += 1
     elif action == "next_question":
+        skipped_now = nxt > st["q_idx"] + 1
         st["q_idx"] = nxt
         nq = qs[nxt]
-        prefix = "Final question. " if nxt == len(qs) - 1 else ""
+        prefix = ("In the interest of time, let's move on. " if skipped_now else "") + ("Final question. " if nxt == len(qs) - 1 else "")
         say = f"{ack} {prefix}{nq['ask']}"
         st["fu_used"] = 0
         st["stall"] = 0

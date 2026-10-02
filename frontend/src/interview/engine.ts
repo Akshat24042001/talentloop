@@ -5,7 +5,10 @@ import { post } from '../lib/api'
 import { AnswerTiming, FaceMatch, HeadTurn, VoiceWatch, virtualCameraLabel, yaw } from './signals'
 
 const CHUNK_MS = 5000
-const CONFIRM_MS: Record<string, number> = { tab_hidden: 1000, window_blur: 2000 }
+// How long the candidate must be away before it counts. Short enough that a glance at another tab or app counts;
+// shorter blips are counted too, and three within 90 seconds are a violation of their own.
+const CONFIRM_MS: Record<string, number> = { tab_hidden: 300, window_blur: 700 }
+const BLIP_WINDOW_MS = 90000, BLIPS_ALLOWED = 2, FULLSCREEN_GRACE_MS = 10000, OFF_CAMERA_SEC = 8
 
 export type CheckState = '' | 'ok' | 'bad'
 export interface Check { state: CheckState; text: string; hidden: boolean }
@@ -86,7 +89,9 @@ export class InterviewEngine {
   private faceDet: any = null
   private faceOk = false
   private micOk = false
-  private faceState = { missing: 0, missingOn: false, multi: 0 }
+  private faceState = { missing: 0, missingOn: false, multi: 0, away: 0 }
+  private blips: number[] = []
+  private fsTimer = 0
   private camRec: Rec | null = null
   private screenRec: Rec | null = null
   private upQueue: { rid: string; kind: string; seq: number; ext: string; blob: Blob }[] = []
@@ -319,9 +324,19 @@ export class InterviewEngine {
       return
     }
     const fs = this.faceState
-    if (n === 0) { fs.missing++; if (fs.missing === 3 && !fs.missingOn) { fs.missingOn = true; this.ev('face_missing_start'); this.snap('no_face') } }
-    else { if (fs.missingOn) { fs.missingOn = false; this.ev('face_missing_end') } fs.missing = 0 }
-    if (strong >= 2) { if (++fs.multi >= 2 && this.once('multi', 30000)) { this.ev('multiple_faces', `${n} faces`); this.snap('multiple_faces') } } else fs.multi = 0
+    if (n === 0) {
+      fs.missing++
+      if (fs.missing === 3 && !fs.missingOn) { fs.missingOn = true; this.ev('face_missing_start'); this.snap('no_face') }
+      if (fs.missing === OFF_CAMERA_SEC && this.once('offcam', 60000)) this.violation('left_camera', `no face for ${OFF_CAMERA_SEC}s`)
+    } else { if (fs.missingOn) { fs.missingOn = false; this.ev('face_missing_end') } fs.missing = 0 }
+    if (strong >= 2) {
+      if (++fs.multi >= 2 && this.once('multi', 30000)) { this.ev('multiple_faces', `${n} faces`); this.snap('multiple_faces') }
+      if (fs.multi === 4 && this.once('multiv', 60000)) this.violation('multiple_people', `${n} faces for 4s`)
+    } else fs.multi = 0
+    // Head turned well away (reading a phone or another screen) for several seconds: a flag for review, not a warning.
+    const y = n === 1 ? yaw(dets[0]?.keypoints) : null
+    fs.away = y != null && Math.abs(y) > 0.55 ? fs.away + 1 : 0
+    if (fs.away === 6 && this.once('look', 45000)) { this.ev('looking_away', `head turned ${y! > 0 ? 'right' : 'left'} for 6s`); this.snap('looking_away') }
   }
 
   // ------------------------------------------------------------ liveness (head turn) and face match
@@ -690,6 +705,13 @@ export class InterviewEngine {
     if (!a) return
     clearTimeout(a.timer); clearInterval(a.shotTimer); this.away = null
     if (a.confirmed && this.inCall) setTimeout(() => this.snap('tab_return'), 500)
+    else if (this.inCall && !this.terminated && Date.now() - a.t0 > 120) {
+      // Too short to be a warning on its own, but a pattern of quick looks elsewhere is.
+      const now = Date.now()
+      this.ev('quick_switch', `${a.kind} ${now - a.t0}ms`)
+      this.blips = [...this.blips.filter(x => now - x < BLIP_WINDOW_MS), now]
+      if (this.blips.length > BLIPS_ALLOWED) { this.blips = []; this.snap('quick_switches'); this.violation('quick_switches', `${BLIPS_ALLOWED + 1} quick switches in ${BLIP_WINDOW_MS / 1000}s`) }
+    }
   }
   private async violation(kind: string, detail: string) {
     if (!this.P.enforce_focus && kind !== 'multi_monitor') return
@@ -700,10 +722,12 @@ export class InterviewEngine {
     const max = r.max_warnings ?? this.P.max_warnings
     this.set({ warnings: r.warning, maxWarnings: max })
     if (r.action === 'terminate') return this.handleTermination(r.say)
-    const what = kind === 'multi_monitor' ? 'A second screen was connected.' : kind === 'tab_hidden' ? 'You left the interview tab.' : 'You switched to another window.'
+    const what = ({ multi_monitor: 'A second screen was connected.', tab_hidden: 'You left the interview tab.', window_blur: 'You switched to another window.',
+      quick_switches: 'You kept switching away from the interview.', fullscreen_exit: "You left full screen and didn't come back.",
+      left_camera: 'You stepped out of the camera view.', multiple_people: 'Someone else was in view of the camera.' } as Record<string, string>)[kind] || 'The interview rules were broken.'
     const final = r.warning >= max
     this.set({ warnBar: { title: final ? 'Final warning' : `Warning ${r.warning} of ${max}`, final,
-      text: `${what} ${final ? 'If it happens again, the interview ends.' : 'Please stay on this screen. This has been noted for the hiring team.'}` } })
+      text: `${what} ${final ? 'If it happens again, the interview ends.' : kind === 'left_camera' || kind === 'multiple_people' ? 'Please stay in view, on your own. This has been noted for the hiring team.' : 'Please stay on this screen. This has been noted for the hiring team.'}` } })
     clearTimeout(this.warnTimer); this.warnTimer = window.setTimeout(() => this.set({ warnBar: null }), 9000)
     this.lastWarnSay = norm(r.say)
     this.addLine('ai', r.say, true, true)
@@ -736,8 +760,11 @@ export class InterviewEngine {
     window.addEventListener('focus', () => { if (!this.inCall) return; if (!document.hidden) this.ev('window_focus'); this.awayEnd() })
     document.addEventListener('fullscreenchange', () => {
       if (!this.inCall) return
-      if (!document.fullscreenElement) { this.ev('fullscreen_exit'); this.set({ overlay: { ...this.state.overlay, fs: true } }) }
-      else { this.ev('fullscreen_enter'); this.set({ overlay: { ...this.state.overlay, fs: false } }) }
+      if (!document.fullscreenElement) {
+        this.ev('fullscreen_exit'); this.set({ overlay: { ...this.state.overlay, fs: true } })
+        clearTimeout(this.fsTimer)
+        this.fsTimer = window.setTimeout(() => { if (this.inCall && !document.fullscreenElement) { this.snapScreen('fullscreen_exit'); this.violation('fullscreen_exit', `not back after ${FULLSCREEN_GRACE_MS / 1000}s`) } }, FULLSCREEN_GRACE_MS)
+      } else { clearTimeout(this.fsTimer); this.ev('fullscreen_enter'); this.set({ overlay: { ...this.state.overlay, fs: false } }) }
     })
     ;(['copy', 'cut', 'paste'] as const).forEach(t => document.addEventListener(t, (e: ClipboardEvent) => {
       if (!this.inCall) return

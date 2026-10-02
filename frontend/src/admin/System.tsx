@@ -34,6 +34,7 @@ export function SystemStatus() {
     ['Database', !!h.platform?.persistent_db, h.platform ? (h.platform.database === 'postgres' ? 'Postgres (DATABASE_URL)' : 'SQLite on local disk') : '-'],
     ['File storage (resumes, recordings)', !!(h.storage?.s3 || h.storage?.persistent_disk), h.storage?.s3 ? 'S3-compatible bucket' : h.storage?.persistent_disk ? 'Persistent disk' : 'Temporary disk'],
     ['Voice interviews (Vapi)', !!h.vapi_key_set && !!h.public_url, h.public_url || 'PUBLIC_URL not set'],
+    ['Live interviewer, last hour', !h.live_turns?.turns || h.live_turns.failed / h.live_turns.turns <= 0.2, h.live_turns?.turns ? `${h.live_turns.turns} turns · ${h.live_turns.failed} failed · ${(h.live_turns.avg_ms / 1000).toFixed(1)} s average` : 'No interviews yet'],
     ['Video processing (ffmpeg)', !!h.ffmpeg, h.ffmpeg ? 'Available' : 'Missing'],
   ]
   return (

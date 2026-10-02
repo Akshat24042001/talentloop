@@ -222,6 +222,19 @@ os.environ["ALLOW_SAMPLE_DATA"] = "1"
 me_ = ok(hr.get("/api/auth/me"))
 check("the account payload doesn't say the user's role and title", not me_["memberships"][0].get("role_label"), str(me_["memberships"][0]))
 
+# AI interview: a failing or slow live model must not make the interviewer race through the questions
+from backend import brain
+pl = {"questions": [{"id": "q1", "type": "resume_probe", "ask": "Tell me about the caching work.", "max_followups": 1, "time_budget_sec": 150, "good_answer_covers": []},
+                    {"id": "q2", "type": "behavioral", "ask": "A conflict you handled?", "max_followups": 1, "time_budget_sec": 150, "good_answer_covers": []}]}
+mk = lambda said, allowed=("next_question", "invite_continue", "clarify_repeat", "follow_up"): {"st": {"q_idx": 0, "stall": 0, "fu_used": 0}, "said": said, "allowed": list(allowed), "progress": "next_question"}
+check("model failure on a short answer moves to the next question", brain._fallback(mk("I used Redis."), pl)["action"] == "next_question")
+check("model failure on a cut-off answer moves on", brain._fallback(mk("We first profiled the queries and"), pl)["action"] != "invite_continue")
+check("model failure when asked to repeat moves on", brain._fallback(mk("Sorry, could you repeat that?"), pl)["action"] != "clarify_repeat")
+long_ = "We profiled the slow endpoints, added a Redis cache in front of the product queries with a five minute expiry, " * 3
+check("model failure on a full answer never moves on", brain._fallback(mk(long_), pl)["action"] != "next_question")
+check("model failure when the candidate doesn't know keeps probing", brain._fallback(mk("Sorry, I don't know this one."), pl)["action"] == "follow_up")
+check("integrity warning numbering says 'second' for a third warning", "third" not in brain.integrity_message({"candidate_name": "A B", "questions": []}, "window_blur", 3, 3)[0])
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

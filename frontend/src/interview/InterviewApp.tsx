@@ -66,9 +66,9 @@ function Consent({ s }: { s: State }) {
   const rules: { icon: ReactNode; strict?: boolean; text: ReactNode; show?: boolean }[] = [
     { icon: <MessageSquareText />, text: <>An <b>AI interviewer</b> talks with you, one question at a time. The question is always on your screen, and you can say <b>"please repeat"</b> any time.</> },
     { icon: <Sun />, text: <>Sit somewhere quiet and well lit, using the latest <b>Chrome or Edge</b>{P.require_screen_share ? <> on a <b>laptop or desktop</b></> : null}. Headphones help.</> },
-    { icon: <UserRound />, text: <>Keep your <b>camera on</b> and your face visible. Only you should be in view.</> },
+    { icon: <UserRound />, strict: P.enforce_focus, text: <>Keep your <b>camera on</b> and your face visible, <b>alone</b>. Stepping out of view or someone else appearing gets a warning, like switching screens.</> },
     { icon: <Eye />, strict: P.enforce_focus, text: !P.enforce_focus ? <><b>Stay on this screen.</b> Leaving the page or switching windows is recorded for HR.</>
-      : mw > 0 ? <><b>Stay on this screen.</b> If you switch tabs, windows or apps, the interviewer will warn you. After <b>{mw} warning{mw === 1 ? '' : 's'}</b>, the next time ends the interview.</>
+      : mw > 0 ? <><b>Stay on this screen, in full screen.</b> Switching tabs, windows or apps, even briefly and repeatedly, gets a spoken warning. After <b>{mw} warning{mw === 1 ? '' : 's'}</b>, the next time ends the interview.</>
       : <><b>Stay on this screen.</b> Switching tabs, windows or apps <b>ends the interview immediately</b>.</> },
     { icon: <Monitor />, strict: true, show: P.block_multi_monitor, text: <>Use <b>one screen only</b>. Disconnect any extra monitor first. A second screen counts as leaving the interview.</> },
     { icon: <ScreenShare />, show: P.require_screen_share, text: <>You'll <b>share your entire screen</b> for the whole interview.</> },
@@ -412,7 +412,7 @@ function Overlays({ s }: { s: State }) {
         {s.shareErr && <p className="mt-3 text-red-300">{s.shareErr}</p>}
       </Overlay>
       <Overlay id="fsOverlay" show={s.overlay.fs && !s.overlay.dq} icon={<Monitor />} title="Please return to full screen">
-        Leaving full screen during the interview is recorded.
+        Leaving full screen is recorded. If you don't return within 10 seconds, it counts as a warning.
         <div className="mt-5"><Button id="fsBtn" variant="primary" onClick={() => engine.returnFullscreen()}>Return to full screen</Button></div>
       </Overlay>
       <Overlay id="monOverlay" show={s.overlay.mon} icon={<Monitor />} title="Second screen detected">

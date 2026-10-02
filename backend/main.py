@@ -186,7 +186,7 @@ def health(req: Request):
         ctx = auth.current(req, s, required=False)
         if not (ctx and ctx.platform_admin):
             return base
-    return {**base, "detail": True, "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
+    return {**base, "detail": True, "live_turns": brain.turn_health(), "fast_model": llm.FAST_MODEL, "smart_model": llm.SMART_MODEL,
             "llm_provider": "openrouter" if llm.OPENROUTER else ("custom" if llm.BASE_URL else "openai"),
             "llm_key_set": bool(llm.API_KEY), "fast_chain": llm.FAST_CHAIN, "smart_chain": llm.SMART_CHAIN,
             "free_models": any(m.endswith(":free") or m == "openrouter/free" for m in llm.FAST_CHAIN + llm.SMART_CHAIN),
@@ -619,6 +619,7 @@ async def heartbeat(iid: str):
     now = time.time()
     if rec["status"] == "in_progress":
         _presence[iid] = now
+        _page_seen[iid] = now
         if now - rec.get("last_seen", 0) > 20:  # persist occasionally, survives a server restart
             async with store.lock(iid):
                 r = get_rec(iid)
@@ -637,7 +638,7 @@ def progress(iid: str):
             "max_warnings": rec["settings"].get("max_warnings", 2)}
 
 
-VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor")
+VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor", "fullscreen_exit", "quick_switches", "left_camera", "multiple_people")
 VIOLATION_DEBOUNCE_SEC = 4
 
 
@@ -1061,6 +1062,21 @@ def _token_ok(rec: dict, token: str, current_only: bool) -> bool:
     return any(t and secrets.compare_digest(token.encode(), t.encode()) for t in valid)
 
 
+_page_seen: dict[str, float] = {}
+
+
+def _check_page_alive(rec: dict) -> None:
+    """The interview page sends a heartbeat every 5 s. If the call keeps going but the page has gone quiet, the
+    tab was hidden for long (browsers throttle hidden tabs), or the page was blocked or tampered with: flag it."""
+    iid, now = rec["id"], time.time()
+    seen = _page_seen.get(iid)
+    started = ((rec.get("state") or {}).get("session_started") or now)
+    quiet = now - seen if seen else now - started
+    if quiet > 25 and now - started > 30 and now - rec.get("client_silent_at", 0) > 60:
+        rec["client_silent_at"] = now
+        server_event(rec, "client_silent", f"no page heartbeat for {int(quiet)}s")
+
+
 @app.post("/llm/{iid}/{token}/chat/completions")
 async def custom_llm(iid: str, token: str, req: Request):
     """Vapi calls this on every candidate turn. The LLM call happens WITHOUT holding the
@@ -1077,6 +1093,7 @@ async def custom_llm(iid: str, token: str, req: Request):
             prep = {"reply": f"The interview has been stopped, and {brain.END_PHRASE}."}
         else:
             prep = brain.prepare_turn(rec, messages)
+            _check_page_alive(rec)
         rec["last_seen"] = time.time()
         store.save(rec)
         plan = rec["plan"]

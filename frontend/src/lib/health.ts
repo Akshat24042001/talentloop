@@ -6,6 +6,7 @@ export interface Health {
   mock: boolean; public_url: string; app_url?: string; detail?: boolean
   fast_model?: string; smart_model?: string; free_models?: boolean; model_note?: string; llm_key_set?: boolean
   vapi_key_set?: boolean; admin_weak?: boolean; ffmpeg?: boolean
+  live_turns?: { turns: number; failed: number; avg_ms: number }
   storage?: { s3: boolean; s3_error: string | null; persistent_disk: boolean }
   platform?: { database: string; persistent_db: boolean; platform_admins_configured: boolean }
 }
@@ -24,6 +25,8 @@ export function healthProblems(h: Health): string[] {
   if (!h.storage.s3 && !h.storage.persistent_disk) bad.push('File storage is temporary: a restart wipes interviews and resumes (set S3_*, see DEPLOY.md)')
   if (h.storage.s3_error) bad.push(`Storage error: ${h.storage.s3_error}`)
   if (h.platform && !h.platform.persistent_db) bad.push('The database is temporary (SQLite on a free server): set DATABASE_URL to your Supabase Postgres, see DEPLOY.md')
+  if (h.live_turns && h.live_turns.turns >= 10 && h.live_turns.failed / h.live_turns.turns > 0.2)
+    bad.push(`The live interviewer's AI model failed ${h.live_turns.failed} of ${h.live_turns.turns} turns in the last hour (rate limits or a slow model). Interviews fall back to safe prompts; set a paid FAST_MODEL for real candidates.`)
   if (h.admin_weak) bad.push('ADMIN_KEY is weak: use a long random string or remove it')
   return bad
 }
