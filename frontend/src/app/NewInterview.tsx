@@ -13,21 +13,21 @@ interface Sample { id: string; role: string; company: string; candidate: string;
 interface Question { id: string; type: string; ask: string; competency_id?: string; scored: boolean; good_answer_covers?: string[]; max_followups: number; time_budget_sec: number }
 interface Plan { duration_min: number; questions: Question[]; competencies?: { id: string; name: string }[]; keyterms?: string[]; resume_claims_to_verify?: string[] }
 
-function Steps({ step }: { step: number }) {
-  const items = ['Candidate & role', 'Review plan', 'Send link']
+function Steps({ step, max, onGo }: { step: number; max: number; onGo: (n: number) => void }) {
+  const items = ['Candidate & role', 'Review plan', 'Interview rules', 'Send link']
   return (
     <ol className="mb-6 flex flex-wrap items-center gap-2 text-sm">
       {items.map((t, i) => {
         const n = i + 1, state = n < step ? 'done' : n === step ? 'on' : ''
         return (
           <li key={t} className="flex items-center gap-2">
-            <span className={cn('flex items-center gap-2 rounded-full px-3 py-1.5 font-medium ring-1 ring-inset',
+            <button type="button" disabled={n > max} onClick={() => onGo(n)} aria-current={state === 'on' ? 'step' : undefined} className={cn('flex items-center gap-2 rounded-full px-3 py-1.5 font-medium ring-1 ring-inset disabled:cursor-not-allowed',
               state === 'on' ? 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-200 dark:ring-brand-500/30'
                 : state === 'done' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30'
                 : 'bg-white text-slate-500 ring-slate-200 dark:bg-ink-900 dark:text-slate-400 dark:ring-ink-700')}>
               <span className={cn('grid size-5 place-items-center rounded-full text-[11px] font-bold', state === 'on' ? 'bg-brand-600 text-white' : state === 'done' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-ink-800')}>
                 {state === 'done' ? <Check className="size-3" strokeWidth={3} /> : n}</span>{t}
-            </span>
+            </button>
             {n < 3 && <span className="hidden h-px w-6 bg-slate-200 dark:bg-ink-700 sm:block" />}
           </li>
         )
@@ -69,7 +69,6 @@ export default function NewInterview() {
   const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, snap: true, rejoin: '30', openAt: '', validH: '72' })
   const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
   const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
-  const planRef = useRef<HTMLDivElement>(null), linkRef = useRef<HTMLDivElement>(null)
   const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
   const { query } = useLocation()
   const link_ = { job_id: query.get('job') || '', candidate_id: query.get('candidate') || '', application_id: query.get('application') || '' }
@@ -113,7 +112,7 @@ export default function NewInterview() {
       const notes = p.source === 'template' ? [`${p.fallback_reason || 'The AI was slow.'} This is a template plan built from the JD, resume and your questions. Review it, or press "Generate interview plan" again to retry with AI.`] : []
       setPlan(r.plan); setJson(JSON.stringify(r.plan, null, 2)); setPlanWarn([...notes, ...(r.warnings || [])]); setInputs(inp); setLink(null)
       toast(p.source === 'template' ? 'Template plan ready (AI was slow)' : `Plan ready in ${Math.max(1, Math.round((p.generated_ms || 0) / 1000))} s`)
-      setTimeout(() => planRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+      go(2)
     } catch (e: any) { setErr1(e.message) }
     setGen(false)
   }
@@ -125,19 +124,21 @@ export default function NewInterview() {
         enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
       const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })
       setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [] })
-      setTimeout(() => linkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+      go(4)
     } catch (e: any) { setErr2(e.message) }
     setCreating(false)
   }
 
-  const step = link ? 3 : plan ? 2 : 1
+  const [view, setView] = useState(1)
+  const maxStep = link ? 4 : plan ? 3 : 1
+  const go = (n: number) => { setView(n); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const comps = Object.fromEntries((plan?.competencies || []).map(c => [c.id, c.name]))
   const budget = plan ? plan.questions.reduce((a, q) => a + q.time_budget_sec, 0) : 0
 
   return (
     <>
       <PageHeader title="New AI interview" description={fromJob ? <>For <b>{f.cand || 'the candidate'}</b> · {fromJob}. The JD, resume and the job's interview questions are filled in. Review, then generate the plan.</> : 'Job description + resume + your questions → a plan you approve → a link for the candidate.'} />
-      <Steps step={step} />
+      <Steps step={view} max={maxStep} onGo={go} />
       {health && (
         <div className="mb-4 flex flex-wrap gap-2">
           {health.mock ? <Badge tone="warning">Demo mode: simulated AI</Badge> : health.detail && <Badge tone="neutral">Interviewer: {health.fast_model} · Plan and scoring: {health.smart_model}</Badge>}
@@ -146,7 +147,7 @@ export default function NewInterview() {
         </div>
       )}
 
-      <Card>
+      {view === 1 && <Card>
         <CardHeader title="Candidate & role" description="The length is used to plan the questions. The candidate is never told the length or the number of questions." />
         <CardBody className="space-y-5">
           {!fromJob && (
@@ -175,13 +176,13 @@ export default function NewInterview() {
           <Field label="Your questions" htmlFor="qs" hint="One per line. Every one of them will be asked.">
             <Textarea id="qs" className="min-h-24" placeholder={'Why are you looking for a change?\nWhat is your notice period?'} value={f.qs} onChange={set('qs')} /></Field>
           {err1 && <Alert tone="danger" icon={<TriangleAlert />}>{err1}</Alert>}
-          <Button id="genBtn" variant="primary" size="lg" icon={<Wand2 />} loading={gen} onClick={generate}>{gen ? 'Generating the plan (usually under 20 s)...' : 'Generate interview plan'}</Button>
+          <Button id="genBtn" variant="primary" size="lg" icon={<Wand2 />} loading={gen} onClick={generate}>{gen ? 'Generating the plan (usually under 20 s)...' : plan ? 'Generate a new plan' : 'Generate interview plan'}</Button>
+          {plan && !gen && <Button size="lg" className="ml-2" onClick={() => go(2)}>Keep the current plan</Button>}
         </CardBody>
-      </Card>
+      </Card>}
 
-      {plan && (
-        <div id="planCard" ref={planRef} className="mt-6 scroll-mt-6 space-y-6">
-          <Card>
+      {plan && view === 2 && (
+          <Card id="planCard">
             <CardHeader title="Review the plan" description={<>This is exactly what the AI will ask, in order. Your approval is the control point. · {plan.questions.length} questions · about {Math.round(budget / 60)} of {plan.duration_min} min</>} />
             <CardBody className="space-y-3">
               {planWarn.map(w => <Alert key={w} icon={<TriangleAlert />}>{w}</Alert>)}
@@ -207,8 +208,14 @@ export default function NewInterview() {
                 <Button className="mt-3" size="sm" onClick={() => { try { const p = JSON.parse(json); setPlan(p); toast('Plan updated') } catch (e: any) { toast('Invalid JSON: ' + e.message) } }}>Apply JSON edits</Button>
               </details>
             </CardBody>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 dark:border-ink-800">
+              <Button variant="ghost" icon={<ArrowLeft />} onClick={() => go(1)}>Candidate & role</Button>
+              <Button id="toRules" variant="primary" onClick={() => go(3)}>Next: interview rules</Button>
+            </div>
           </Card>
+      )}
 
+      {plan && view === 3 && (
           <Card>
             <CardHeader title="Interview rules" description="How strict the interview is, and how the link behaves." />
             <CardBody className="grid gap-6 lg:grid-cols-2">
@@ -234,15 +241,15 @@ export default function NewInterview() {
               </Group>
             </CardBody>
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-5 py-4 dark:border-ink-800">
-              <Button id="createBtn" variant="primary" size="lg" icon={<Link2 />} loading={creating} onClick={create}>Create candidate link</Button>
-              {err2 && <span className="text-sm text-red-600 dark:text-red-300">{err2}</span>}
+              <Button variant="ghost" icon={<ArrowLeft />} onClick={() => go(2)}>Review plan</Button>
+              <Button id="createBtn" className="ml-auto" variant="primary" size="lg" icon={<Link2 />} loading={creating} onClick={create}>Create candidate link</Button>
+              {err2 && <span className="w-full text-sm text-red-600 dark:text-red-300">{err2}</span>}
             </div>
           </Card>
-        </div>
       )}
 
-      {link && (
-        <div ref={linkRef} className="mt-6 scroll-mt-6">
+      {link && view === 4 && (
+        <div>
           <Card id="linkOut" className="ring-2 ring-emerald-500/30">
             <CardHeader title={<span className="flex items-center gap-2"><span className="grid size-6 place-items-center rounded-full bg-emerald-500 text-white"><Check className="size-3.5" strokeWidth={3} /></span>Link ready</span>}
               description="Send this link to the candidate. You'll find the interview on the Interviews page." />
