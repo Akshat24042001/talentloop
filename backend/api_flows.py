@@ -403,7 +403,8 @@ def _safe_data(rr: db.RoundResult) -> dict:
 
 
 def _msg_json(m: db.Message) -> dict:
-    return {"id": m.id, "channel": m.channel, "to": m.to, "subject": m.subject, "body": m.body, "template": m.template, "status": m.status,
+    body = "(Sign-in code hidden: only the candidate sees it.)" if m.template == "candidate_login" else m.body
+    return {"id": m.id, "channel": m.channel, "to": m.to, "subject": m.subject, "body": body, "template": m.template, "status": m.status,
             "error": m.error, "created_at": m.created_at, "sent_at": m.sent_at}
 
 
@@ -1030,11 +1031,20 @@ async def create_slots(job_id: str, rid: str, req: Request):
             while t + step <= end and len(spans) < 200:
                 spans.append({"starts_at": t, "ends_at": t + step})
                 t += step + gap
+        skipped = 0
+        taken: dict[str, list[tuple[float, float]]] = {}
         for sp in spans[:200]:
             a, b = float(sp["starts_at"]), float(sp.get("ends_at") or float(sp["starts_at"]) + mins * 60)
             if b <= a or a < time.time():
                 continue
             iv = str(body.get("interviewer_id") or sp.get("interviewer_id") or ctx.user_id or "") or None
+            if iv:                                  # the same person can't offer two overlapping times (any job)
+                if iv not in taken:
+                    taken[iv] = [(x.starts_at, x.ends_at) for x in s.query(db.Slot).filter(db.Slot.interviewer_id == iv, db.Slot.ends_at > time.time())]
+                if any(x < b and y > a for x, y in taken[iv]):
+                    skipped += 1
+                    continue
+                taken[iv].append((a, b))
             sl = db.Slot(org_id=ctx.org_id, job_id=job.id, round_id=rid, interviewer_id=iv, starts_at=a, ends_at=b,
                          meeting_url=str(body.get("meeting_url") or sp.get("meeting_url") or "")[:500],
                          location=str(body.get("location") or sp.get("location") or "")[:300])
@@ -1042,7 +1052,61 @@ async def create_slots(job_id: str, rid: str, req: Request):
             made.append(sl)
         s.flush()
         log_activity(s, ctx, "slots_added", f"{rnd['name']}: {len(made)} slot(s)", job_id=job.id)
-        return {"created": len(made)}
+        told = scheduling.new_times_open(s, job, rid) if made else 0
+        return {"created": len(made), "skipped_overlaps": skipped, "candidates_told": told}
+
+
+@router.get("/api/round-results/{rrid}/open-times")
+def open_times(rrid: str, req: Request):
+    """Times HR can book for this candidate: free interviewer slots, or AI interview start times."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        rr, a, job = _rr(s, ctx, rrid)
+        rnd = flows.round_of(job, rr.round_id) or {"config": {}}
+        if rr.round_type == "human_interview":
+            return {"kind": "slots", "slots": [scheduling.slot_json(x, s) for x in scheduling.open_slots(s, job.id, rr.round_id, lead_sec=300)]}
+        if rr.round_type == "ai_interview":
+            return {"kind": "ai", "times": scheduling.ai_slots(s, rr, rnd, ctx.org) if rr.status == "invited" else []}
+        raise HTTPException(400, "This round has no interview times.")
+
+
+@router.post("/api/round-results/{rrid}/book")
+def hr_book(rrid: str, req: Request, body: dict):
+    """HR books (or moves) the interview time for the candidate. The candidate is emailed the confirmation."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        rr, a, job = _rr(s, ctx, rrid)
+        who = (ctx.user.name or ctx.user.email) if ctx.user else "Hiring team"
+        if a.round_id != rr.round_id or a.stage in flows.CLOSED_STAGES + flows.FINAL_STAGES:
+            raise HTTPException(400, "The candidate isn't in this round any more.")
+        try:
+            if rr.round_type == "human_interview":
+                sl = scheduling.book(s, rr, str(body.get("slot_id") or ""), by_hr=who)
+                return {"ok": True, "starts_at": sl.starts_at}
+            if rr.round_type == "ai_interview":
+                b = scheduling.ai_book(s, rr, float(body.get("starts_at") or 0), by_hr=who)
+                return {"ok": True, "starts_at": b["starts_at"]}
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+        raise HTTPException(400, "This round has no interview times.")
+
+
+@router.post("/api/round-results/{rrid}/cancel-booking")
+def hr_cancel_booking(rrid: str, req: Request, body: dict):
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        rr, a, job = _rr(s, ctx, rrid)
+        who = (ctx.user.name or ctx.user.email) if ctx.user else "Hiring team"
+        try:
+            if rr.round_type == "human_interview":
+                scheduling.cancel(s, rr, who, str(body.get("reason") or "")[:500], notify=body.get("notify", True) is not False)
+            elif rr.round_type == "ai_interview":
+                scheduling.ai_cancel(s, rr, who)
+            else:
+                raise ValueError("Nothing to cancel.")
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+        return {"ok": True}
 
 
 @router.delete("/api/slots/{sid}")

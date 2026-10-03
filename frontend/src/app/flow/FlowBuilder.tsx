@@ -196,6 +196,13 @@ function RoundEditor({ r, meta, team, jobId, canEdit, saved, onChange }: { r: Ro
               <Field label="Length (minutes)" htmlFor="r-dur"><Stepper id="r-dur" aria-label="Length" max={60} value={c.duration_min ?? 15} onChange={v => cfg('duration_min', v)} /></Field>
               <Field label="Warnings before it ends" htmlFor="r-warn"><Input id="r-warn" type="number" min={0} max={10} value={c.max_warnings ?? 2} onChange={e => cfg('max_warnings', num(e.target.value))} /></Field>
             </div>
+            <Switch id="r-sched" checked={c.allow_scheduling !== false} onChange={v => cfg('allow_scheduling', v)} label="Candidates can book a time"
+              description="Besides starting right away, they can pick a 30-minute start time; we send a confirmation, a calendar invite and reminders, and they can change or cancel it." />
+            {c.allow_scheduling !== false && <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Earliest start" htmlFor="r-from"><Stepper id="r-from" aria-label="Earliest hour" min={0} max={23} step={1} unit=":00" value={c.day_from ?? 8} onChange={v => cfg('day_from', v)} /></Field>
+              <Field label="Latest end" htmlFor="r-to"><Stepper id="r-to" aria-label="Latest hour" min={1} max={24} step={1} unit=":00" value={c.day_to ?? 22} onChange={v => cfg('day_to', v)} /></Field>
+              <Field label="Changes allowed" htmlFor="r-chg"><Stepper id="r-chg" aria-label="Changes allowed" min={0} max={10} step={1} unit="changes" value={c.reschedules_allowed ?? 5} onChange={v => cfg('reschedules_allowed', v)} /></Field>
+            </div>}
             <Switch id="r-rp" checked={!!c.role_play} onChange={v => cfg('role_play', v)} label="Role-play" description="The AI plays a customer or stakeholder for part of the interview." />
             {c.role_play && <Field label="Role-play brief" htmlFor="r-rpb"><Textarea id="r-rpb" rows={3} value={c.role_play_brief || ''} onChange={e => cfg('role_play_brief', e.target.value)} placeholder="You are a busy clinic owner who thinks the software is too expensive…" /></Field>}
           </Section>}
@@ -313,7 +320,8 @@ function HumanConfig({ c, cfg, team, jobId, roundId, saved }: { c: Record<string
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Length (minutes)" htmlFor="h-dur"><Stepper id="h-dur" aria-label="Length" value={c.duration_min ?? 45} onChange={v => cfg('duration_min', v)} presets={MINUTE_PRESETS} /></Field>
         <Field label="Mode" htmlFor="h-mode"><Select id="h-mode" value={c.mode || 'video'} onChange={e => cfg('mode', e.target.value)}><option value="video">Video call</option><option value="in_person">In person</option><option value="phone">Phone</option></Select></Field>
-        <Field label="Reschedules allowed" htmlFor="h-res"><Input id="h-res" type="number" min={0} max={5} value={c.reschedules_allowed ?? 1} onChange={e => cfg('reschedules_allowed', +e.target.value)} /></Field>
+        <Field label="Changes the candidate can make" htmlFor="h-res" hint="Reschedules or cancellations from their link."><Stepper id="h-res" aria-label="Changes allowed" min={0} max={10} step={1} unit="changes" value={c.reschedules_allowed ?? 3} onChange={v => cfg('reschedules_allowed', v)} /></Field>
+        <Field label="Changes allowed until" htmlFor="h-cut" hint="Hours before the interview. After that they contact you."><Stepper id="h-cut" aria-label="Change cutoff" min={0} max={48} step={1} unit="hours before" value={c.change_cutoff_hours ?? 2} onChange={v => cfg('change_cutoff_hours', v)} /></Field>
       </div>
       {c.mode !== 'in_person' ? <Field label="Meeting link" htmlFor="h-url" hint="Used for every slot unless a slot has its own."><Input id="h-url" value={c.meeting_url || ''} onChange={e => cfg('meeting_url', e.target.value)} placeholder="https://meet.google.com/…" /></Field>
         : <Field label="Address" htmlFor="h-loc"><Input id="h-loc" value={c.location || ''} onChange={e => cfg('location', e.target.value)} /></Field>}
@@ -333,15 +341,15 @@ function Slots({ jobId, roundId, team, interviewers, minutes }: { jobId: string;
   async function create() {
     setBusy(true)
     try {
-      let made = 0
+      let made = 0, skipped = 0, told = 0
       for (let d = 0; d < Math.max(1, f.days); d++) {
         const base = new Date(`${f.date}T00:00`); base.setDate(base.getDate() + d)
         if (f.days > 1 && (base.getDay() === 0 || base.getDay() === 6)) continue
         const at = (hm: string) => { const [h, m] = hm.split(':').map(Number); const x = new Date(base); x.setHours(h!, m!, 0, 0); return x.getTime() / 1000 }
         const r = await api(`/api/jobs/${jobId}/rounds/${roundId}/slots`, { json: { series: { start: at(f.from), end: at(f.to), minutes: f.minutes, gap_minutes: f.gap }, interviewer_id: f.interviewer || undefined } })
-        made += r.created
+        made += r.created; skipped += r.skipped_overlaps || 0; told += r.candidates_told || 0
       }
-      toast(`${made} slot(s) added`); setOpen(false); reload()
+      toast(`${made} slot(s) added${skipped ? `, ${skipped} skipped (the interviewer already has a slot then)` : ''}${told ? `. ${told} waiting candidate(s) emailed` : ''}`); setOpen(false); reload()
     } catch (e: any) { toast(e.message) }
     setBusy(false)
   }

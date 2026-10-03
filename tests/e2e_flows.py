@@ -224,8 +224,8 @@ def main():
             start = time.time() + 2 * 86400
             api(hr, f"/api/jobs/{job['id']}/rounds/{hrnd['round']['id']}/slots", "post", data={"series": {"start": start, "end": start + 3 * 3600, "minutes": 45}})
             st.goto(hrnd["result"]["candidate_link"])
-            st.locator("button[aria-pressed]").first.click()
-            st.get_by_role("button", name="Book this time").click()
+            st.locator("button[aria-pressed]").filter(has_text=re.compile(r"\d:\d\d")).first.click()
+            st.get_by_role("button", name=re.compile(r"^Book ")).click()
             expect(st.get_by_role("link", name="Add to calendar")).to_be_visible()
             shot(st, "f09-booked")
             det = api(hr, f"/api/applications/{app['id']}")

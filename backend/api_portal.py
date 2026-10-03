@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from . import assessments, auth, db, flows, jd_schema, matching, references, refs, resumes, scheduling, store, worker
+from . import assessments, auth, db, flows, jd_schema, tzfmt, matching, references, refs, resumes, scheduling, store, worker
 from .offload import offload
 from .api_accounts import org_settings
 
@@ -147,12 +147,24 @@ def round_page(token: str, req: Request):
             out["interview"] = {"url": f"/interview.html?id={iid}" if iid and rr.status in ("invited", "in_progress") else None,
                                 "duration_min": cfg.get("duration_min", 15), "language": cfg.get("language", "en"),
                                 "phone_available": _phone_ok() and bool(c and c.phone), "preparing": rr.status == "setting_up"}
+            ac = scheduling.ai_cfg(rnd)
+            ab = d.get("ai_booking") if not (d.get("ai_booking") or {}).get("cancelled_at") else None
+            can, why = scheduling.ai_can_change(rr, rnd)
+            out["interview"]["schedule"] = {
+                "allowed": ac["allow"] and rr.status == "invited" and bool(iid), "booking": ab, "can_change": can, "why": why,
+                "changes_left": max(0, ac["reschedules"] - int(d.get("ai_reschedules", 0))), "timezone": tzfmt.org_tz(org),
+                "missed": bool((d.get("ai_booking") or {}).get("missed")),
+                "slots": scheduling.ai_slots(s, rr, rnd, org) if ac["allow"] and rr.status == "invited" and iid and can else []}
         elif kind == "human_interview":
-            b = d.get("booking")
-            reschedules_left = int(cfg.get("reschedules_allowed", 1)) - int(d.get("reschedules", 0))
-            out["interview"] = {"booking": {k: b.get(k) for k in ("starts_at", "ends_at", "location", "interviewer")} | {"has_link": bool(b.get("meeting_url"))} if b else None,
-                                "slots": [] if (b and reschedules_left <= 0) else [scheduling.slot_json(x) | {"meeting_url": ""} for x in scheduling.open_slots(s, job.id, rr.round_id)[:60]],
-                                "reschedules_left": max(0, reschedules_left), "duration_min": cfg.get("duration_min", 45), "mode": cfg.get("mode", "video")}
+            b = d.get("booking") if not (d.get("booking") or {}).get("cancelled_at") else None
+            hc = scheduling.human_cfg(rnd)
+            can, why = scheduling.can_change(rr, rnd)
+            out["interview"] = {"booking": {k: b.get(k) for k in ("starts_at", "ends_at", "location", "interviewer", "by")} | {"has_link": bool(b.get("meeting_url"))} if b else None,
+                                "slots": [scheduling.slot_json(x) | {"meeting_url": ""} for x in scheduling.open_slots(s, job.id, rr.round_id)[:80]] if can else [],
+                                "can_change": can, "why": why, "cutoff_hours": hc["cutoff_hours"], "timezone": tzfmt.org_tz(org),
+                                "reschedules_left": max(0, hc["reschedules_allowed"] - int(d.get("reschedules", 0))), "duration_min": hc["minutes"], "mode": hc["mode"],
+                                "time_request": d.get("time_request"),
+                                "cancelled": ({k: d["booking"].get(k) for k in ("starts_at", "cancelled_by", "cancel_reason")} if (d.get("booking") or {}).get("cancelled_at") else None)}
         return out
 
 
@@ -219,7 +231,7 @@ async def test_start(token: str, req: Request, consent: str = Form("0"), photo: 
         win = _drive_window(s, app)
         if win and not win["open"]:
             raise HTTPException(403, "The test window for your college is not open right now." + (
-                f" It opens {time.strftime('%d %b, %I:%M %p', time.localtime(win['opens_at']))}." if win.get("opens_at") and time.time() < win["opens_at"] else ""))
+                f" It opens {tzfmt.when(win['opens_at'], tzfmt.org_tz(org))}." if win.get("opens_at") and time.time() < win["opens_at"] else ""))
         if consent not in ("1", "true", "yes"):
             raise HTTPException(400, "Please accept the consent notice to start.")
         d = dict(rr.data or {})
@@ -591,6 +603,60 @@ async def book_slot(token: str, req: Request):
         return {"ok": True, "starts_at": sl.starts_at}
 
 
+@router.post("/api/r/{token}/cancel")
+@offload
+async def cancel_booking(token: str, req: Request):
+    _limit(req, "book", 30)
+    body = await req.json() if (await req.body()) else {}
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        _active(rr, app)
+        try:
+            if rr.round_type == "human_interview":
+                scheduling.cancel(s, rr, "candidate", str(body.get("reason") or "")[:500])
+            elif rr.round_type == "ai_interview":
+                scheduling.ai_cancel(s, rr, "candidate")
+            else:
+                raise ValueError("Nothing to cancel here.")
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+    return {"ok": True}
+
+
+@router.post("/api/r/{token}/request-times")
+@offload
+async def request_times(token: str, req: Request):
+    _limit(req, "times", 5, 3600)
+    body = await req.json()
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        if rr.round_type != "human_interview":
+            raise HTTPException(400, "This link is not for booking.")
+        _active(rr, app)
+        try:
+            scheduling.request_times(s, rr, str(body.get("note") or ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+    return {"ok": True}
+
+
+@router.post("/api/r/{token}/ai-book")
+@offload
+async def ai_book(token: str, req: Request):
+    _limit(req, "book", 30)
+    body = await req.json()
+    with db.session() as s:
+        rr, app, job, org = _by_token(s, token)
+        if rr.round_type != "ai_interview":
+            raise HTTPException(400, "This link is not for an AI interview.")
+        _active(rr, app)
+        try:
+            b = scheduling.ai_book(s, rr, float(body.get("starts_at") or 0))
+        except (ValueError, TypeError) as e:
+            raise HTTPException(409, str(e)) from None
+    return {"ok": True, "booking": b}
+
+
 @router.get("/api/r/{token}/join")
 def join_meeting(token: str, req: Request):
     with db.session() as s:
@@ -607,12 +673,14 @@ def join_meeting(token: str, req: Request):
 def booking_ics(token: str):
     with db.session() as s:
         rr, app, job, org = _by_token(s, token)
-        b = (rr.data or {}).get("booking")
+        b = (rr.data or {}).get("booking") if rr.round_type == "human_interview" else (rr.data or {}).get("ai_booking")
         if not b or b.get("cancelled_at"):
             raise HTTPException(404, "Nothing booked")
         rnd = flows.round_of(job, rr.round_id) or {"name": "Interview"}
-        cal = scheduling.ics(rr.id, b["starts_at"], b["ends_at"], f"{rnd['name']}: {job.title} at {org.name}", "Your interview",
-                             f"{flows.invite_link(s, rr)}/join" if b.get("meeting_url") else b.get("location", ""))
+        page = flows.invite_link(s, rr)
+        where = f"{page}/join" if b.get("meeting_url") else b.get("location") or page
+        cal = scheduling.ics(rr.id, b["starts_at"], b["ends_at"], f"{rnd['name']}: {job.title} at {org.name}",
+                             f"Your interview. Details, join link and changes: {page}", where, seq=int(b.get("seq", 0)))
     return Response(cal, media_type="text/calendar", headers={"Content-Disposition": 'attachment; filename="interview.ics"'})
 
 
@@ -698,13 +766,19 @@ def status_page(token: str, req: Request):
             st = rr.status if rr else "upcoming"
             link = flows.invite_link(s, rr) if rr and app.round_id == r["id"] and r["type"] not in ("cv_screening", "manager_approval", "application") \
                 and st in ("invited", "in_progress", "booked") else None
+            bk = None
+            if rr and app.round_id == r["id"]:
+                b = (rr.data or {}).get("booking" if r["type"] == "human_interview" else "ai_booking")
+                if b and not b.get("cancelled_at") and st in ("booked", "invited"):
+                    bk = {"starts_at": b["starts_at"], "ends_at": b["ends_at"], "interviewer": b.get("interviewer", ""), "location": b.get("location", ""),
+                          "has_link": bool(b.get("meeting_url")) or r["type"] == "ai_interview"}
             steps.append({"name": label, "type": r["type"], "status": st, "label": flows.STATUS_LABEL.get(st, "Upcoming") if st != "upcoming" else "Upcoming",
-                          "current": app.round_id == r["id"], "link": link, "transparency": transparency(r) if ROUND_FACING(r) else None})
+                          "current": app.round_id == r["id"], "link": link, "booking": bk, "transparency": transparency(r) if ROUND_FACING(r) else None})
         return {"org": brand(org), "job": {"title": job.title, "ref": refs.job_ref(job)}, "candidate": {"name": c.name, "email": c.email},
                 "stage": app.stage, "stage_label": CAND_STAGE.get(app.stage, app.stage), "applied_at": app.created_at, "steps": steps,
                 "human_requested": bool(app.human_requested_at), "accommodation": app.accommodation or None,
                 "has_ai_round": any(r["type"] == "ai_interview" for r in flows.flow_of(job)),
-                "contact": (job.fields or {}).get("recruiter_contact") or ""}
+                "contact": (job.fields or {}).get("recruiter_contact") or "", "timezone": tzfmt.org_tz(org)}
 
 
 def ROUND_FACING(r: dict) -> bool:          # noqa: N802

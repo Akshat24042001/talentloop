@@ -11,6 +11,8 @@ import { ask } from '../components/dialogs'
 type Tab = 'company' | 'careers' | 'hiring' | 'matching' | 'data'
 const W_LABEL: Record<string, string> = { skills: 'Skills', experience: 'Experience', relevance: 'Keyword relevance', location: 'Location', logistics: 'Notice & salary' }
 
+const TIMEZONES: string[] = (() => { try { return (Intl as any).supportedValuesOf('timeZone') as string[] } catch { return ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'America/New_York', 'UTC'] } })()
+
 export default function Settings() {
   const me = useMe()
   const { query } = useLocation()
@@ -56,6 +58,8 @@ function OrgSettings({ tab }: { tab: string }) {
             <Field label="Industry" htmlFor="s-ind"><Input id="s-ind" value={s.industry || ''} onChange={e => set('industry', e.target.value)} /></Field>
             <Field label="Company size" htmlFor="s-size"><Select id="s-size" value={s.size || ''} onChange={e => set('size', e.target.value)}><option value="">Select…</option>{['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'].map(x => <option key={x}>{x}</option>)}</Select></Field>
             <Field label="Country" htmlFor="s-country"><Input id="s-country" value={s.country || ''} onChange={e => set('country', e.target.value)} /></Field>
+            <Field label="Time zone" htmlFor="s-tz" hint="Interview times in emails and reminders use it."><Select id="s-tz" value={s.timezone || 'Asia/Kolkata'} onChange={e => set('timezone', e.target.value)}>
+              {TIMEZONES.map(z => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}</Select></Field>
             <Field label="Default currency" htmlFor="s-cur"><Select id="s-cur" value={s.default_currency || 'INR'} onChange={e => set('default_currency', e.target.value)}>{['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD'].map(x => <option key={x}>{x}</option>)}</Select></Field>
           </div>
           <Field label="About the company" htmlFor="s-about" hint="Shown on your careers page and at the end of every job description."><Textarea id="s-about" value={s.about || ''} onChange={e => set('about', e.target.value)} /></Field>

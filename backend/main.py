@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
-from . import (api_accounts, api_flows, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
+from . import (api_accounts, api_candidate, api_flows, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
                communication, mailbox, matching, media, messages, proctor, refs, retention, store, worker)
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
@@ -1244,10 +1244,11 @@ async def _download_and_attach(iid: str, url: str, kind: str):
 app.include_router(api_hiring.router)
 app.include_router(api_flows.router)
 app.include_router(api_portal.router)
+app.include_router(api_candidate.router)
 
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
 SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
-              "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/ref/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
+              "/me", "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/ref/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
 
 
 def _spa(rest: str = ""):

@@ -19,7 +19,7 @@ import os
 import secrets
 import time
 
-from . import db, messages, refs
+from . import db, messages, refs, tzfmt
 
 log = logging.getLogger("flows")
 
@@ -71,8 +71,8 @@ DEFAULT_CONFIG = {
     "practical_task": {"instructions": "", "rubric": [{"criterion": "Correctness", "weight": 50}, {"criterion": "Clarity and presentation", "weight": 25},
                                                         {"criterion": "Efficiency (formulas, structure)", "weight": 25}],
                        "file_types": ".xlsx,.xls,.csv,.docx,.pdf,.zip,.txt", "attachment": None},
-    "ai_interview": {"duration_min": 15, "language": "en", "channel": "web", "max_warnings": 2, "role_play": False, "role_play_brief": ""},
-    "human_interview": {"duration_min": 45, "mode": "video", "interviewers": [], "reschedules_allowed": 1, "meeting_url": "", "location": ""},
+    "ai_interview": {"duration_min": 15, "language": "en", "channel": "web", "max_warnings": 2, "role_play": False, "role_play_brief": "", "allow_scheduling": True, "day_from": 8, "day_to": 22, "reschedules_allowed": 5},
+    "human_interview": {"duration_min": 45, "mode": "video", "interviewers": [], "reschedules_allowed": 3, "change_cutoff_hours": 2, "meeting_url": "", "location": ""},
     "manager_approval": {"approvers": []},
     "reference_check": {"min_referees": 2, "max_referees": 3, "require_manager": False},
 }
@@ -185,7 +185,7 @@ ROUND_INVITE = {
     "practical_task": "Your next step is a practical task{name}. Download the instructions and upload your work.",
     "live_task": "Your next step is a live task{name}, about {minutes} minutes. Use a laptop or desktop: you'll share your screen while you work.",
     "reference_check": "Your next step is a reference check{name}. Please name people who have worked with you; we'll send them a short form.",
-    "ai_interview": "Your next step is a first-round interview with our AI interviewer{name}. It is a voice conversation in your browser, about {minutes} minutes, available any time.",
+    "ai_interview": "Your next step is a first-round interview with our AI interviewer{name}. It is a voice conversation in your browser, about {minutes} minutes. Start it whenever you are ready, or book a time that suits you and we will remind you.",
     "human_interview": "You're invited to an interview{name}. Please pick a time that suits you.",
 }
 
@@ -327,7 +327,7 @@ def _start(s, app, job, rnd, rr, notify):
         text = ROUND_INVITE.get(kind, "Your next step is ready{name}.").format(name=f" ({rnd['name']})" if rnd["name"] != ROUND_TYPES[kind]["label"] else "",
                                                                                  minutes=minutes or 15)
         if rr.deadline_at:
-            text += f" Please complete it by {time.strftime('%d %b %Y', time.localtime(rr.deadline_at))}."
+            text += f" Please complete it by {tzfmt.when(rr.deadline_at, tzfmt.org_tz(s.get(db.Org, app.org_id)))}."
         if rnd.get("message"):
             text += "\n\n" + rnd["message"]
         notify_candidate(s, app, "Your next step", text, f"invite_{kind}", f"{base_url()}/r/{tok}",

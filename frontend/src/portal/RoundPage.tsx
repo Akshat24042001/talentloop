@@ -1,7 +1,8 @@
 // The candidate's page for one round (/r/<token>): a proctored test, a video or role-task recording, a practical
 // task upload, the AI interview start page, or booking a human interview.
-import { AlarmClock, CalendarCheck, CalendarPlus, Camera, CircleCheck, Download, FileUp, Headphones, Maximize, Mic, MonitorUp, Phone, RotateCcw, Send, Square, UserRound, Video } from 'lucide-react'
+import { AlarmClock, CalendarCheck, CalendarPlus, CircleCheck, Download, FileUp, Headphones, Maximize, Mic, MonitorUp, Phone, RotateCcw, Send, Square, UserRound, Video } from 'lucide-react'
 import { ask } from '../components/dialogs'
+import SlotPicker, { fullWhen } from '../components/SlotPicker'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Spinner, Textarea, cn, toast } from '../components/ui'
 import { when } from '../lib/format'
@@ -508,6 +509,55 @@ function LiveRound({ p, base, onDone }: { p: Page; base: string; onDone: () => v
 }
 
 // ---------------------------------------------------------------------------------------------- AI interview
+interface AISched { allowed: boolean; booking: { starts_at: number; ends_at: number; by?: string } | null; can_change: boolean; why: string; changes_left: number; timezone: string; missed: boolean; slots: number[] }
+function AIPick({ sch, base, reload, deadline, onDone }: { sch: AISched; base: string; reload: () => void; deadline: number | null; onDone?: () => void }) {
+  const [open, setOpen] = useState(!!onDone), [pick, setPick] = useState(''), [busy, setBusy] = useState(false), [err, setErr] = useState('')
+  async function book() {
+    setBusy(true); setErr('')
+    try { await send(`${base}/ai-book`, { starts_at: Number(pick) }); toast('Interview time booked. Check your email for the confirmation.'); onDone?.(); reload() } catch (e: any) { setErr(e.message); reload() }
+    setBusy(false)
+  }
+  if (!open) return (
+    <Card className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+      <span>{sch.missed ? 'You missed your booked time. No problem: ' : 'Not ready right now? '}Book a time that suits you{deadline ? ` before ${new Date(deadline * 1000).toLocaleDateString([], { day: 'numeric', month: 'short' })}` : ''} and we'll email you a confirmation and reminders.</span>
+      <Button icon={<CalendarPlus />} onClick={() => setOpen(true)}>Book a time</Button>
+    </Card>)
+  return (
+    <Card className="p-5">
+      <div className="mb-1 text-base font-semibold">{sch.booking ? 'Pick a new time' : 'Book a time for your AI interview'}</div>
+      <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">The AI interviewer is available all day. We only show times with room, so your interview starts without waiting.</p>
+      <SlotPicker items={sch.slots.map(t => ({ id: String(t), starts_at: t }))} value={pick} onChange={setPick} empty="No times are left before your deadline. You can still start the interview now." />
+      {err && <Alert className="mt-3" tone="danger">{err}</Alert>}
+      <div className="mt-4 flex flex-wrap gap-2"><Button variant="primary" icon={<CalendarCheck />} disabled={!pick} loading={busy} onClick={book}>{pick ? `Book ${fullWhen(Number(pick))}` : 'Book this time'}</Button>
+        <Button onClick={() => { setOpen(false); onDone?.() }}>Not now</Button></div>
+    </Card>
+  )
+}
+function AIBooked({ sch, base, reload }: { sch: AISched; base: string; reload: () => void }) {
+  const [change, setChange] = useState(false), [busy, setBusy] = useState(false)
+  const b = sch.booking!
+  async function cancel() {
+    if (!await ask('Cancel your interview time? You can book another time or start any time before your deadline.', { confirm: 'Cancel the time' })) return
+    setBusy(true)
+    try { await send(`${base}/cancel`); toast('Interview time cancelled'); reload() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  if (change) return <AIPick sch={sch} base={base} reload={reload} deadline={null} onDone={() => setChange(false)} />
+  return (
+    <Card className="p-5">
+      <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300"><CalendarCheck className="size-5" /></span>
+        <div className="text-sm"><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Booked{b.by && b.by !== 'candidate' ? ' by the hiring team' : ''}</div>
+          <div className="text-lg font-semibold">{fullWhen(b.starts_at)}</div>
+          <div className="text-slate-600 dark:text-slate-300">Come back to this page at that time and press Start. We'll remind you a day before, an hour before and when it's time.</div></div></div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button icon={<CalendarPlus />} href={`${base}/calendar.ics`}>Add to calendar</Button>
+        {sch.can_change && <Button icon={<RotateCcw />} onClick={() => setChange(true)}>Change the time</Button>}
+        {sch.can_change && <Button variant="ghost" className="text-red-600 dark:text-red-400" loading={busy} onClick={cancel}>Cancel</Button>}
+      </div>
+      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{sch.can_change ? `${sch.changes_left} change(s) left, up to 30 minutes before.` : sch.why}</p>
+    </Card>
+  )
+}
 const LANG: Record<string, string> = { en: 'English', hi: 'Hindi', 'hi-en': 'Hindi or English (Hinglish is fine)', ta: 'Tamil', te: 'Telugu', kn: 'Kannada', mr: 'Marathi', bn: 'Bengali', gu: 'Gujarati', ml: 'Malayalam' }
 function AIRound({ p, base, reload }: { p: Page; base: string; reload: () => void }) {
   const iv = p.interview
@@ -528,8 +578,12 @@ function AIRound({ p, base, reload }: { p: Page; base: string; reload: () => voi
       <HowItWorks t={p.transparency} />
       {err && <Alert tone="danger">{err}</Alert>}
       {iv.preparing ? <Card className="flex items-center gap-3 p-5 text-sm"><Spinner className="size-5 text-brand-500" />Preparing your interview. This takes under a minute; the page updates by itself.</Card>
-        : iv.url ? <div className="flex flex-wrap gap-2"><Button variant="primary" size="lg" icon={<Mic />} href={iv.url}>Start the interview</Button>
-          {iv.phone_available && <Button size="lg" icon={<Phone />} onClick={callMe} disabled={!!calling}>{calling ? `Calling …${calling}` : 'Call my phone instead'}</Button>}</div>
+        : iv.url ? <>
+          {iv.schedule?.booking && <AIBooked sch={iv.schedule} base={base} reload={reload} />}
+          <div className="flex flex-wrap gap-2"><Button variant="primary" size="lg" icon={<Mic />} href={iv.url}>{iv.schedule?.booking ? 'Start now' : 'Start the interview now'}</Button>
+            {iv.phone_available && <Button size="lg" icon={<Phone />} onClick={callMe} disabled={!!calling}>{calling ? `Calling …${calling}` : 'Call my phone instead'}</Button>}</div>
+          {iv.schedule?.allowed && !iv.schedule.booking && <AIPick sch={iv.schedule} base={base} reload={reload} deadline={p.deadline_at} />}
+        </>
         : <Alert tone="info">The interview link isn't ready. Please check back shortly or contact the hiring team.</Alert>}
       {calling && <Alert tone="success" title="We're calling you now">Answer the call from an unknown number. If you miss it, you can try again later or use the browser.</Alert>}
       {asked ? <Alert tone="info" icon={<UserRound />}>You asked for an interview with a person. The hiring team will reply; you can still take the AI interview if you prefer.</Alert>
@@ -544,46 +598,72 @@ function AIRound({ p, base, reload }: { p: Page; base: string; reload: () => voi
 
 // ---------------------------------------------------------------------------------------------- human interview booking
 interface Slot { id: string; starts_at: number; ends_at: number; interviewer: string; location: string }
+interface HumanIv {
+  booking: { starts_at: number; ends_at: number; location: string; interviewer: string; has_link: boolean; by?: string } | null; slots: Slot[]
+  can_change: boolean; why: string; cutoff_hours: number; reschedules_left: number; duration_min: number; mode: string; timezone: string
+  time_request: { note: string; at: number } | null; cancelled: { starts_at: number; cancelled_by: string; cancel_reason: string } | null
+}
+const MODE: Record<string, string> = { video: 'Video call', in_person: 'In person', phone: 'Phone call' }
+
 function BookRound({ p, base, reload }: { p: Page; base: string; reload: () => void }) {
-  const iv = p.interview as { booking: { starts_at: number; ends_at: number; location: string; interviewer: string; has_link: boolean } | null; slots: Slot[]; reschedules_left: number; duration_min: number; mode: string }
-  const [pick, setPick] = useState(''), [busy, setBusy] = useState(false), [change, setChange] = useState(false), [err, setErr] = useState('')
-  async function book() {
-    setBusy(true); setErr('')
-    try { await send(`${base}/book`, { slot_id: pick }); toast('Booked'); setChange(false); reload() } catch (e: any) { setErr(e.message); reload() }
-    setBusy(false)
+  const iv = p.interview as HumanIv
+  const [pick, setPick] = useState(''), [busy, setBusy] = useState(''), [change, setChange] = useState(false), [err, setErr] = useState('')
+  const [none, setNone] = useState(false), [note, setNote] = useState(''), [cancel, setCancel] = useState(false), [reason, setReason] = useState('')
+  async function run(what: string, fn: () => Promise<unknown>, ok: string) {
+    setBusy(what); setErr('')
+    try { await fn(); toast(ok); setChange(false); setPick(''); setNone(false); setCancel(false); reload() } catch (e: any) { setErr(e.message); reload() }
+    setBusy('')
   }
   if (p.finished && !iv.booking) return <Done title="This interview round is complete" link={p.status_link} />
-  const days = new Map<string, Slot[]>()
-  for (const s of iv.slots) { const k = new Date(s.starts_at * 1000).toDateString(); days.set(k, [...(days.get(k) || []), s]) }
-  const mode = { video: 'Video call', in_person: 'In person', phone: 'Phone call' }[iv.mode] || iv.mode
+  const mode = MODE[iv.mode] || iv.mode
+  const picker = (
+    <Card className="p-5">
+      <div className="mb-1 text-base font-semibold">{iv.booking ? 'Pick a new time' : 'Pick a time for your interview'}</div>
+      <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">{mode}, {iv.duration_min} minutes.{iv.booking ? ` Your current time is kept until you confirm the new one, and it opens up for others once you move. ${iv.reschedules_left} change(s) left.` : ''}</p>
+      <SlotPicker items={iv.slots.map(s => ({ id: s.id, starts_at: s.starts_at, note: s.interviewer || undefined }))} value={pick} onChange={setPick}
+        empty="No times are open right now. Tell us what suits you below and we'll email you when new times open." />
+      {err && <Alert className="mt-3" tone="danger">{err}</Alert>}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant="primary" icon={<CalendarCheck />} disabled={!pick || !!busy} loading={busy === 'book'}
+          onClick={() => run('book', () => send(`${base}/book`, { slot_id: pick }), iv.booking ? 'Interview moved' : 'Interview booked')}>
+          {pick ? `${iv.booking ? 'Move to' : 'Book'} ${fullWhen(iv.slots.find(s => s.id === pick)!.starts_at)}` : iv.booking ? 'Move my interview' : 'Book this time'}</Button>
+        {change && <Button onClick={() => { setChange(false); setPick('') }}>Keep my current time</Button>}
+        <Button variant="ghost" onClick={() => setNone(true)}>None of these times work</Button>
+      </div>
+    </Card>
+  )
   return (
     <div className="space-y-4">
+      {iv.cancelled && !iv.booking && <Alert tone="warning" title="Your interview time was cancelled">
+        {fullWhen(iv.cancelled.starts_at)} was cancelled {iv.cancelled.cancelled_by === 'candidate' ? 'by you' : 'by the hiring team'}{iv.cancelled.cancel_reason && iv.cancelled.cancelled_by !== 'candidate' ? `: ${iv.cancelled.cancel_reason}` : '.'} Please pick a new time.</Alert>}
+      {iv.time_request && !iv.booking && <Alert tone="info" title="We've told the hiring team">You suggested: "{iv.time_request.note}". You'll get an email when new times open.</Alert>}
       {iv.booking && !change ? (
         <Card className="p-5">
-          <div className="flex items-start gap-3"><CalendarCheck className="size-6 text-emerald-600" /><div className="text-sm">
-            <div className="text-base font-semibold">{when(iv.booking.starts_at)}</div>
-            <div className="text-slate-600 dark:text-slate-300">{mode}, {iv.duration_min} minutes{iv.booking.interviewer ? ` with ${iv.booking.interviewer}` : ''}{iv.booking.location ? ` · ${iv.booking.location}` : ''}</div></div></div>
+          <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300"><CalendarCheck className="size-5" /></span>
+            <div className="text-sm"><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Confirmed{iv.booking.by && iv.booking.by !== 'candidate' ? ' by the hiring team' : ''}</div>
+              <div className="text-lg font-semibold">{fullWhen(iv.booking.starts_at)}</div>
+              <div className="text-slate-600 dark:text-slate-300">{mode}, {iv.duration_min} minutes{iv.booking.interviewer ? ` with ${iv.booking.interviewer}` : ''}{iv.booking.location ? ` · ${iv.booking.location}` : ''}</div></div></div>
           <div className="mt-4 flex flex-wrap gap-2">
             {iv.booking.has_link && <Button variant="primary" icon={<Video />} href={`${base}/join`} target="_blank">Join the meeting</Button>}
             <Button icon={<CalendarPlus />} href={`${base}/calendar.ics`}>Add to calendar</Button>
-            {iv.reschedules_left > 0 && iv.slots.length > 0 && !p.finished && <Button variant="ghost" onClick={() => setChange(true)}>Change the time</Button>}
+            {iv.can_change && !p.finished && <Button icon={<RotateCcw />} onClick={() => setChange(true)}>Change the time</Button>}
+            {iv.can_change && !p.finished && <Button variant="ghost" className="text-red-600 dark:text-red-400" onClick={() => setCancel(true)}>Cancel</Button>}
           </div>
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{iv.can_change ? `You can change or cancel up to ${iv.cutoff_hours} hours before (${iv.reschedules_left} change(s) left). The confirmation and calendar invite are in your email.` : iv.why}</p>
         </Card>
-      ) : !iv.slots.length ? <Alert tone="info" title="No times available right now">The hiring team will add more times soon. Check back on this page.</Alert> : (
-        <Card className="p-5">
-          <div className="mb-3 text-sm font-semibold">Pick a time ({mode}, {iv.duration_min} minutes){iv.booking && <span className="font-normal text-slate-500"> · {iv.reschedules_left} change(s) left</span>}</div>
-          <div className="space-y-4">{[...days.entries()].map(([d, list]) => (
-            <div key={d}><div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{new Date(list[0]!.starts_at * 1000).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' })}</div>
-              <div className="flex flex-wrap gap-2">{list.map(s => <button key={s.id} aria-pressed={pick === s.id} onClick={() => setPick(s.id)}
-                className={cn('tabular rounded-lg px-3 py-2 text-sm font-medium ring-1', pick === s.id ? 'bg-brand-600 text-white ring-brand-600' : 'ring-slate-200 hover:bg-slate-50 dark:ring-ink-700 dark:hover:bg-ink-850')}>
-                {new Date(s.starts_at * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</button>)}</div></div>))}</div>
-          {err && <Alert className="mt-3" tone="danger">{err}</Alert>}
-          <div className="mt-4 flex gap-2"><Button variant="primary" icon={<CalendarCheck />} disabled={!pick} loading={busy} onClick={book}>{iv.booking ? 'Move my interview' : 'Book this time'}</Button>
-            {change && <Button onClick={() => setChange(false)}>Keep my current time</Button>}</div>
-          <p className="mt-2 text-xs text-slate-500">Times are shown in your device's time zone.</p>
-        </Card>)}
+      ) : picker}
+      {err && !change && iv.booking && <Alert tone="danger">{err}</Alert>}
       <HowItWorks t={p.transparency} />
-      {!iv.booking && <p className="flex items-center gap-1.5 text-xs text-slate-500"><Camera className="size-3.5" />You'll get a calendar invite by email once you book.</p>}
+      <Modal open={none} onOpenChange={setNone} title="Suggest times that work for you" description="The hiring team gets your note and can add times or book one for you. You'll get an email when new times open."
+        footer={<><Button onClick={() => setNone(false)}>Cancel</Button><Button variant="primary" loading={busy === 'times'} disabled={note.trim().length < 5}
+          onClick={() => run('times', () => send(`${base}/request-times`, { note }), 'Sent to the hiring team')}>Send</Button></>}>
+        <Textarea className="mt-4" rows={3} aria-label="Times that suit you" value={note} onChange={e => setNote(e.target.value)} placeholder="For example: weekdays after 5 pm, or Saturday morning" />
+      </Modal>
+      <Modal open={cancel} onOpenChange={setCancel} title="Cancel this interview time?" description="The time is released for others. You can pick a new time right after, from this page."
+        footer={<><Button onClick={() => setCancel(false)}>Keep it</Button><Button variant="danger" loading={busy === 'cancel'}
+          onClick={() => run('cancel', () => send(`${base}/cancel`, { reason }), 'Interview time cancelled')}>Cancel the time</Button></>}>
+        <Textarea className="mt-4" rows={2} aria-label="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (optional)" />
+      </Modal>
     </div>
   )
 }

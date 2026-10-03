@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 
-from . import brain, db, flows, interviews, ivindex, llm, matching, messages
+from . import brain, db, flows, tzfmt, interviews, ivindex, llm, matching, messages
 
 log = logging.getLogger("worker")
 _running = asyncio.Lock()
@@ -58,7 +58,7 @@ async def setup_ai_interview(rr_id: str) -> None:
         text = flows.ROUND_INVITE["ai_interview"].format(name="", minutes=plan.get("duration_min", 15))
         text += (" Before it starts you'll see what the AI assesses and how. If you prefer, you can ask for an interview with a person instead.")
         if rr.deadline_at:
-            text += f" Please take it by {time.strftime('%d %b %Y', time.localtime(rr.deadline_at))}."
+            text += f" Please take it by {tzfmt.when(rr.deadline_at, tzfmt.org_tz(s.get(db.Org, rr.org_id)))}."
         if rnd.get("message"):
             text += "\n\n" + rnd["message"]
         flows.notify_candidate(s, app, "Your next step", text, "invite_ai_interview", link, "Start here")
@@ -249,7 +249,7 @@ def _deadline(s, rr: db.RoundResult, now: float) -> None:
         rnd = flows.round_of(job, rr.round_id) or {"name": rr.round_type}
         link = flows.invite_link(s, rr)          # the same link they already have
         flows.notify_candidate(s, app, "Reminder", f"A reminder that your next step ({rnd['name']}) closes on "
-                               f"{time.strftime('%d %b %Y, %H:%M', time.localtime(rr.deadline_at))}.", "reminder", link, "Continue here")
+                               f"{tzfmt.when(rr.deadline_at, tzfmt.org_tz(s.get(db.Org, rr.org_id)))}.", "reminder", link, "Continue here")
 
 
 MAIN_LOOP: asyncio.AbstractEventLoop | None = None    # set at startup: kick() may be called from worker threads

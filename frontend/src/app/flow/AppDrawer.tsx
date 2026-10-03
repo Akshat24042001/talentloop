@@ -1,7 +1,7 @@
 // One application in a job's flow: every round's result, test sections, recordings, practical work, integrity
 // evidence, HR actions (pass, hold, reject, move, resend, reset, override) and the messages sent.
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, Download, ExternalLink, Flag, Hand, Link2, Mail, MessageCircle, MessageSquareHeart, Play, RefreshCw, RotateCcw, Star, Trash2, X } from 'lucide-react'
+import { CalendarCheck, CalendarClock, Check, Download, ExternalLink, Flag, Hand, Link2, Mail, MessageCircle, MessageSquareHeart, Play, RefreshCw, RotateCcw, Star, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Field, Input, Modal, Select, Spinner, Textarea, copyText, toast } from '../../components/ui'
 import { ErrorBox, Loading, useApi } from '../../components/kit'
@@ -13,6 +13,7 @@ import { ReasonModal } from './Board'
 import { REC_TONE, STATUS_TONE, type Round, type RoundSummary } from './types'
 import { LinkActions } from '../../components/LinkActions'
 import { ask } from '../../components/dialogs'
+import SlotPicker, { fullWhen, type SlotItem } from '../../components/SlotPicker'
 
 interface Msg { id: string; channel: string; to: string; subject: string; body: string; template: string; status: string; error: string; created_at: number; sent_at: number | null }
 interface Detail {
@@ -95,6 +96,61 @@ export default function AppDrawer({ id, onClose, onChanged, onMoving }: { id: st
   )
 }
 
+/** Interview time for HR: what's booked (and its history), what the candidate asked for, and book / move / cancel for them. */
+function HRSchedule({ type, res, data, canEdit, onChanged }: { type: string; res: RoundSummary; data: Record<string, any>; canEdit: boolean; onChanged: () => void }) {
+  const raw = type === 'human_interview' ? data.booking : data.ai_booking
+  const b = raw && !raw.cancelled_at ? raw : null
+  const [pick, setPick] = useState<null | { kind: string; items: SlotItem[] }>(null), [sel, setSel] = useState(''), [busy, setBusy] = useState(false)
+  const [cancel, setCancel] = useState(false), [reason, setReason] = useState('')
+  const hist: { action: string; by: string; starts_at: number | null; at: number }[] = data.booking_history || []
+  const open = ['invited', 'booked'].includes(res.status)
+  async function load() {
+    try {
+      const r = await api(`/api/round-results/${res.id}/open-times`)
+      setPick({ kind: r.kind, items: r.kind === 'slots' ? r.slots.map((x: any) => ({ id: x.id, starts_at: x.starts_at, note: x.interviewer || undefined })) : r.times.map((t: number) => ({ id: String(t), starts_at: t })) })
+      setSel('')
+    } catch (e: any) { toast(e.message) }
+  }
+  async function book() {
+    setBusy(true)
+    try { await api(`/api/round-results/${res.id}/book`, { json: pick!.kind === 'slots' ? { slot_id: sel } : { starts_at: Number(sel) } }); toast('Booked. The candidate was emailed the confirmation and calendar invite.'); setPick(null); onChanged() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  async function doCancel() {
+    setBusy(true)
+    try { await api(`/api/round-results/${res.id}/cancel-booking`, { json: { reason } }); toast('Cancelled. The slot is open again and the candidate was told.'); setCancel(false); onChanged() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  if (type === 'ai_interview' && !b && !hist.length && !canEdit) return null
+  return (
+    <div className="space-y-2">
+      {b ? <div className="flex flex-wrap items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 dark:bg-emerald-500/10">
+          <CalendarCheck className="size-4 text-emerald-600 dark:text-emerald-400" /><b>{when(b.starts_at)}</b>
+          {b.interviewer && <span className="text-slate-600 dark:text-slate-300">with {b.interviewer}</span>}
+          {b.location && <span className="text-slate-600 dark:text-slate-300">· {b.location}</span>}
+          <span className="text-xs text-slate-500 dark:text-slate-400">{b.by && b.by !== 'candidate' ? `booked by ${b.by}` : 'booked by the candidate'}{data.reschedules ? ` · moved ${data.reschedules}x by candidate` : ''}{data.ai_reschedules ? ` · moved ${data.ai_reschedules}x` : ''}</span>
+        </div>
+        : open && <p className="text-slate-500 dark:text-slate-400">{type === 'human_interview' ? 'No time booked yet. The candidate picks from your open slots, or you can book one for them.' : 'No time booked: the candidate can start any time or book a time.'}</p>}
+      {data.time_request && !b && <Alert tone="warning" title="None of the open times work for them">"{data.time_request.note}" ({ago(data.time_request.at)}). Add slots in the hiring flow (they're emailed automatically) or book a time for them.</Alert>}
+      {canEdit && open && <div className="flex flex-wrap gap-2">
+        <Button size="sm" icon={<CalendarClock />} onClick={load}>{b ? 'Change the time' : 'Book a time for them'}</Button>
+        {b && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => setCancel(true)}>Cancel booking</Button>}
+      </div>}
+      {hist.length > 0 && <details><summary className="cursor-pointer text-xs font-medium">Booking history ({hist.length})</summary>
+        <ul className="mt-1 space-y-0.5 text-xs text-slate-600 dark:text-slate-300">{hist.slice().reverse().map((h, i) => <li key={i}>{when(h.at)} · {h.action}{h.starts_at ? ` ${when(h.starts_at)}` : ''} · by {h.by}</li>)}</ul></details>}
+      {pick && <Modal open wide onOpenChange={o => !o && setPick(null)} title={b ? 'Move the interview' : 'Book a time for the candidate'}
+        description="The candidate gets an email with the time, the join link and a calendar invite, and can still change it from their link. The old slot opens up for others."
+        footer={<><Button onClick={() => setPick(null)}>Cancel</Button><Button variant="primary" disabled={!sel} loading={busy} onClick={book}>{sel ? `Book ${fullWhen(Number(pick.kind === 'slots' ? pick.items.find(x => x.id === sel)!.starts_at : sel))}` : 'Book'}</Button></>}>
+        <div className="mt-4"><SlotPicker items={pick.items} value={sel} onChange={setSel} empty={pick.kind === 'slots' ? 'No open slots. Add slots in the job\'s hiring flow first.' : 'No AI interview times are left before the deadline.'} /></div>
+      </Modal>}
+      <Modal open={cancel} onOpenChange={setCancel} title="Cancel this interview booking?" description="The slot opens up again. The candidate is emailed and can pick a new time from their link."
+        footer={<><Button onClick={() => setCancel(false)}>Keep it</Button><Button variant="danger" loading={busy} onClick={doCancel}>Cancel booking</Button></>}>
+        <Textarea className="mt-4" rows={2} aria-label="Reason for the candidate" value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason, shown to the candidate (optional)" />
+      </Modal>
+    </div>
+  )
+}
+
 /** AI drafts feedback from the candidate's completed rounds; a person edits it and sends it. */
 function FeedbackModal({ id, name, onClose, onSent }: { id: string; name: string; onClose: () => void; onSent: () => void }) {
   const [text, setText] = useState(''), [basis, setBasis] = useState<string[]>([]), [note, setNote] = useState(''), [busy, setBusy] = useState<'' | 'draft' | 'send'>('')
@@ -150,6 +206,7 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
         <div className="space-y-3 border-t border-slate-100 px-3.5 py-3 text-sm dark:border-ink-800">
           {res.suggestion && ['submitted', 'on_hold'].includes(res.status) && <Alert tone="info">Suggested by the pass rule: <b>{({ pass: 'Pass', fail: 'Not progress', hold: 'Hold' } as Record<string, string>)[res.suggestion] || res.suggestion}</b></Alert>}
           {res.deadline_at && ['invited', 'in_progress', 'pending'].includes(res.status) && <p className="text-xs text-slate-500">Deadline {when(res.deadline_at)}</p>}
+          {(r.round.type === 'human_interview' || r.round.type === 'ai_interview') && <HRSchedule type={r.round.type} res={res} data={data} canEdit={canEdit && isCur} onChanged={onChanged} />}
           <RoundData type={r.round.type} res={res} data={data} />
           {Object.keys(res.integrity || {}).length > 0 && <Integrity res={res} hasPhoto={!!d.candidate.has_photo} />}
           {data.score_overridden && <p className="text-xs text-slate-500">Score changed from {data.score_overridden.from ?? 'none'} {ago(data.score_overridden.at)}.</p>}
@@ -249,9 +306,7 @@ function RoundData({ type, res, data }: { type: string; res: RoundSummary; data:
   if (type === 'human_interview') {
     const b = data.booking, fb = data.feedback
     return <>
-      {b ? <p><b>{when(b.starts_at)}</b>{b.interviewer ? ` with ${b.interviewer}` : ''}{b.location ? ` · ${b.location}` : ''}{b.meeting_url && <> · <a className="text-brand-600 dark:text-brand-400 hover:underline" href={b.meeting_url} target="_blank" rel="noopener">meeting link</a></>}</p>
-        : <p className="text-slate-500">{res.status === 'invited' ? 'Waiting for the candidate to pick a slot.' : 'Not booked.'}</p>}
-      {data.reschedules ? <p className="text-xs text-slate-500">Rescheduled {data.reschedules} time(s).</p> : null}
+      {b && !b.cancelled_at && b.meeting_url && <p><a className="text-brand-600 dark:text-brand-400 hover:underline" href={b.meeting_url} target="_blank" rel="noopener">Meeting link</a></p>}
       {fb && <div className="rounded-xl bg-slate-50 p-3 dark:bg-ink-850"><H>Feedback from {fb.by}</H>
         <p><Badge tone={fb.decision === 'pass' ? 'success' : fb.decision === 'fail' ? 'danger' : 'warning'}>{({ pass: 'Select', fail: 'Reject', hold: 'Hold' } as Record<string, string>)[fb.decision]}</Badge>{fb.rating ? <span className="ml-2 text-amber-500">{'★'.repeat(fb.rating)}</span> : null}{!fb.attended && <Badge tone="danger">No-show</Badge>}</p>
         {fb.summary?.summary && <p className="mt-1.5">{fb.summary.summary}</p>}

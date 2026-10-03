@@ -1,15 +1,16 @@
 // Public pages: the candidate's application status, the manager's decision page, the interviewer's feedback
 // page, campus drive registration and the placement officer's results.
-import { Camera, Check, CircleCheck, Circle, CircleDot, ClipboardList, FileText, Hand, Mic, RotateCcw, Square, Star, Trash2, UserRound, X } from 'lucide-react'
+import { CalendarCheck, Camera, Check, CircleCheck, Circle, CircleDot, ClipboardList, FileText, Hand, Mic, RotateCcw, Square, Star, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Textarea, cn } from '../components/ui'
 import { when } from '../lib/format'
+import { fullWhen } from '../components/SlotPicker'
 import { Frame, HowItWorks, PageState, Preview, grab, send, useCamera, useLoad, type Brand, type Transparency } from './common'
 
 // ---------------------------------------------------------------------------------------------- status page
 interface Status {
   org: Brand; job: { title: string; ref: string }; candidate: { name: string; email: string }; stage: string; stage_label: string; applied_at: number
-  steps: { name: string; type: string; status: string; label: string; current: boolean; link: string | null; transparency: Transparency | null }[]
+  steps: { name: string; type: string; status: string; label: string; current: boolean; link: string | null; transparency: Transparency | null; booking: { starts_at: number; ends_at: number; interviewer: string; location: string; has_link: boolean } | null }[]
   human_requested: boolean; accommodation: { request?: string; status?: string; extra_time_pct?: number; hr_note?: string } | null; has_ai_round: boolean; contact: string
 }
 
@@ -31,14 +32,24 @@ export function StatusPage({ token }: { token: string }) {
       <p className="text-sm text-slate-500">Hi {data.candidate.name.split(' ')[0]}, your application for</p>
       <h1 className="mt-1 text-2xl font-semibold tracking-tight">{data.job.title}</h1>
       <div className="mt-2 flex flex-wrap items-center gap-2"><Badge tone={data.stage === 'rejected' ? 'danger' : ['offer', 'hired'].includes(data.stage) ? 'success' : 'brand'}>{data.stage_label}</Badge><span className="text-sm text-slate-500">Applied {when(data.applied_at)}</span></div>
-      {cur?.link && !closed && <Card className="mt-5 flex flex-wrap items-center gap-3 p-5"><div className="min-w-0 flex-1"><div className="text-sm text-slate-500">Your next step</div><div className="font-semibold">{cur.name}</div></div><Button variant="primary" href={cur.link}>Open</Button></Card>}
+      {cur?.link && !closed && (cur.booking ? (
+        <Card className="mt-5 p-5">
+          <div className="flex items-start gap-3"><CalendarCheck className="mt-0.5 size-6 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div className="min-w-0 flex-1"><div className="text-sm text-slate-500 dark:text-slate-400">{cur.name} · confirmed</div>
+              <div className="text-lg font-semibold">{fullWhen(cur.booking.starts_at)}</div>
+              {(cur.booking.interviewer || cur.booking.location) && <div className="text-sm text-slate-600 dark:text-slate-300">{[cur.booking.interviewer && `With ${cur.booking.interviewer}`, cur.booking.location].filter(Boolean).join(' · ')}</div>}</div></div>
+          <div className="mt-4 flex flex-wrap gap-2"><Button variant="primary" href={cur.link}>{cur.type === 'ai_interview' ? 'Interview page' : 'Details and join link'}</Button>
+            <Button href={cur.link}>Change or cancel the time</Button></div>
+        </Card>)
+        : <Card className="mt-5 flex flex-wrap items-center gap-3 p-5"><div className="min-w-0 flex-1"><div className="text-sm text-slate-500">Your next step</div><div className="font-semibold">{cur.name}</div>
+          {cur.type === 'human_interview' && <div className="text-xs text-slate-500 dark:text-slate-400">Pick an interview time that suits you.</div>}</div><Button variant="primary" href={cur.link}>{cur.type === 'human_interview' ? 'Pick a time' : 'Open'}</Button></Card>)}
       <Card className="mt-5 p-5">
         <ol className="space-y-3">{data.steps.map((s, i) => {
           const done = ['passed', 'submitted', 'skipped'].includes(s.status), bad = ['failed', 'expired', 'no_show'].includes(s.status)
           return (
             <li key={i} className="flex items-start gap-3">
               {done ? <CircleCheck className="mt-0.5 size-5 text-emerald-500" /> : s.current ? <CircleDot className="mt-0.5 size-5 text-brand-500" /> : bad ? <X className="mt-0.5 size-5 text-red-500" /> : <Circle className="mt-0.5 size-5 text-slate-300" />}
-              <div className="min-w-0 flex-1"><div className={cn('text-sm font-semibold', !s.current && !done && 'text-slate-500')}>{s.name}</div><div className="text-xs text-slate-500">{s.label}</div>
+              <div className="min-w-0 flex-1"><div className={cn('text-sm font-semibold', !s.current && !done && 'text-slate-500')}>{s.name}</div><div className="text-xs text-slate-500">{s.label}{s.booking ? ` · ${fullWhen(s.booking.starts_at)}` : ''}</div>
                 {s.current && s.transparency && <details className="mt-1"><summary className="cursor-pointer text-xs font-medium text-brand-600 dark:text-brand-400">How this step works</summary><HowItWorks className="mt-2" t={s.transparency} /></details>}</div>
               {s.link && <Button size="sm" href={s.link}>Open</Button>}
             </li>)
@@ -56,7 +67,8 @@ export function StatusPage({ token }: { token: string }) {
         </div>
         {data.contact && <p className="mt-3 text-slate-500">Questions: {data.contact}</p>}
       </Card>}
-      <p className="mt-6 text-center"><button className="text-xs text-slate-500 hover:text-red-600 hover:underline" onClick={() => setModal('delete')}><Trash2 className="mr-1 inline size-3" />Delete all my data with {data.org.name}</button></p>
+      <p className="mt-6 text-center text-sm"><a className="font-medium text-brand-600 hover:underline dark:text-brand-400" href="/me">See all your applications (sign in with your email)</a></p>
+      <p className="mt-3 text-center"><button className="text-xs text-slate-500 hover:text-red-600 hover:underline" onClick={() => setModal('delete')}><Trash2 className="mr-1 inline size-3" />Delete all my data with {data.org.name}</button></p>
       <Modal open={modal === 'acc'} onOpenChange={() => setModal('')} title="Ask for an accommodation" description="For example extra time on tests, a screen reader, captions, or a different interview format. Only the hiring team sees this."
         footer={<><Button onClick={() => setModal('')}>Cancel</Button><Button variant="primary" disabled={text.trim().length < 5} onClick={() => act('accommodation', { request: text })}>Send</Button></>}>
         {err && <Alert className="mt-3" tone="danger">{err}</Alert>}<Textarea className="mt-4" rows={4} aria-label="What you need" value={text} onChange={e => setText(e.target.value)} /></Modal>

@@ -451,6 +451,12 @@ async def update_org(req: Request):
                      if isinstance(x, dict) and str(x.get("header") or "").strip()][:80]
             if k == "application_fields":
                 v = {str(f): bool(r) for f, r in (v or {}).items() if f in DEFAULT_SETTINGS["application_fields"]}
+            if k == "timezone":
+                from zoneinfo import ZoneInfo
+                try:
+                    ZoneInfo(str(v))
+                except Exception:
+                    raise HTTPException(400, "Unknown time zone. Pick one from the list.") from None
             cur[k] = v
         org.settings = cur
         log_activity(s, ctx, "settings_updated", ", ".join(sorted(incoming))[:300])

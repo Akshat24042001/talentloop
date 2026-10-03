@@ -128,9 +128,10 @@ def experienced(c, slug, me_id):
     assert len(page["interview"]["slots"]) == 5 and page["interview"]["slots"][0]["meeting_url"] == "", "meeting links stay hidden until booked"
     ok(cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][0]["id"]}))
     assert cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][0]["id"]}).status_code == 409, "a booked slot can't be taken twice"
-    ok(cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][1]["id"]}))      # one reschedule
-    r = cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][2]["id"]})
-    assert r.status_code == 409 and "can't change the time again" in r.text
+    for i in (1, 2, 3):                                                                                     # three changes allowed
+        ok(cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][i]["id"]}))
+    r = cand.post(f"/api/r/{tok(hlink)}/book", json={"slot_id": page["interview"]["slots"][4]["id"]})
+    assert r.status_code == 409 and "maximum number of times" in r.text
     ics = cand.get(f"/api/r/{tok(hlink)}/calendar.ics")
     assert ics.status_code == 200 and "BEGIN:VEVENT" in ics.text
     assert outbox(c, "interview_booked") and outbox(c, "interviewer_booked")

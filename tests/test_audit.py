@@ -40,8 +40,10 @@ def mkapp(j):
 def detail(aid): return ok(hr.get(f"/api/applications/{aid}"))
 def rnd(aid, t): return next(x for x in detail(aid)["rounds"] if x["round"]["type"] == t)
 def move(aid, rid): ok(hr.post(f"/api/applications/{aid}/decide", json={"action": "move", "round_id": rid}))
+_slot_n = [0]
 def add_slot(j, R, days=2, hours=0):
-    s0 = time.time() + days * 86400 + hours * 3600
+    _slot_n[0] += 1                                    # one interviewer can't offer overlapping times: space them out
+    s0 = time.time() + days * 86400 + hours * 3600 + _slot_n[0] * 3700
     ok(hr.post(f"/api/jobs/{j['id']}/rounds/{R['human_interview']['id']}/slots", json={"slots": [{"starts_at": s0, "ends_at": s0 + 3600}], "meeting_url": "https://meet.test/x"}))
     return [s for s in ok(hr.get(f"/api/jobs/{j['id']}/rounds/{R['human_interview']['id']}/slots")) if not s["booked"]][-1]
 pub = C()
