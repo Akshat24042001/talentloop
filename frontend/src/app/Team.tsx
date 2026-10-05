@@ -25,10 +25,10 @@ export default function Team() {
     catch (e: any) { toast(e.message) }
     setBusy(false)
   }
-  async function changeRole(mid: string, r: string) { try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { role: r } }); toast('Role updated'); reload() } catch (e: any) { toast(e.message) } }
+  async function changeRole(mid: string, r: string) { const m = data?.members.find(x => x.id === mid), label = data?.roles.find(x => x.id === r)?.label || r; if (!await ask(`Change ${m?.name || 'this person'}'s role to ${label}? What they can see and do changes right away.`, { confirm: 'Change role', danger: false })) return; try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { role: r } }); toast('Role updated'); reload() } catch (e: any) { toast(e.message) } }
   async function remove(mid: string, name: string) { if (!await ask(`Remove ${name} from ${me.org?.name}?`)) return; try { await api(`/api/team/members/${mid}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
   async function revoke(id: string) { if (!await ask('Revoke this invite? The link stops working.')) return; await api(`/api/team/invites/${id}`, { method: 'DELETE' }); toast('Invite revoked'); reload() }
-  async function renew(id: string) { try { const r = await api(`/api/team/invites/${id}/renew`, { method: 'POST' }); const url = location.origin + r.path; setLink(url); copyText(url, 'New invite link copied'); reload() } catch (e: any) { toast(e.message) } }
+  async function renew(id: string) { if (!await ask('Make a new invite link? The old link stops working.', { confirm: 'New link', danger: false })) return; try { const r = await api(`/api/team/invites/${id}/renew`, { method: 'POST' }); const url = location.origin + r.path; setLink(url); copyText(url, 'New invite link copied'); reload() } catch (e: any) { toast(e.message) } }
   async function setActive(mid: string, name: string, active: boolean) {
     if (!active && !await ask(`Pause ${name}'s access? They are signed out of ${me.org?.name} now and can't sign in until you turn it back on. Nothing is deleted.`)) return
     try { await api(`/api/team/members/${mid}`, { method: 'PATCH', json: { active } }); toast(active ? `${name} can sign in again` : `${name}'s access paused`); reload() } catch (e: any) { toast(e.message) }

@@ -4,7 +4,7 @@ import { Alert, Button, Field, Input, Logo } from '../components/ui'
 import { Loading } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
-import { signOut, useSession, type Me } from '../lib/session'
+import { confirmSignOut, useSession, type Me } from '../lib/session'
 
 function AuthLayout({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
   return (
@@ -169,7 +169,7 @@ export function VerifyEmail() {
   }
   return (
     <AuthLayout title="Confirm your email" subtitle={`We sent a 6-digit code to ${me?.user.email}. Check spam too.`}
-      footer={<>Wrong email? <button type="button" className="font-semibold text-brand-600 hover:underline dark:text-brand-300" onClick={signOut}>Sign out</button> and sign up again.</>}>
+      footer={<>Wrong email? <button type="button" className="font-semibold text-brand-600 hover:underline dark:text-brand-300" onClick={confirmSignOut}>Sign out</button> and sign up again.</>}>
       <form onSubmit={submit} className="space-y-4">
         {err && <Alert tone="danger">{err}</Alert>}
         {sent && <Alert tone="success">{sent}</Alert>}

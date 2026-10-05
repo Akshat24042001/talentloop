@@ -398,6 +398,7 @@ function Requests({ d, canEdit, onDone }: { d: Detail; canEdit: boolean; onDone:
   const acc = d.accommodation || {}
   const [pct, setPct] = useState(25)
   async function accDecide(status: string) {
+    if (status !== 'approved' && !await ask('Decline this adjustment request? The candidate is told by email.', { confirm: 'Decline' })) return
     try { await api(`/api/applications/${d.id}/accommodation`, { json: { status, extra_time_pct: pct } }); toast(status === 'approved' ? 'Approved' : 'Declined'); onDone() } catch (e: any) { toast(e.message) }
   }
   async function human(action: string) {

@@ -59,7 +59,7 @@ export function JobDrives({ jobId, canManage }: { jobId: string; canManage: bool
 
 function DriveList({ drives, onEdit, reload }: { drives: Drive[]; onEdit?: (d: Drive) => void; reload: () => void; showJob?: boolean }) {
   const [qr, setQr] = useState<Drive | null>(null)
-  async function setStatus(d: Drive, status: string) { try { await api(`/api/drives/${d.id}`, { method: 'PATCH', json: { status } }); reload() } catch (e: any) { toast(e.message) } }
+  async function setStatus(d: Drive, status: string) { if (status === 'closed' && !await ask(`Close the ${d.college} drive? Students can no longer register with its link or code. You can reopen it later.`, { confirm: 'Close drive' })) return; try { await api(`/api/drives/${d.id}`, { method: 'PATCH', json: { status } }); reload() } catch (e: any) { toast(e.message) } }
   async function del(d: Drive) { if (!await ask(`Delete the ${d.college} drive?`)) return; try { await api(`/api/drives/${d.id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
   return (
     <div className="grid gap-3 lg:grid-cols-2">

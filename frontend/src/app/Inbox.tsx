@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, CardBody, Input, Select, toast } from '../c
 import { Empty, ErrorBox, ListSkeleton, PageHeader, Pager, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { ago, when } from '../lib/format'
+import { ask } from '../components/dialogs'
 import { MSG_LABEL, MSG_TONE } from './flow/AppDrawer'
 
 interface Req { kind: 'human' | 'accommodation'; application_id: string; application_ref?: string; candidate: string; candidate_ref: string; job: string; job_ref: string; at: number; note: string; status: string; extra_time_pct?: number }
@@ -14,6 +15,7 @@ export function Requests() {
   const [pct, setPct] = useState<Record<string, number>>({})
   if (error) return <ErrorBox error={error} retry={reload} />
   async function acc(r: Req, status: string) {
+    if (status !== 'approved' && !await ask('Decline this adjustment request? The candidate is told by email.', { confirm: 'Decline' })) return
     try { await api(`/api/applications/${r.application_id}/accommodation`, { json: { status, extra_time_pct: pct[r.application_id] ?? 25 } }); toast(status === 'approved' ? 'Approved; the candidate was told' : 'Declined; the candidate was told'); reload() } catch (e: any) { toast(e.message) }
   }
   async function human(r: Req, action: string) {

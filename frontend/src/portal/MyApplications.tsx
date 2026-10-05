@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Alert, Badge, Button, Card, Field, Input } from '../components/ui'
 import { fullWhen } from '../components/SlotPicker'
 import { when } from '../lib/format'
+import { ask as confirm } from '../components/dialogs'
 import { Frame, PageState, getJSON, send, type Brand } from './common'
 
 interface Step { name: string; type: string; status: string; status_label: string; link: string | null; deadline_at: number | null; booking: { starts_at: number; ends_at: number; interviewer: string } | null }
@@ -52,7 +53,7 @@ export default function MyApplications() {
     <Frame>
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div><h1 className="text-2xl font-semibold tracking-tight">{state.applications.length || !state.drives?.length ? 'Your applications' : 'Your campus drives'}</h1><p className="text-sm text-slate-500 dark:text-slate-400">{state.email}</p></div>
-        <Button size="sm" variant="ghost" icon={<LogOut />} onClick={async () => { await send('/api/me/logout'); setState('out'); setSent(false); setCode('') }}>Sign out</Button>
+        <Button size="sm" variant="ghost" icon={<LogOut />} onClick={async () => { if (!await confirm('Sign out? You will need a new code from your email to sign in again.', { confirm: 'Sign out', danger: false })) return; await send('/api/me/logout'); setState('out'); setSent(false); setCode('') }}>Sign out</Button>
       </div>
       {!!state.drives?.length && <div className="mt-5 space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Campus drives you coordinate</h2>

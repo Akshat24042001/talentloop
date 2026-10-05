@@ -353,7 +353,7 @@ function Slots({ jobId, roundId, team, interviewers, minutes }: { jobId: string;
     } catch (e: any) { toast(e.message) }
     setBusy(false)
   }
-  async function del(id: string) { try { await api(`/api/slots/${id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
+  async function del(id: string) { if (!await ask('Delete this free slot? Candidates can no longer book it.')) return; try { await api(`/api/slots/${id}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
   const free = (data || []).filter(s => !s.booked).length
   return (
     <div className="space-y-2">

@@ -27,6 +27,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 export const useSession = () => useContext(Ctx)
 export function useMe(): Me { return useContext(Ctx).me! }
 
+// Asks first: signing out loses unsaved work and needs the password again.
+export async function confirmSignOut() {
+  const { ask } = await import('../components/dialogs')
+  if (await ask('Sign out? You will need your password to sign in again. Anything not saved on this page is lost.', { confirm: 'Sign out', danger: false })) await signOut()
+}
+
 export async function signOut() {
   clearCache()
   try { await api('/api/auth/logout', { method: 'POST' }) } catch { /* already signed out */ }

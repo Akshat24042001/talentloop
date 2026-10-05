@@ -36,6 +36,7 @@ export default function JobDetail({ id }: { id: string }) {
   if (!job) return <PageSkeleton />
   const st = JOB_STATUS[job.status]!
   async function setStatus(s: string) {
+    if (s === 'paused' && !await ask(`Pause "${job!.title}"? It disappears from your careers page and nobody can apply until you reopen it. Candidates already in the pipeline are kept.`, { confirm: 'Pause job' })) return
     try { await api(`/api/jobs/${id}`, { method: 'PATCH', json: { status: s } }); toast(s === 'open' ? 'Job is live' : `Job ${JOB_STATUS[s]!.label.toLowerCase()}`); reload() } catch (e: any) { toast(e.message) }
   }
   const careers = `${location.origin}${job.careers_url}`
@@ -189,7 +190,7 @@ function TeamAccess({ job, reload, canManage }: { job: Job; reload: () => void; 
   async function add() {
     try { await api(`/api/jobs/${job.id}/collaborators`, { json: { user_id: uid, permission: perm } }); toast('Access given'); reload() } catch (e: any) { toast(e.message) }
   }
-  async function remove(cid: string) { try { await api(`/api/jobs/${job.id}/collaborators/${cid}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
+  async function remove(cid: string) { const who = job.collaborators.find(c => c.id === cid); if (!await ask(`Remove ${who?.name || 'this person'}'s access to ${job.title}? They stop seeing this job and its candidates.`, { confirm: 'Remove access' })) return; try { await api(`/api/jobs/${job.id}/collaborators/${cid}`, { method: 'DELETE' }); reload() } catch (e: any) { toast(e.message) } }
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
       <Card>

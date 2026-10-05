@@ -6,7 +6,7 @@ import { Loading, PageSkeleton } from './components/kit'
 import { DialogHost } from './components/dialogs'
 import { setUnauthorizedHandler } from './lib/api'
 import { match, navigate, useLocation } from './lib/router'
-import { SessionProvider, useSession } from './lib/session'
+import { SessionProvider, confirmSignOut, useSession } from './lib/session'
 import { Forgot, Invite, Login, Signup, VerifyEmail } from './site/Auth'
 
 // Every page is its own chunk: the careers page or a candidate link never downloads the HR workspace.
@@ -91,7 +91,7 @@ function NoCompany() {
     <div className="grid min-h-screen place-items-center p-6 text-center"><div className="max-w-sm">
       <Logo className="justify-center" /><h1 className="mt-6 text-xl font-semibold">You're not part of a company yet</h1>
       <p className="mt-2 text-sm text-slate-500">Ask your company admin for an invite link, or create your own workspace.</p>
-      <div className="mt-5 flex justify-center gap-2"><Button href="/signup" variant="primary">Create a workspace</Button><Button onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); location.href = '/login' }}>Sign out</Button></div>
+      <div className="mt-5 flex justify-center gap-2"><Button href="/signup" variant="primary">Create a workspace</Button><Button onClick={confirmSignOut}>Sign out</Button></div>
     </div></div>
   )
 }
