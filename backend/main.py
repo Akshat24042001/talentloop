@@ -72,6 +72,7 @@ async def _startup():
     n = await asyncio.to_thread(matching.backfill_features)
     if n:
         log.info("computed matching features for %d candidates", n)
+    llm.load_saved()                 # the platform admin's model choice, if saved
     await llm.resolve_models()
     if SWEEP_EVERY_SEC > 0:
         asyncio.create_task(_sweeper())
@@ -1280,7 +1281,7 @@ route_tags.apply(app.router, api_accounts.router, api_hiring.router, api_flows.r
 app.openapi_tags = route_tags.openapi_tags()
 
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
-SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
+SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/forgot", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
               "/me", "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/ref/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
 
 

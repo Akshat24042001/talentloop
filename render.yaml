@@ -28,6 +28,10 @@ services:
         sync: false
       - key: LLM_MOCK
         value: "0"
+      - key: MAIL_MODE        # test = every email goes only to MAIL_TEST_TO; live = real recipients; off = none
+        value: test
+      - key: MAIL_TEST_TO
+        sync: false
       # Resumes and recordings: Supabase Storage's S3 endpoint (or Backblaze B2), see DEPLOY.md.
       - key: S3_BUCKET
         sync: false

@@ -5,6 +5,7 @@ import { Ago, CardsSkeleton, ErrorBox, Loading, PageHeader, Tabs, useApi } from 
 import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { SampleData, SystemStatus } from './System'
+import AIModels from './AIModels'
 import { ask } from '../components/dialogs'
 
 interface Overview { orgs: number; users: number; active_users_7d: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; ai_calls_30d: number; signups_30d: number[]; storage: { s3: boolean; database: string } }
@@ -30,6 +31,7 @@ export default function Admin() {
     <>
       <PageHeader title="Platform admin" description="Every company and user on this TalentLoop installation." />
       <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"><SystemStatus /><SampleData /></div>
+      <div className="mb-5"><AIModels /></div>
       {!d ? <CardsSkeleton n={6} /> : <>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
           <Stat label="Companies" value={d.orgs} icon={<Building2 />} />

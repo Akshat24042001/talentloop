@@ -7,18 +7,36 @@ Every setting the server reads. Set them in Render > the service > Environment. 
 | Setting | What it does | Example |
 |---|---|---|
 | `DATABASE_URL` | Accounts, jobs, candidates. Supabase **Session pooler** URI (port 5432). | `postgresql://postgres.xxxx:PASSWORD@aws-0-ap-south-1.pooler.supabase.com:5432/postgres` |
-| `LLM_API_KEY` | AI (OpenRouter `sk-or-...` or OpenAI). | |
+| AI provider key(s) | At least one of `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` (Grok). The older `LLM_API_KEY` still works (`sk-or-...` = OpenRouter). Pick provider and models in Platform admin > AI models; providers without a key show there but are disabled. | |
 | `VAPI_PUBLIC_KEY` | Browser voice interviews. | |
 | `APP_URL` | The address people open; used in every emailed link. Without it links fall back to Render's own URL. | `https://talentloop-latest.onrender.com` |
 | `PLATFORM_ADMIN_EMAILS` | Who gets the Platform admin console (comma-separated). | |
 | `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Resumes, recordings, interview records, logos. Needed on Render's free plan (no disk): without it files are lost on every restart. | Supabase Storage S3 endpoint |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | **All emails**: invites, interview confirmations and reminders, calendar invites, sign-in codes for `/me`, referee requests, manager approvals. Without SMTP nothing is emailed; messages wait in Outbox. | Gmail: `smtp.gmail.com`, `587`, your address, an app password, `Hiring <you@company.com>` |
+| `MAIL_MODE` | **Who actually gets email.** `test` (default, also used for any typo): every email goes only to `MAIL_TEST_TO`, subject tagged `[TEST for real@address]`; WhatsApp is never sent. `live`: real recipients, but sample candidates and dummy domains (`example.com`, `.test`, `.invalid`, `.local`, `localhost`) are always skipped. `off`: nothing is sent. | `test` |
+| `MAIL_TEST_TO` | The one inbox that receives everything in test mode. If empty in test mode, nothing is sent. | `you@gmail.com` |
+
+### Email with Resend
+
+```
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587
+SMTP_USER=resend
+SMTP_PASSWORD=<your Resend API key, re_...>
+SMTP_FROM=TalentLoop <onboarding@resend.dev>
+MAIL_MODE=test
+MAIL_TEST_TO=<the email your Resend account is registered with>
+```
+
+`onboarding@resend.dev` only delivers to the email address that owns the Resend account. To email anyone else (`MAIL_MODE=live`),
+verify your own domain in Resend and change `SMTP_FROM` to an address on it. Messages held in test mode are not sent later
+by switching to live; retry them one by one from Outbox if needed.
 
 ## Strongly recommended
 
 | Setting | Why | Default |
 |---|---|---|
-| `FAST_MODEL` | The model that runs live interview turns. Free models are slow and rate-limited; a paid fast model is the biggest reliability win for AI interviews. Comma-separated list = fallbacks in order. | free OpenRouter models |
+| `FAST_MODEL` | Server default only: Platform admin > AI models overrides it. The model that runs live interview turns. Free models are slow and rate-limited; a paid fast model is the biggest reliability win for AI interviews. Comma-separated list = fallbacks in order. | free OpenRouter models |
 | `SMART_MODEL` | Plans, scoring, reports. | free OpenRouter models |
 | `VISION_MODEL` | Reads photo and scanned resumes; reviews live-task screenshots. Any OpenRouter model that accepts images (check "image" input on openrouter.ai/models). | off |
 | `URL_SECRET` | Long random string that signs links (`openssl rand -hex 32`). If unset, one is generated and kept in the database, which also works. | stored in DB |

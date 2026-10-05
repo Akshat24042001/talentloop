@@ -6,7 +6,7 @@ import { DialogHost } from './components/dialogs'
 import { setUnauthorizedHandler } from './lib/api'
 import { match, navigate, useLocation } from './lib/router'
 import { SessionProvider, useSession } from './lib/session'
-import { Invite, Login, Signup } from './site/Auth'
+import { Forgot, Invite, Login, Signup } from './site/Auth'
 
 // Every page is its own chunk: the careers page or a candidate link never downloads the HR workspace.
 function named<T extends Record<string, unknown>>(load: () => Promise<T>, key: keyof T) {
@@ -106,6 +106,7 @@ function Routes() {
   if (path === '/app' || path.startsWith('/app/') || path === '/admin') return <Workspace path={path} />
   let p
   if (path === '/login') return <Login />
+  if (path === '/forgot') return <Forgot />
   if (path === '/signup') return <Signup />
   if ((p = match('/invite/:token', path))) return <Invite token={p.token!} />
   if ((p = match('/careers/:slug', path))) return <CareersPage slug={p.slug!} />

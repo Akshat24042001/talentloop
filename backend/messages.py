@@ -8,6 +8,14 @@ Email: SMTP_HOST, SMTP_PORT (587 = STARTTLS, 465 = SSL), SMTP_USER, SMTP_PASSWOR
 WhatsApp: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TEMPLATE (an approved template whose body has one variable,
 {{1}}, that receives the message text), WHATSAPP_TEMPLATE_LANG (default en), WHATSAPP_API_VERSION (default v21.0).
 Meta only allows business-initiated WhatsApp messages through approved templates, hence the single-variable template.
+
+Delivery mode (MAIL_MODE), checked right before anything leaves the server, in this one place:
+  test (default)  every email goes ONLY to MAIL_TEST_TO, with the real recipient shown at the top; WhatsApp is never
+                  sent. Without MAIL_TEST_TO nothing is sent (held).
+  live            real recipients, except sample and dummy addresses (example.com, .test, .invalid, .localhost ...)
+                  and candidates tagged "sample", which are never contacted in any mode.
+  off             nothing is sent (held).
+A typo or an unknown value counts as "test", so a mistake never emails real people.
 """
 import asyncio
 import email.utils
@@ -26,6 +34,10 @@ from . import db
 log = logging.getLogger("messages")
 
 SMTP = {k: (os.getenv(f"SMTP_{k}") or "").strip() for k in ("HOST", "PORT", "USER", "PASSWORD", "FROM")}
+_mode = (os.getenv("MAIL_MODE") or "test").strip().lower()
+MAIL_MODE = _mode if _mode in ("test", "live", "off") else "test"
+MAIL_TEST_TO = (os.getenv("MAIL_TEST_TO") or "").strip().lower()
+DUMMY_DOMAIN = re.compile(r"(^|\.)(example\.(com|org|net)|test|example|invalid|localhost|local|mailinator\.com)$", re.I)
 WA = {"token": (os.getenv("WHATSAPP_TOKEN") or "").strip(), "phone_id": (os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "").strip(),
       "template": (os.getenv("WHATSAPP_TEMPLATE") or "").strip(), "lang": (os.getenv("WHATSAPP_TEMPLATE_LANG") or "en").strip(),
       "version": (os.getenv("WHATSAPP_API_VERSION") or "v21.0").strip()}
@@ -40,7 +52,32 @@ def whatsapp_enabled() -> bool:
 
 
 def status() -> dict:
-    return {"email": email_enabled(), "whatsapp": whatsapp_enabled()}
+    return {"email": email_enabled(), "whatsapp": whatsapp_enabled(), "mode": MAIL_MODE, "test_to": MAIL_TEST_TO if MAIL_MODE == "test" else ""}
+
+
+def is_dummy(addr: str) -> bool:
+    dom = (addr or "").rsplit("@", 1)[-1].strip().lower().rstrip(">")
+    return not dom or "." not in dom and dom != "localhost" or bool(DUMMY_DOMAIN.search(dom))
+
+
+def delivery(s, m: db.Message) -> tuple[str | None, str]:
+    """Where this message may actually go right now: (address, "") or (None, why it is held or skipped)."""
+    if MAIL_MODE == "off":
+        return None, "held: MAIL_MODE is off, nothing is sent"
+    if m.channel != "email":
+        if MAIL_MODE != "live":
+            return None, "held: test mode never sends WhatsApp"
+    elif MAIL_MODE == "test":
+        if not MAIL_TEST_TO or "@" not in MAIL_TEST_TO:
+            return None, "held: test mode, and MAIL_TEST_TO is not set"
+        return MAIL_TEST_TO, ""
+    if m.channel == "email" and is_dummy(m.to):
+        return None, "skipped: sample or dummy address"
+    if m.candidate_id:
+        c = s.get(db.Candidate, m.candidate_id)
+        if c is not None and ("sample" in (c.tags or []) or c.source == "demo"):
+            return None, "skipped: sample candidate"
+    return m.to, ""
 
 
 def norm_phone(phone: str, default_cc: str = "91") -> str:
@@ -80,16 +117,20 @@ def _wa_text(body: str) -> str:
     return re.sub(r"\s+", " ", body).strip()[:900]
 
 
-def _send_email(m: db.Message, sender_name: str = "") -> None:
+def _send_email(m: db.Message, sender_name: str = "", to: str = "") -> None:
+    if not to:
+        raise RuntimeError("no delivery address")              # never fall back to m.to: delivery() decides
     msg = EmailMessage()
     name, addr = email.utils.parseaddr(SMTP["FROM"])
     msg["From"] = email.utils.formataddr((sender_name or name, addr)) if addr else SMTP["FROM"]
-    msg["To"] = m.to
-    msg["Subject"] = m.subject
+    msg["To"] = to
+    test = to != m.to
+    msg["Subject"] = (f"[TEST for {m.to}] " if test else "") + m.subject
     msg["Date"] = email.utils.formatdate(localtime=True)
     msg["Message-ID"] = email.utils.make_msgid(domain=(SMTP["FROM"].split("@")[-1].strip("> ") or "talentloop"))
-    msg.set_content(m.body)
     ics = _ics_attachment(m)
+    msg.set_content((f"TEST MODE: TalentLoop sent this to you instead of {m.to}. Set MAIL_MODE=live to email real recipients.\n"
+                     f"{'-' * 60}\n\n" if test else "") + m.body)
     if ics:
         msg.add_attachment(ics.encode(), maintype="text", subtype="calendar", filename="interview.ics", params={"method": "REQUEST"})
     port = int(SMTP["PORT"] or 587)
@@ -98,7 +139,7 @@ def _send_email(m: db.Message, sender_name: str = "") -> None:
         with smtplib.SMTP_SSL(SMTP["HOST"], port, context=ctx, timeout=30) as srv:
             if SMTP["USER"]:
                 srv.login(SMTP["USER"], SMTP["PASSWORD"])
-            srv.send_message(msg)
+            srv.send_message(msg, to_addrs=[to])
     else:
         with smtplib.SMTP(SMTP["HOST"], port, timeout=30) as srv:
             srv.ehlo()
@@ -107,7 +148,7 @@ def _send_email(m: db.Message, sender_name: str = "") -> None:
                 srv.ehlo()
             if SMTP["USER"]:
                 srv.login(SMTP["USER"], SMTP["PASSWORD"])
-            srv.send_message(msg)
+            srv.send_message(msg, to_addrs=[to])
 
 
 def _ics_attachment(m: db.Message) -> str:
@@ -145,14 +186,18 @@ async def dispatch_once(limit: int = 50) -> int:
             m = s.get(db.Message, mid)
             if not m or m.status != "queued":
                 continue
+            to, why = delivery(s, m)
+            if not to:
+                m.status, m.error = ("held" if why.startswith("held") else "skipped"), why
+                continue
             try:
                 if channel == "email":
                     org = s.get(db.Org, m.org_id) if m.org_id else None
                     sender = ((org.settings or {}).get("sender_name") or org.name) if org else ""
-                    await asyncio.to_thread(_send_email, m, sender)
+                    await asyncio.to_thread(_send_email, m, sender, to)
                 else:
                     await _send_whatsapp(m)
-                m.status, m.sent_at, m.error = "sent", time.time(), ""
+                m.status, m.sent_at, m.error = "sent", time.time(), ("" if to == m.to else f"test mode: delivered to {to}")
                 sent += 1
             except Exception as e:
                 m.status, m.error = "failed", f"{type(e).__name__}: {str(e)[:400]}"

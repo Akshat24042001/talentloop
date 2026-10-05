@@ -46,7 +46,7 @@ def apply(*routers) -> None:
         for route in getattr(r, "routes", []):
             if isinstance(route, APIRoute):
                 route.tags = [tag_for(route.path)]
-                if route.path.startswith(("/app", "/login", "/signup", "/careers/", "/r/", "/status/", "/decide/", "/feedback/", "/ref/",
+                if route.path.startswith(("/app", "/login", "/forgot", "/signup", "/careers/", "/r/", "/status/", "/decide/", "/feedback/", "/ref/",
                                           "/results/", "/drive/", "/invite/", "/me", "/admin", "/dashboard.html", "/hr.html", "/report.html")) \
                         and not route.path.startswith("/api/"):
                     route.include_in_schema = False          # web pages, not API endpoints

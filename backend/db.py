@@ -269,7 +269,7 @@ class AppSecret(Base):
     """Server-side keys generated once (for example the key that encrypts ids in URLs)."""
     __tablename__ = "app_secrets"
     name: Mapped[str] = mapped_column(String(40), primary_key=True)
-    value: Mapped[str] = mapped_column(String(200))
+    value: Mapped[str] = mapped_column(Text)
 
 
 class InterviewIndex(Base):
@@ -433,6 +433,11 @@ def migrate() -> None:
                     "CREATE INDEX IF NOT EXISTS ix_matches_job_rank ON matches (job_id, rank)",
                     "CREATE INDEX IF NOT EXISTS ix_activity_org_at ON activity (org_id, at)"):
             conn.execute(text(ddl))
+    if engine.dialect.name == "postgresql":          # app_secrets.value was VARCHAR(200); settings like the model choice are longer
+        cols = {c["name"]: c for c in insp.get_columns("app_secrets")}
+        if "value" in cols and getattr(cols["value"]["type"], "length", None):
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE app_secrets ALTER COLUMN value TYPE TEXT"))
     _backfill_numbers()
     log.info("database ready (%s)", "sqlite" if IS_SQLITE else "postgres")
 

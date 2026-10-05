@@ -53,8 +53,42 @@ export function Login() {
         <Field label="Work email" htmlFor="email"><Input id="email" type="email" autoComplete="email" required autoFocus value={email} onChange={e => setEmail(e.target.value)} /></Field>
         <Field label="Password" htmlFor="password"><Input id="password" type="password" autoComplete="current-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<KeyRound />}>Sign in</Button>
-        <p className="text-center text-xs text-slate-500 dark:text-slate-400">Forgot your password? Ask your company admin to re-invite you.</p>
+        <p className="text-center text-sm"><a href={`/forgot${email ? `?email=${encodeURIComponent(email)}` : ''}`} className="font-medium text-brand-600 hover:underline dark:text-brand-300">Forgot your password?</a></p>
       </form>
+    </AuthLayout>
+  )
+}
+
+export function Forgot() {
+  const { query } = useLocation()
+  const [email, setEmail] = useState(query.get('email') || ''), [code, setCode] = useState(''), [pw, setPw] = useState('')
+  const [step, setStep] = useState<'ask' | 'reset' | 'done'>('ask'), [err, setErr] = useState(''), [busy, setBusy] = useState(false)
+  async function ask(e: FormEvent) {
+    e.preventDefault(); setErr(''); setBusy(true)
+    try { await api('/api/auth/forgot', { json: { email }, quiet401: true }); setStep('reset') } catch (x: any) { setErr(x.message) }
+    setBusy(false)
+  }
+  async function reset(e: FormEvent) {
+    e.preventDefault(); setErr(''); setBusy(true)
+    try { await api('/api/auth/reset', { json: { email, code, password: pw }, quiet401: true }); setStep('done') } catch (x: any) { setErr(x.message) }
+    setBusy(false)
+  }
+  return (
+    <AuthLayout title="Reset your password" subtitle={step === 'ask' ? "We'll email you a 6-digit code." : step === 'reset' ? `If ${email} has an account, a code is on its way. Check spam too.` : undefined}
+      footer={<a href="/login" className="font-semibold text-brand-600 hover:underline dark:text-brand-300">Back to sign in</a>}>
+      {step === 'done' ? <Alert tone="success" title="Password changed">You were signed out on every device. <a className="font-semibold underline" href={`/login`}>Sign in</a> with the new password.</Alert>
+        : step === 'ask' ? <form onSubmit={ask} className="space-y-4">
+          {err && <Alert tone="danger">{err}</Alert>}
+          <Field label="Email" htmlFor="f-email"><Input id="f-email" type="email" autoComplete="email" required autoFocus value={email} onChange={e => setEmail(e.target.value)} /></Field>
+          <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<Mail />}>Email me a code</Button>
+        </form>
+        : <form onSubmit={reset} className="space-y-4">
+          {err && <Alert tone="danger">{err}</Alert>}
+          <Field label="6-digit code" htmlFor="f-code"><Input id="f-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
+          <Field label="New password" htmlFor="f-pw" hint="At least 8 characters."><Input id="f-pw" type="password" autoComplete="new-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
+          <Button variant="primary" className="w-full" type="submit" loading={busy} disabled={code.length !== 6 || pw.length < 8} icon={<KeyRound />}>Set new password</Button>
+          <button type="button" className="w-full text-center text-sm text-slate-500 hover:underline dark:text-slate-400" onClick={() => { setStep('ask'); setCode('') }}>Send a new code</button>
+        </form>}
     </AuthLayout>
   )
 }

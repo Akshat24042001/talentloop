@@ -621,3 +621,139 @@ def public_logo(org_id: str, name: str):
     from fastapi.responses import FileResponse
     return FileResponse(p, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000, immutable",
                                                              "Content-Security-Policy": "default-src 'none'", "X-Content-Type-Options": "nosniff"})
+
+
+# ---------------------------------------------------------------------------
+# forgotten password: a 6-digit code by email (works once: it is tied to the current password)
+# ---------------------------------------------------------------------------
+def _reset_code(user: db.User, window: int) -> str:
+    import hashlib
+    import hmac
+    from . import refs
+    n = int.from_bytes(hmac.new(refs.key(), f"reset|{user.email}|{user.password_hash}|{window}".encode(), hashlib.sha256).digest()[:6], "big")
+    return f"{n % 1_000_000:06d}"
+
+
+@router.post("/api/auth/forgot")
+@offload
+async def forgot_password(req: Request):
+    body = await req.json()
+    email = str(body.get("email") or "").strip().lower()
+    auth.rate_limit(f"forgot:{auth.client_ip(req)}", 10, 3600)
+    auth.rate_limit(f"forgot:{email}", 4, 3600)
+    from . import messages
+    with db.session() as s:
+        user = s.query(db.User).filter_by(email=email).first()
+        if user and not user.disabled:                # same reply either way: no account discovery
+            mem = s.query(db.Membership).filter_by(user_id=user.id).first()
+            code = _reset_code(user, int(time.time() // 900))
+            messages.queue(s, mem.org_id if mem else "", to_email=email, subject="Reset your TalentLoop password",
+                           body=f"Your password reset code is {code}.\n\nIt works once, for about 15 minutes. If you didn't ask for it, ignore this email: "
+                                "your password stays the same.", template="password_reset")
+    return {"ok": True}
+
+
+@router.post("/api/auth/reset")
+@offload
+async def reset_password(req: Request):
+    body = await req.json()
+    email = str(body.get("email") or "").strip().lower()
+    code = "".join(ch for ch in str(body.get("code") or "") if ch.isdigit())
+    pw = str(body.get("password") or "")
+    auth.rate_limit(f"reset:{auth.client_ip(req)}", 20, 600)
+    auth.rate_limit(f"reset:{email}", 8, 600)
+    if len(pw) < 8:
+        raise HTTPException(400, "Use at least 8 characters.")
+    import hmac
+    with db.session() as s:
+        user = s.query(db.User).filter_by(email=email).first()
+        w = int(time.time() // 900)
+        if not user or len(code) != 6 or not any(hmac.compare_digest(code, _reset_code(user, x)) for x in (w, w - 1)):
+            raise HTTPException(400, "That code isn't right or has expired. Ask for a new one.")
+        user.password_hash = auth.hash_password(pw)
+        s.query(db.AuthSession).filter_by(user_id=user.id).delete()    # signed out everywhere
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# AI models (platform admin): provider and models per role, switchable without a restart
+# ---------------------------------------------------------------------------
+_model_cache: dict[str, tuple[float, list]] = {}
+
+
+def _llm_state() -> dict:
+    from . import llm
+    return {"providers": [{"id": k, "label": p["label"], "available": llm.available(k), "env": p["env"], "note": p["note"], "site": p["site"],
+                           "base_url": p["base_url"]} for k, p in llm.PROVIDERS.items() if k != "custom" or p["base_url"]],
+            "config": llm.CONFIG, "source": llm.SOURCE, "suggest": llm.SUGGEST, "note": llm.MODEL_CHECK.get("note", ""), "mock": llm.MOCK}
+
+
+@router.get("/api/platform/llm")
+def llm_settings(req: Request):
+    with db.session() as s:
+        _admin(req, s)
+    return _llm_state()
+
+
+@router.get("/api/platform/llm/models")
+async def llm_models(req: Request, provider: str):
+    from . import llm
+    with db.session() as s:
+        _admin(req, s)
+    if provider not in llm.PROVIDERS:
+        raise HTTPException(404, "Unknown provider")
+    hit = _model_cache.get(provider)
+    if hit and time.time() - hit[0] < 600:
+        return {"models": hit[1]}
+    try:
+        models = await llm.list_models(provider)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    except Exception as e:
+        raise HTTPException(502, f"Couldn't list {llm.PROVIDERS[provider]['label']} models: {type(e).__name__}") from None
+    _model_cache[provider] = (time.time(), models)
+    return {"models": models}
+
+
+@router.put("/api/platform/llm")
+async def llm_save(req: Request):
+    from . import llm
+    body = await req.json()
+    with db.session() as s:
+        ctx = _admin(req, s)
+    for role in ("fast", "smart", "vision"):
+        r = body.get(role) or {}
+        pid, models = r.get("provider"), [m for m in r.get("models") or [] if str(m).strip()]
+        if pid not in llm.PROVIDERS:
+            raise HTTPException(400, f"Pick a provider for {role}.")
+        if role != "vision" and not models:
+            raise HTTPException(400, f"Pick at least one model for {role}.")
+        if models and not llm.available(pid):
+            raise HTTPException(400, f"{llm.PROVIDERS[pid]['label']} isn't available: set {llm.PROVIDERS[pid]['env']} on the server first.")
+    llm.save(body)
+    with db.session() as s:
+        log_activity(s, ctx, "settings_updated", "AI models: " + "; ".join(f"{r} {llm.CONFIG[r]['provider']}:{','.join(llm.CONFIG[r]['models'])}" for r in ("fast", "smart", "vision"))[:300])
+    return _llm_state()
+
+
+@router.delete("/api/platform/llm")
+def llm_reset(req: Request):
+    from . import llm
+    with db.session() as s:
+        _admin(req, s)
+    llm.reset()
+    return _llm_state()
+
+
+@router.post("/api/platform/llm/test")
+async def llm_test(req: Request):
+    from . import llm
+    body = await req.json()
+    with db.session() as s:
+        _admin(req, s)
+    role = body.get("role")
+    if role not in ("fast", "smart", "vision"):
+        raise HTTPException(400, "Unknown role")
+    if llm.MOCK:
+        return {"ok": True, "model": "mock", "seconds": 0, "reply": {"mock": True}}
+    return await llm.test_role(role)

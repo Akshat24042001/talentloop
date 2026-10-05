@@ -436,7 +436,7 @@ function Notes({ d, canEdit, onSaved }: { d: Detail; canEdit: boolean; onSaved: 
 }
 
 export const MSG_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = { sent: 'success', queued: 'warning', failed: 'danger', not_configured: 'neutral' }
-export const MSG_LABEL: Record<string, string> = { sent: 'Sent', queued: 'Queued', failed: 'Failed', not_configured: 'Channel not set up' }
+export const MSG_LABEL: Record<string, string> = { sent: 'Sent', queued: 'Queued', failed: 'Failed', not_configured: 'Channel not set up', held: 'Held (not sent)', skipped: 'Skipped (sample or dummy)' }
 function Messages({ msgs, onRetry }: { msgs: Msg[]; onRetry: () => void }) {
   if (!msgs.length) return null
   async function retry(id: string) { try { await api(`/api/messages/${id}/retry`, { method: 'POST' }); toast('Queued again'); onRetry() } catch (e: any) { toast(e.message) } }
