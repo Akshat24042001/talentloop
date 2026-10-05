@@ -164,4 +164,4 @@ in one process. Don't scale the backend beyond one instance.
 The background worker sends messages, applies deadlines and reminders, scores recordings, applies each company's
 retention settings and imports the mailbox. On Render's free plan the service sleeps after 15 minutes without
 visitors, and the worker sleeps with it: queued messages and reminders go out when the next visitor wakes it. Use the
-Starter plan (or an uptime pinger hitting `/api/health`) when candidates are moving through flows.
+Starter plan (or an uptime pinger hitting `/api/ping` every 5 minutes, see docs/ENVIRONMENT.md) when candidates are moving through flows.

@@ -10,7 +10,7 @@ services:
     # Free plan: no persistent disk, so interviews are wiped when the service restarts or sleeps
     # (after 15 min idle). For real candidates switch to "starter" and uncomment the disk block.
     plan: free
-    healthCheckPath: /api/health
+    healthCheckPath: /api/ping
     # disk:
     #   name: data
     #   mountPath: /data

@@ -455,6 +455,14 @@ check("an SVG logo (can carry scripts) is accepted", hr.post("/api/org/logo", fi
 check("a logo can be uploaded without signing in", pub.post("/api/org/logo", files={"file": ("logo.jpg", _b.getvalue(), "image/jpeg")}).status_code == 200)
 check("the careers page doesn't use the uploaded logo", lurl and lurl not in pub.get(f"/api/public/orgs/{ok(hr.get('/api/org'))['slug']}").text)
 
+
+# Keep-awake ping and endpoint tags
+check("the keep-awake ping fails for HEAD (most uptime monitors use HEAD)", pub.head("/api/ping").status_code != 200)
+check("the keep-awake ping needs a sign-in", pub.get("/api/ping").status_code != 200)
+_spec = pub.get("/openapi.json").json()
+_untagged = [f"{m} {p}" for p, ops in _spec["paths"].items() for m, op in ops.items() if (op.get("tags") or ["Other"])[0] == "Other"]
+check("some endpoints have no tag in the API docs", _untagged, str(_untagged))
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

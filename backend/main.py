@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
-from . import (api_accounts, api_candidate, api_flows, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
+from . import (api_accounts, api_candidate, api_flows, route_tags, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
                communication, mailbox, matching, media, messages, proctor, refs, retention, store, worker)
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
@@ -197,6 +197,17 @@ def reconnect_window(rec: dict) -> int:
 # ---------------------------------------------------------------------------
 # HR side
 # ---------------------------------------------------------------------------
+@app.get("/api/ping")
+@app.get("/healthz")
+@app.head("/api/ping", include_in_schema=False)
+@app.head("/healthz", include_in_schema=False)
+def ping():
+    """Keep-awake and uptime checks: no database, no sign-in, answers in microseconds. Accepts HEAD (most monitors
+    use it). Use this one for a cron every 5 minutes; /api/health also reports configuration."""
+    return {"ok": True, "t": int(time.time())}
+
+
+@app.head("/api/health", include_in_schema=False)
 @app.get("/api/health")
 def health(req: Request):
     """Liveness for the host's health check, plus what pages need (demo mode, public link base). Server
@@ -1265,6 +1276,8 @@ app.include_router(api_hiring.router)
 app.include_router(api_flows.router)
 app.include_router(api_portal.router)
 app.include_router(api_candidate.router)
+route_tags.apply(app.router, api_accounts.router, api_hiring.router, api_flows.router, api_portal.router, api_candidate.router)
+app.openapi_tags = route_tags.openapi_tags()
 
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
 SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
