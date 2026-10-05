@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, Field, Input } from '../components/ui'
 import { fullWhen } from '../components/SlotPicker'
 import { when } from '../lib/format'
 import { ask as confirm } from '../components/dialogs'
+import { STATUS_TONE } from '../app/flow/types'
 import { Frame, PageState, getJSON, send, type Brand } from './common'
 
 interface Step { name: string; type: string; status: string; status_label: string; link: string | null; deadline_at: number | null; booking: { starts_at: number; ends_at: number; interviewer: string } | null }
@@ -71,7 +72,7 @@ export default function MyApplications() {
             <Badge tone={a.stage === 'rejected' ? 'danger' : ['offer', 'hired'].includes(a.stage) ? 'success' : 'brand'}>{a.stage_label}</Badge>
           </div>
           {a.step && <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm dark:bg-ink-850">
-            <div className="text-xs text-slate-500 dark:text-slate-400">Now: {a.step.name} · {a.step.status_label}</div>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">Now: {a.step.name} <Badge tone={STATUS_TONE[a.step.status] || 'neutral'}>{a.step.status_label}</Badge></div>
             {a.step.booking && <div className="mt-1 flex items-center gap-1.5 font-semibold"><CalendarCheck className="size-4 text-emerald-600 dark:text-emerald-400" />{fullWhen(a.step.booking.starts_at)}{a.step.booking.interviewer ? <span className="font-normal text-slate-500 dark:text-slate-400"> with {a.step.booking.interviewer}</span> : null}</div>}
             {!a.step.booking && a.step.deadline_at && <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Please complete by {when(a.step.deadline_at)}</div>}
           </div>}

@@ -256,8 +256,9 @@ def console_user(uid: str, req: Request):
                  "last_seen_at": x.last_seen_at, "online": bool(x.last_seen_at and x.last_seen_at > t - 300)}
                 for x in s.query(db.AuthSession).filter(db.AuthSession.user_id == uid, db.AuthSession.expires_at > t)
                 .order_by(db.AuthSession.created_at.desc())]
+        sole = {o.id for o in _sole_owned(s, uid)}
         mems = [{"id": m.id, "org_id": m.org_id, "company": names.get(m.org_id, ""), "role": m.role, "role_label": auth.ROLE_LABEL.get(m.role, m.role),
-                 "title": m.title, "active": m.active is not False, "joined_at": m.created_at}
+                 "title": m.title, "active": m.active is not False, "joined_at": m.created_at, "only_owner": m.org_id in sole}
                 for m in s.query(db.Membership).filter_by(user_id=uid).order_by(db.Membership.created_at)]
         days = s.query(func.count()).select_from(db.UserDay).filter(db.UserDay.user_id == uid).scalar() or 0
         recent = [{"at": a.at, "action": a.action, "detail": a.detail, "company": names.get(a.org_id or "", "")}
@@ -831,8 +832,22 @@ def console_export(kind: str, req: Request, org: str = ""):
 # ---------------------------------------------------------------------------
 # delete an account
 # ---------------------------------------------------------------------------
+def _sole_owned(s, uid: str) -> list[db.Org]:
+    """Companies where this person is the only owner: deleting the person deletes these with everything in them."""
+    out = []
+    for m in s.query(db.Membership).filter_by(user_id=uid, role="owner"):
+        if not s.query(db.Membership).filter(db.Membership.org_id == m.org_id, db.Membership.role == "owner", db.Membership.user_id != uid).count():
+            o = s.get(db.Org, m.org_id)
+            if o:
+                out.append(o)
+    return out
+
+
 @router.delete("/api/console/users/{uid}")
 async def console_user_delete(uid: str, req: Request):
+    """Delete an account and everything that depends on it: its sign-ins, memberships and activity days, and every
+    company it is the only owner of (with all their jobs, candidates, files and interviews). Companies with another
+    owner stay; the person just leaves them. The audit log keeps entries, without the person's name."""
     body = await req.json()
     with db.session() as s:
         ctx = _admin(req, s)
@@ -845,16 +860,24 @@ async def console_user_delete(uid: str, req: Request):
             raise HTTPException(400, "Type the account's email to delete it.")
         if u.email in auth.PLATFORM_ADMINS:
             raise HTTPException(400, "This email is in PLATFORM_ADMIN_EMAILS on the server. Remove it there first.")
-        for m in s.query(db.Membership).filter_by(user_id=uid):
-            if m.role == "owner" and not _owners_left(s, m.org_id, m.id):
-                raise HTTPException(400, f"They are the only owner of {s.get(db.Org, m.org_id).name}. Make someone else owner first, or delete that company.")
-        email, orgs = u.email, [m.org_id for m in s.query(db.Membership).filter_by(user_id=uid)]
+        email = u.email
+        doomed = [(o.id, o.name) for o in _sole_owned(s, uid)]
+        others = [m.org_id for m in s.query(db.Membership).filter_by(user_id=uid) if m.org_id not in {i for i, _ in doomed}]
+    erased = []
+    for org_id, name in doomed:
+        out = _erase_org(org_id)
+        erased.append(f"{name} ({out['candidates']} candidates, {out['interviews']} interviews)")
+    with db.session() as s:
+        u = s.get(db.User, uid)
         s.query(db.AuthSession).filter_by(user_id=uid).delete()
         s.query(db.Membership).filter_by(user_id=uid).delete()
         s.query(db.UserDay).filter_by(user_id=uid).delete()
         s.query(db.Activity).filter_by(user_id=uid).update({db.Activity.user_id: None}, synchronize_session=False)
-        s.query(db.Job).filter_by(created_by=uid).update({db.Job.created_by: None}, synchronize_session=False)
+        for table in db.Base.metadata.sorted_tables:          # "created by" on jobs, interviews, invites ...: keep the row, forget the person
+            if "created_by" in table.c:
+                s.execute(table.update().where(table.c.created_by == uid).values(created_by=None))
         s.delete(u)
-        for org_id in orgs or [None]:
+        for org_id in others:
             _audit(s, ctx, org_id, f"Account {email} deleted")
-    return {"ok": True}
+        _audit(s, ctx, None, f"Account {email} deleted" + (f", with the companies only they owned: {'; '.join(erased)}" if erased else ""))
+    return {"ok": True, "companies_deleted": [n for _, n in doomed]}

@@ -131,12 +131,32 @@ check("a company-filtered report includes other companies", any(line.startswith(
 boss.patch(f"/api/console/candidates/{bc}", json={"name": "=HYPERLINK(\"http://evil\")"})
 check("a formula in the data runs in Excel", "\n=HYPERLINK" in boss.get("/api/console/export/candidates.csv").text or ",=HYPERLINK" in boss.get("/api/console/export/candidates.csv").text)
 gu = {u["email"]: u["id"] for u in boss.get("/api/admin/users").json()}
-check("the only owner's account can be deleted", boss.request("DELETE", f"/api/console/users/{gu['owner@beta.test']}", json={"confirm": "owner@beta.test"}).status_code != 400)
+# deleting the only owner deletes their company with it (checked at the end)
 check("an account is deleted without typing its email", boss.request("DELETE", f"/api/console/users/{gu['hr@gamma.test']}", json={"confirm": "nope"}).status_code != 400)
 check("a platform admin can delete their own account", boss.request("DELETE", f"/api/console/users/{gu['boss@talentloop.test']}", json={"confirm": "boss@talentloop.test"}).status_code != 400)
 r = boss.request("DELETE", f"/api/console/users/{gu['hr@gamma.test']}", json={"confirm": "hr@gamma.test"})
 check("an account can't be deleted", r.status_code != 200, r.text[:200])
 check("a deleted account can still sign in", nc.get("/api/auth/me").status_code != 401 or TestClient(app).post("/api/auth/login", json={"email": "hr@gamma.test", "password": "gamma-pass-1"}).status_code != 401)
+
+# --- deleting a person deletes the companies only they owned, and nothing else ---
+two = TestClient(app); signup(two, "solo@delta.test", "Delta"); two.post("/api/demo/seed")
+inv = boss.post(f"/api/console/orgs/{Bq}/invites", json={"email": "solo@delta.test", "role": "owner"}).json()
+two.post(f"/api/invites/{inv['path'].split('/')[-1]}/accept", json={"password": "correct-horse-1"})
+uid2 = {u["email"]: u["id"] for u in boss.get("/api/admin/users").json()}["solo@delta.test"]
+D = {o["name"]: o["id"] for o in boss.get("/api/admin/orgs").json()}["Delta"]
+detail = boss.get(f"/api/console/users/{uid2}").json()
+check("the account page doesn't say which companies would be deleted", {m["company"]: m["only_owner"] for m in detail["memberships"]} != {"Delta": True, "Beta": False}, str(detail["memberships"]))
+beta_before = boss.get(f"/api/console/candidates?org={Bq}").json()["total"]
+r = boss.request("DELETE", f"/api/console/users/{uid2}", json={"confirm": "solo@delta.test"})
+check("deleting a sole owner fails", r.status_code != 200 or r.json().get("companies_deleted") != ["Delta"], r.text[:200])
+with db.session() as s:
+    left = [t.name for t in db.Base.metadata.sorted_tables if "org_id" in t.c and s.execute(t.select().where(t.c.org_id == D)).first() is not None]
+    check("the sole owner's company survives", s.get(db.Org, D) is not None or left, str(left))
+    check("a company with another owner was deleted", s.get(db.Org, Bq) is None)
+    check("the person is still in the other company", s.query(db.Membership).filter_by(user_id=uid2).count())
+    check("the person's account survives", s.get(db.User, uid2) is not None)
+check("the other company lost data", boss.get(f"/api/console/candidates?org={Bq}").json()["total"] != beta_before)
+check("the deleted person can still sign in", two.get("/api/auth/me").status_code != 401)
 
 bugs = [n for n, b in RES if b]
 print(f"\n{'CONSOLE CHECKS PASSED' if not bugs else 'CONSOLE CHECKS FAILED'} ({len(RES)})")

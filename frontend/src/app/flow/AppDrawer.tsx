@@ -375,7 +375,7 @@ function Integrity({ res, hasPhoto }: { res: RoundSummary; hasPhoto: boolean }) 
   if (!counts.length && !snaps.length && !g.start_photo && !reasons.length && !g.risk) return null
   return (
     <div className={`rounded-xl p-3 ${res.flagged ? 'bg-red-50 dark:bg-red-500/10' : 'bg-slate-50 dark:bg-ink-850'}`}>
-      <H>Integrity{g.risk ? ` · ${g.risk} risk` : ''}</H>
+      <H>Integrity {g.risk && <Badge tone={g.risk === 'high' ? 'danger' : g.risk === 'medium' ? 'warning' : 'success'}>{g.risk} risk</Badge>}</H>
       {res.flagged && <p className="mb-1.5 text-red-700 dark:text-red-300">Flagged for review. Flags never reject anyone on their own.</p>}
       {reasons.length > 0 && <ul className="mb-1.5 list-disc pl-5">{reasons.map((x, i) => <li key={i}>{x}</li>)}</ul>}
       {counts.length > 0 && <div className="flex flex-wrap gap-1.5">{counts.map(([k, l]) => <Badge key={k} tone="warning">{l}: {g[k]}</Badge>)}</div>}

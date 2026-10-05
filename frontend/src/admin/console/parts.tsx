@@ -10,6 +10,8 @@ import { api } from '../../lib/api'
 import { navigate } from '../../lib/router'
 import { JOB_STATUS, SOURCE_LABEL, STAGE_TONE } from '../../app/labels'
 
+// AI interview recommendation (brain.RECOMMENDATIONS) -> colour
+export const RECOMMENDATION_TONE: Record<string, 'success' | 'warning' | 'danger'> = { strong_yes: 'success', yes: 'success', maybe: 'warning', no: 'danger' }
 export const label = (s: string) => s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
 export const go = (to: string) => navigate(to)
 
@@ -227,7 +229,7 @@ export function InterviewPanel({ id, onClose }: { id: string | null; onClose: ()
       {error ? <p className="text-sm text-red-600">{error}</p> : !v ? <Loading /> : <>
         <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ id: 'report', label: 'Report' }, { id: 'transcript', label: 'Transcript' }]} />
         {tab === 'report' && (r.summary || r.recommendation ? <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">{r.recommendation && <Badge tone="brand">Recommendation: {label(r.recommendation)}</Badge>}{r.confidence && <Badge>Confidence: {label(r.confidence)}</Badge>}
+          <div className="flex flex-wrap gap-2">{r.recommendation && <Badge tone={RECOMMENDATION_TONE[r.recommendation] || 'neutral'}>Recommendation: {label(r.recommendation)}</Badge>}{r.confidence && <Badge>Confidence: {label(r.confidence)}</Badge>}
             {v.summary?.overall != null && <Badge tone="violet">Overall {Math.round(v.summary.overall)}</Badge>}</div>
           {r.summary && <p className="text-sm leading-relaxed">{r.summary}</p>}
           <List t="Strengths" items={r.strengths} /><List t="Concerns" items={r.concerns} /><List t="Red flags" items={r.red_flags} />

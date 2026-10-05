@@ -7,7 +7,7 @@ import { Ago } from '../../components/kit'
 import { useApi } from '../../components/kit'
 import { api } from '../../lib/api'
 import { ACTION_LABEL, JOB_STATUS } from '../../app/labels'
-import { CandidatePanel, CompanyLink, FilterBar, Head, InterviewPanel, JobPanel, JobStatus, OrgSelect, Paging, SearchBox, Table, label, type Paged } from './parts'
+import { RECOMMENDATION_TONE, CandidatePanel, CompanyLink, FilterBar, Head, InterviewPanel, JobPanel, JobStatus, OrgSelect, Paging, SearchBox, Table, label, type Paged } from './parts'
 
 /** Debounced text for search boxes, and a page that resets when any filter changes. */
 function useFilters<T extends Record<string, string>>(init: T) {
@@ -87,7 +87,7 @@ export function Interviews({ org }: { org?: string }) {
       ...(org ? [] : [{ h: 'Company', cell: (r: IvRow) => <CompanyLink id={r.org_id} name={r.company} /> }]),
       { h: 'Role', cell: r => r.role || '-' },
       { h: 'Status', cell: r => <Badge tone={r.status === 'scored' || r.status === 'completed' ? 'success' : r.status === 'incomplete' ? 'warning' : 'neutral'}>{label(r.status)}</Badge> },
-      { h: 'Result', cell: r => r.overall != null ? <span className="tabular-nums">{Math.round(r.overall)}{r.recommendation ? ` · ${label(r.recommendation)}` : ''}</span> : '-' },
+      { h: 'Result', cell: r => r.overall != null || r.recommendation ? <span className="flex items-center gap-1.5 tabular-nums">{r.overall != null && Math.round(r.overall)}{r.recommendation && <Badge tone={RECOMMENDATION_TONE[r.recommendation] || 'neutral'}>{label(r.recommendation)}</Badge>}</span> : '-' },
       { h: 'When', cell: r => <Ago ts={r.created_at} />, className: 'whitespace-nowrap text-xs text-slate-500' },
     ]} />
     <Paging data={data} page={fl.page} setPage={fl.setPage} />
