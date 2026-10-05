@@ -1,17 +1,17 @@
 """Mail safety:  python -m tests.test_mail
 
-A fake SMTP server records every recipient, in the headers and in the SMTP envelope. Test mode must deliver only to
-MAIL_TEST_TO; live mode must skip sample and dummy addresses; off mode and unknown modes must never deliver to anyone
-else. WhatsApp must never go out outside live mode. A check passes when the problem does NOT happen."""
+A fake SMTP server records every recipient, in the headers and in the SMTP envelope. Outside production (APP_ENV) mail
+must go only to DEV_EMAIL_TO; production must skip sample and dummy addresses; an unknown APP_ENV must count as
+development. WhatsApp must never go out outside production. A check passes when the problem does NOT happen."""
 import asyncio, os, tempfile
 os.environ.update({"ALLOW_SAMPLE_DATA": "1", "LLM_MOCK": "1", "PUBLIC_URL": "https://x.test", "VAPI_PUBLIC_KEY": "pk", "ADMIN_KEY": "",
                    "DATA_DIR": tempfile.mkdtemp(), "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""), "PLATFORM_ADMIN_EMAILS": "", "SWEEP_EVERY_SEC": "0",
                    "SMTP_HOST": "smtp.fake", "SMTP_PORT": "587", "SMTP_USER": "resend", "SMTP_PASSWORD": "x", "SMTP_FROM": "TalentLoop <onboarding@resend.dev>",
                    "WHATSAPP_TOKEN": "t", "WHATSAPP_PHONE_NUMBER_ID": "1", "WHATSAPP_TEMPLATE": "tpl",
-                   "MAIL_MODE": "", "MAIL_TEST_TO": "me@mine.test.example"})
+                   "APP_ENV": "", "DEV_EMAIL_TO": "me@mine.test.example"})
 import logging; logging.disable(logging.CRITICAL)
 import importlib
-from backend import db, messages
+from backend import appenv, db, messages
 db.migrate()
 
 RES = []
@@ -51,46 +51,41 @@ def statuses():
     with db.session() as s:
         return [(m.channel, m.to, m.status, m.error) for m in s.query(db.Message).order_by(db.Message.created_at)]
 
-# default (MAIL_MODE unset) is test mode
-check("an unset MAIL_MODE isn't test mode", messages.MAIL_MODE != "test", messages.MAIL_MODE)
-messages.MAIL_TEST_TO = "me@mine.test"          # dummy-looking on purpose: test mode must still deliver only here
+# default (APP_ENV unset) is development
+check("an unset APP_ENV isn't development", appenv.APP_ENV != "development" or messages.PRODUCTION)
+messages.DEV_EMAIL_TO = "me@mine.test"          # dummy-looking on purpose: development must still deliver only here
 SENT.clear(); send("real.person@gmail.com", REAL, "9876543210")
-check("test mode emails the real recipient", any("real.person@gmail.com" in (h or "") or "real.person@gmail.com" in env for h, env, _, _ in SENT), str(SENT))
-check("test mode doesn't deliver to the test address", [x[1] for x in SENT] != [["me@mine.test"]], str(SENT))
-check("the test email doesn't say who it was for", not SENT or "real.person@gmail.com" not in SENT[0][2] or "TEST" not in SENT[0][3])
-check("test mode sends WhatsApp", WA, str(WA))
-check("the outbox loses the real recipient in test mode", statuses()[0][1] != "real.person@gmail.com", str(statuses()[:2]))
+check("development emails the real recipient", any("real.person@gmail.com" in (h or "") or "real.person@gmail.com" in env for h, env, _, _ in SENT), str(SENT))
+check("development doesn't deliver to the developer inbox", [x[1] for x in SENT] != [["me@mine.test"]], str(SENT))
+check("the dev email doesn't say who it was for", not SENT or "real.person@gmail.com" not in SENT[0][2] or "DEVELOPMENT" not in SENT[0][3])
+check("development sends WhatsApp", WA, str(WA))
+check("the outbox loses the real recipient in development", statuses()[0][1] != "real.person@gmail.com", str(statuses()[:2]))
 
-messages.MAIL_TEST_TO = ""
+messages.DEV_EMAIL_TO = ""
 SENT.clear(); send("real.person@gmail.com", REAL)
-check("test mode without a test address sends anyway", SENT, str(SENT))
-check("test mode without a test address isn't reported as held", statuses()[-1][2] != "held", str(statuses()[-1]))
+check("development without DEV_EMAIL_TO sends anyway", SENT, str(SENT))
+check("development without DEV_EMAIL_TO isn't reported as held", statuses()[-1][2] != "held", str(statuses()[-1]))
 
-messages.MAIL_MODE = "off"; messages.MAIL_TEST_TO = "me@mine.test"
-SENT.clear(); send("real.person@gmail.com", REAL)
-check("off mode sends email", SENT, str(SENT))
-
-messages.MAIL_MODE = "live"
+messages.PRODUCTION = True; messages.DEV_EMAIL_TO = "me@mine.test"
 SENT.clear(); WA.clear()
 send("real.person@gmail.com", REAL, "9876543210")
-check("live mode doesn't email the real recipient", [x[1] for x in SENT] != [["real.person@gmail.com"]], str(SENT))
-check("live mode doesn't send WhatsApp", WA != ["919876543210"], str(WA))
-check("a live email is marked as a test", SENT and SENT[0][2].startswith("[TEST"))
+check("production doesn't email the real recipient", [x[1] for x in SENT] != [["real.person@gmail.com"]], str(SENT))
+check("production doesn't send WhatsApp", WA != ["919876543210"], str(WA))
+check("a production email is marked as a dev email", SENT and SENT[0][2].startswith("[DEV"))
 SENT.clear(); WA.clear()
 send("sample@gmail.com", SAMPLE, "9876500000")
-check("live mode emails a sample candidate", SENT, str(SENT))
-check("live mode sends WhatsApp to a sample candidate", WA, str(WA))
+check("production emails a sample candidate", SENT, str(SENT))
+check("production sends WhatsApp to a sample candidate", WA, str(WA))
 for dummy in ("anyone@example.com", "x@college.test", "a@b.invalid", "z@foo.example", "staff@localhost"):
     SENT.clear(); send(dummy)
-    check(f"live mode emails a dummy address ({dummy})", SENT, str(SENT))
+    check(f"production emails a dummy address ({dummy})", SENT, str(SENT))
 SENT.clear(); send("manager@company.in")
-check("live mode doesn't email a real staff address", [x[1] for x in SENT] != [["manager@company.in"]], str(SENT))
+check("production doesn't email a real staff address", [x[1] for x in SENT] != [["manager@company.in"]], str(SENT))
 
-# a mistyped mode is treated as test
-os.environ["MAIL_MODE"] = "LIVEE"; importlib.reload(messages)
-check("a mistyped MAIL_MODE sends live", messages.MAIL_MODE != "test", messages.MAIL_MODE)
-os.environ["MAIL_MODE"] = "Live "; importlib.reload(messages)
-check("'Live ' with spaces and capitals isn't understood", messages.MAIL_MODE != "live")
+# names: anything unknown is development
+for raw, want in (("PRODUCTIONN", "development"), ("Production ", "production"), ("prod", "production"), ("staging", "testing"), ("live", "production"), ("", "development")):
+    os.environ["APP_ENV"] = raw; importlib.reload(appenv)
+    check(f"APP_ENV={raw!r} isn't read as {want}", appenv.APP_ENV != want, appenv.APP_ENV)
 
 bugs = [n for n, b, _ in RES if b]
 print(f"\n{'MAIL CHECKS PASSED' if not bugs else 'MAIL CHECKS FAILED'} ({len(RES)})")

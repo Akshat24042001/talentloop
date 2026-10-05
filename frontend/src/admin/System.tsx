@@ -18,7 +18,8 @@ export function SampleData() {
     catch (e: any) { toast(e.message) }
     setBusy('')
   }
-  if (!me.org) return null
+  const h = useHealth()
+  if (!me.org || h?.production) return null   // sample data is a development tool
   return (
     <Card><CardHeader title="Sample data" description={`For demos: 6 jobs and 40 realistic resumes, loaded into the workspace you're in now (${me.org.name}). Company users can only remove it.`} />
       <CardBody className="flex flex-wrap gap-2"><Button variant="primary" icon={<Database />} loading={busy === 'seed'} onClick={() => run('seed')}>Load sample data</Button>

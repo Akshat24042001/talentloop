@@ -45,15 +45,14 @@ export function Requests() {
 interface Msg { id: string; channel: string; to: string; subject: string; body: string; template: string; status: string; error: string; created_at: number; sent_at: number | null }
 export function Outbox() {
   const [status, setStatus] = useState(''), [page, setPage] = useState(1), [open, setOpen] = useState<string | null>(null)
-  const { data, error, reload } = useApi<{ total: number; items: Msg[]; channels: { email: boolean; whatsapp: boolean; mode?: string; test_to?: string } }>(`/api/messages?status=${status}&page=${page}`)
+  const { data, error, reload } = useApi<{ total: number; items: Msg[]; channels: { email: boolean; whatsapp: boolean; production?: boolean; dev_email_to?: string } }>(`/api/messages?status=${status}&page=${page}`)
   if (error) return <ErrorBox error={error} retry={reload} />
   async function retry(id: string) { try { await api(`/api/messages/${id}/retry`, { method: 'POST' }); toast('Queued again'); reload() } catch (e: any) { toast(e.message) } }
   return (
     <>
       <PageHeader title="Outbox" description="Every email and WhatsApp message sent to candidates, managers and interviewers." actions={<Button icon={<RefreshCw />} onClick={reload}>Refresh</Button>} />
-      {data?.channels.mode === 'test' && <Alert className="mb-4" tone="warning" title="Test mode: no real recipient gets email">
-        {data.channels.test_to ? <>Every email goes only to <b>{data.channels.test_to}</b>, with the real recipient shown at the top. WhatsApp is not sent.</> : <>MAIL_TEST_TO is not set, so nothing is sent; messages are held here.</>} Set MAIL_MODE=live on the server to email real recipients. Sample and dummy addresses are never emailed.</Alert>}
-      {data?.channels.mode === 'off' && <Alert className="mb-4" tone="warning" title="Sending is off">MAIL_MODE is off: messages are kept here and nothing is sent.</Alert>}
+      {data && data.channels.production === false && <Alert className="mb-4" tone="warning" title="Development: no real recipient gets email">
+        {data.channels.dev_email_to ? <>Every email goes only to <b>{data.channels.dev_email_to}</b>, with the real recipient shown at the top. WhatsApp is not sent.</> : <>DEV_EMAIL_TO is not set, so nothing is sent; messages are held here.</>} Real recipients get messages only when the server runs with APP_ENV=production. Sample and dummy addresses are never emailed.</Alert>}
       {data && (!data.channels.email || !data.channels.whatsapp) && <Alert className="mb-4" tone="info" title="Channels">
         Email is {data.channels.email ? 'set up' : 'not set up (SMTP_HOST and related settings on the server)'}. WhatsApp is {data.channels.whatsapp ? 'set up' : 'not set up (WHATSAPP_TOKEN and related settings)'}. Messages on a channel that isn't set up are kept here and can be retried later.</Alert>}
       <div className="mb-3"><Select aria-label="Status" className="w-48" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}><option value="">All messages</option>{Object.entries(MSG_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></div>

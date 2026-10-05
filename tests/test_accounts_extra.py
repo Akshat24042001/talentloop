@@ -5,7 +5,7 @@ import os, re, tempfile
 os.environ.update({"ALLOW_SAMPLE_DATA": "1", "LLM_MOCK": "1", "PUBLIC_URL": "https://x.test", "VAPI_PUBLIC_KEY": "pk", "ADMIN_KEY": "",
                    "DATA_DIR": tempfile.mkdtemp(), "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""), "PLATFORM_ADMIN_EMAILS": "boss@talentloop.test",
                    "SWEEP_EVERY_SEC": "0", "MESSAGES_EVERY_SEC": "0", "OPENROUTER_API_KEY": "sk-or-test", "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "",
-                   "GEMINI_API_KEY": "", "XAI_API_KEY": "", "LLM_API_KEY": "", "MAIL_MODE": "off"})
+                   "GEMINI_API_KEY": "", "XAI_API_KEY": "", "LLM_API_KEY": "", "APP_ENV": "development", "DEV_EMAIL_TO": ""})
 import logging; logging.disable(logging.CRITICAL)
 from fastapi.testclient import TestClient
 from backend.main import app

@@ -13,8 +13,21 @@ Every setting the server reads. Set them in Render > the service > Environment. 
 | `PLATFORM_ADMIN_EMAILS` | Who gets the Platform admin console (comma-separated). | |
 | `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Resumes, recordings, interview records, logos. Needed on Render's free plan (no disk): without it files are lost on every restart. | Supabase Storage S3 endpoint |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | **All emails**: invites, interview confirmations and reminders, calendar invites, sign-in codes for `/me`, referee requests, manager approvals. Without SMTP nothing is emailed; messages wait in Outbox. | Gmail: `smtp.gmail.com`, `587`, your address, an app password, `Hiring <you@company.com>` |
-| `MAIL_MODE` | **Who actually gets email.** `test` (default, also used for any typo): every email goes only to `MAIL_TEST_TO`, subject tagged `[TEST for real@address]`; WhatsApp is never sent. `live`: real recipients, but sample candidates and dummy domains (`example.com`, `.test`, `.invalid`, `.local`, `localhost`) are always skipped. `off`: nothing is sent. | `test` |
-| `MAIL_TEST_TO` | The one inbox that receives everything in test mode. If empty in test mode, nothing is sent. | `you@gmail.com` |
+| `APP_ENV` | **Which environment this is.** `development` (default; also used for anything misspelled), `testing`, or `production`. See the table below. | `development` |
+| `DEV_EMAIL_TO` | Outside production, the one inbox that receives every email. If empty, nothing is sent. | `you@gmail.com` |
+### Development vs production
+
+| | development / testing | production |
+|---|---|---|
+| Email | Only to `DEV_EMAIL_TO`, subject `[DEV for real@address]` | Real recipients |
+| WhatsApp | Never sent | Sent |
+| Sample candidates, dummy addresses (example.com, .test ...) | Never contacted | Never contacted |
+| Sample data (Platform admin) | Available | Hidden and refused |
+| Fake AI (`LLM_MOCK=1`) | Allowed | Ignored |
+| API docs (`/docs`, `/openapi.json`) | On | Off (set `API_DOCS=1` to turn on) |
+| "Development" badge on every page | Shown | Never |
+
+Any new development-only feature should check `appenv.IS_PRODUCTION` (backend) or `useHealth().production` (frontend).
 
 ### Email with Resend
 
@@ -24,13 +37,13 @@ SMTP_PORT=587
 SMTP_USER=resend
 SMTP_PASSWORD=<your Resend API key, re_...>
 SMTP_FROM=TalentLoop <onboarding@resend.dev>
-MAIL_MODE=test
-MAIL_TEST_TO=<the email your Resend account is registered with>
+APP_ENV=development
+DEV_EMAIL_TO=<the email your Resend account is registered with>
 ```
 
-`onboarding@resend.dev` only delivers to the email address that owns the Resend account. To email anyone else (`MAIL_MODE=live`),
-verify your own domain in Resend and change `SMTP_FROM` to an address on it. Messages held in test mode are not sent later
-by switching to live; retry them one by one from Outbox if needed.
+`onboarding@resend.dev` only delivers to the email address that owns the Resend account. To email anyone else (`APP_ENV=production`),
+verify your own domain in Resend and change `SMTP_FROM` to an address on it. Messages held in development are not sent later
+by switching to production; retry them one by one from Outbox if needed.
 
 ## Strongly recommended
 
@@ -63,7 +76,7 @@ by switching to live; retry them one by one from Outbox if needed.
 `S3_PATH_STYLE`, `PERSISTENT_DISK`, `DATA_DIR` (`/data`), `SWEEP_EVERY_SEC`, `MESSAGES_EVERY_SEC`,
 `RETENTION_EVERY_SEC`, `FINISH_DELAY_SEC`.
 
-Test only, never in production: `LLM_MOCK=1`, `ALLOW_SAMPLE_DATA=1`, `WEB_DIR`.
+Development only (ignored when `APP_ENV=production`): `LLM_MOCK=1`, `ALLOW_SAMPLE_DATA=1`. Test only: `WEB_DIR`.
 
 ## Keeping the free Render service awake
 

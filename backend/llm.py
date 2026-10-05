@@ -29,7 +29,8 @@ from openai import AsyncOpenAI, BadRequestError, NotFoundError
 
 log = logging.getLogger("llm")
 
-MOCK = os.getenv("LLM_MOCK", "0") == "1"
+from . import appenv  # noqa: E402
+MOCK = appenv.allowed_in_dev("LLM_MOCK")     # the fake AI never runs in production
 JSON_MODE = (os.getenv("LLM_JSON_MODE") or "1") == "1"
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 _LEGACY_KEY = (os.getenv("LLM_API_KEY") or "").strip()

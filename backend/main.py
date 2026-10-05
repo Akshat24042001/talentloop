@@ -51,7 +51,13 @@ db.migrate()   # idempotent: creates missing tables (also when the app is import
 refs.key()      # load (or create once) the key that encrypts ids in URLs, outside any request transaction
 store.ON_SAVE.append(ivindex.sync)
 store.ON_DELETE.append(ivindex.remove)
-app = FastAPI(title="TalentLoop")
+from . import appenv  # noqa: E402
+if appenv.IS_PRODUCTION:
+    log.info("APP_ENV=production: real recipients get email and WhatsApp")
+else:
+    log.warning("APP_ENV=%s: emails go only to %s, WhatsApp is off, development tools are on", appenv.APP_ENV,
+                appenv.DEV_EMAIL_TO or "nobody (DEV_EMAIL_TO is not set)")
+app = FastAPI(title="TalentLoop", **({} if appenv.API_DOCS else {"docs_url": None, "redoc_url": None, "openapi_url": None}))
 from .compress import Gzip  # noqa: E402
 app.add_middleware(Gzip)
 app.include_router(api_accounts.router)
@@ -213,7 +219,7 @@ def ping():
 def health(req: Request):
     """Liveness for the host's health check, plus what pages need (demo mode, public link base). Server
     configuration (models, storage, keys, errors) is only shown to platform admins."""
-    base = {"ok": True, "mock": llm.MOCK, "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"),
+    base = {"ok": True, **appenv.public(), "mock": llm.MOCK, "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"),
             "reconnect_window_sec": RECONNECT_WINDOW_SEC}
     with db.session() as s:
         ctx = auth.current(req, s, required=False)

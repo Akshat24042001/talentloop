@@ -1,3 +1,4 @@
+import { DevRibbon } from './lib/health'
 import { Suspense, lazy, useEffect, type ComponentType, type ReactNode } from 'react'
 import { Shell } from './app/Shell'
 import { Button, Logo, Toaster, TooltipProvider } from './components/ui'
@@ -124,5 +125,5 @@ function Routes() {
 }
 
 export default function App() {
-  return <SessionProvider><TooltipProvider><Suspense fallback={<Loading className="min-h-screen" />}><Routes /></Suspense><Toaster /><DialogHost /></TooltipProvider></SessionProvider>
+  return <SessionProvider><TooltipProvider><Suspense fallback={<Loading className="min-h-screen" />}><Routes /></Suspense><Toaster /><DialogHost /><DevRibbon /></TooltipProvider></SessionProvider>
 }

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { createElement, useEffect, useState } from 'react'
 import { api } from './api'
 
 // Everyone gets mock + link bases; `detail` (models, storage, keys) only comes back for platform admins.
 export interface Health {
+  env?: string; production?: boolean
   mock: boolean; public_url: string; app_url?: string; detail?: boolean
   fast_model?: string; smart_model?: string; free_models?: boolean; model_note?: string; llm_key_set?: boolean
   vapi_key_set?: boolean; admin_weak?: boolean; ffmpeg?: boolean
@@ -15,6 +16,14 @@ export function useHealth(): Health | null {
   const [h, set] = useState<Health | null>(null)
   useEffect(() => { (healthP ||= api<Health>('/api/health', { quiet401: true })).then(set).catch(() => { healthP = null }) }, [])
   return h
+}
+// Shown on every page outside production, so nobody mistakes a development server for the real one.
+export function DevRibbon() {
+  const h = useHealth()
+  if (!h || h.production !== false) return null
+  return createElement('div', { role: 'status', title: 'APP_ENV is not production: emails go only to the developer inbox, WhatsApp is off.',
+    className: 'pointer-events-none fixed bottom-3 left-3 z-[60] rounded-full bg-amber-400 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-950 shadow-lg ring-1 ring-amber-600/40' },
+    h.env === 'testing' ? 'Testing' : 'Development')
 }
 export function healthProblems(h: Health): string[] {
   const bad: string[] = []

@@ -1264,7 +1264,10 @@ def demo_seed(req: Request):
     with db.session() as s:
         ctx = ctx_of(req, s)
         auth.require(ctx, auth.MANAGE_JOBS, "load sample data")
-        if not (ctx.platform_admin or ctx.via_key or os.getenv("ALLOW_SAMPLE_DATA") == "1"):
+        from . import appenv
+        if appenv.IS_PRODUCTION:
+            raise HTTPException(403, "Sample data is only available in development (APP_ENV=development).")
+        if not (ctx.platform_admin or ctx.via_key or appenv.allowed_in_dev("ALLOW_SAMPLE_DATA")):
             raise HTTPException(403, "Sample data is loaded by the platform admin.")
         if s.query(db.Candidate).filter_by(org_id=ctx.org_id, source="demo").count():
             raise HTTPException(409, "Sample data is already loaded. Remove it first.")
