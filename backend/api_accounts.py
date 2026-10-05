@@ -500,6 +500,74 @@ def admin_overview(req: Request):
         }
 
 
+@router.get("/api/admin/analytics")
+def admin_analytics(req: Request, days: int = 30):
+    """Platform-wide numbers and daily series for the platform admin. Days are in REPORT_TZ (default India time)."""
+    from datetime import date, timedelta
+    days = days if days in (7, 30, 90) else 30
+    with db.session() as s:
+        _admin(req, s)
+        t = time.time()
+        today = date.fromisoformat(auth.local_day(t))
+        labels = [(today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)]
+        idx = {d: i for i, d in enumerate(labels)}
+        since = t - (days + 1) * 86400
+
+        def series(col, *where):
+            out = [0] * days
+            for (ts,) in s.query(col).filter(col > since, *where):
+                i = idx.get(auth.local_day(ts))
+                if i is not None:
+                    out[i] += 1
+            return out
+        active = [0] * days
+        for d, n in s.query(db.UserDay.day, func.count()).filter(db.UserDay.day >= labels[0]).group_by(db.UserDay.day):
+            if d in idx:
+                active[idx[d]] = n
+        active_orgs = [0] * days
+        for d, n in s.query(db.UserDay.day, func.count(func.distinct(db.UserDay.org_id))).filter(db.UserDay.day >= labels[0], db.UserDay.org_id.isnot(None)).group_by(db.UserDay.day):
+            if d in idx:
+                active_orgs[idx[d]] = n
+
+        def distinct_users(n_days):
+            first = (today - timedelta(days=n_days - 1)).isoformat()
+            return s.query(func.count(func.distinct(db.UserDay.user_id))).filter(db.UserDay.day >= first).scalar() or 0
+        online = s.query(db.AuthSession, db.User).join(db.User, db.User.id == db.AuthSession.user_id) \
+            .filter(db.AuthSession.last_seen_at > t - 300, db.AuthSession.expires_at > t).order_by(db.AuthSession.last_seen_at.desc()).all()
+        org_names = dict(s.query(db.Org.id, db.Org.name).all())
+        seen, people = set(), []
+        for sess, u in online:
+            if u.id in seen:
+                continue
+            seen.add(u.id)
+            people.append({"name": u.name, "email": u.email, "company": org_names.get(sess.org_id or "", ""), "last_seen_at": sess.last_seen_at,
+                           "platform_admin": u.is_platform_admin})
+        sample = db.Candidate.source == "demo"
+        top = s.query(db.Candidate.org_id, func.count()).filter(db.Candidate.created_at > t - days * 86400, ~sample) \
+            .group_by(db.Candidate.org_id).order_by(func.count().desc()).limit(8).all()
+        busiest = s.query(db.UserDay.org_id, func.count()).filter(db.UserDay.day >= labels[0], db.UserDay.org_id.isnot(None)) \
+            .group_by(db.UserDay.org_id).order_by(func.count().desc()).limit(8).all()
+        stages = dict(s.query(db.Application.stage, func.count()).group_by(db.Application.stage).all())
+        return {
+            "days": labels, "tz": os.getenv("REPORT_TZ") or "Asia/Kolkata",
+            "online_now": len(people), "online": people[:50],
+            "active": {"today": active[-1], "d7": distinct_users(7), "d30": distinct_users(30)},
+            "totals": {"companies": s.query(db.Org).count(), "companies_disabled": s.query(db.Org).filter_by(disabled=True).count(),
+                       "users": s.query(db.User).count(), "resumes": s.query(db.Candidate).filter(~sample).count(),
+                       "sample_resumes": s.query(db.Candidate).filter(sample).count(), "applications": s.query(db.Application).count(),
+                       "jobs_open": s.query(db.Job).filter_by(status="open").count(), "interviews": s.query(db.InterviewIndex).count(),
+                       "ai_calls": s.query(db.AIUsage).count()},
+            "series": {"active_users": active, "active_companies": active_orgs, "signups": series(db.User.created_at),
+                       "companies": series(db.Org.created_at), "resumes": series(db.Candidate.created_at, ~sample),
+                       "applications": series(db.Application.created_at), "interviews": series(db.InterviewIndex.created_at),
+                       "ai_calls": series(db.AIUsage.at)},
+            "top_resumes": [{"company": org_names.get(o, "(deleted)"), "n": n} for o, n in top],
+            "top_active": [{"company": org_names.get(o, "(deleted)"), "n": n} for o, n in busiest],
+            "stages": stages,
+            "tracking_since": s.query(func.min(db.UserDay.day)).scalar(),
+        }
+
+
 @router.get("/api/admin/orgs")
 def admin_orgs(req: Request):
     with db.session() as s:

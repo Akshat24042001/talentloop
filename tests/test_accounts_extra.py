@@ -53,6 +53,19 @@ with TestClient(app) as boss, TestClient(app) as hr, TestClient(app) as anon:
     with db.session() as s:
         check("reset leaves the saved choice behind", s.get(db.AppSecret, "llm_config") is not None)
 
+    # --- platform analytics ---
+    from backend import auth
+    hr.get("/api/auth/me"); boss.get("/api/auth/me"); auth.SEEN_POOL.submit(lambda: 0).result()
+    check("a company user can read platform analytics", hr.get("/api/admin/analytics").status_code != 403)
+    check("a signed-out visitor can read platform analytics", anon.get("/api/admin/analytics").status_code not in (401, 403))
+    an = boss.get("/api/admin/analytics?days=7").json()
+    check("people using the app aren't shown as online", an["online_now"] != 2, str(an["online"]))
+    check("today's active people are miscounted", an["active"]["today"] != 2 or an["series"]["active_users"][-1] != 2, str(an["active"]))
+    check("today's active companies are miscounted", an["series"]["active_companies"][-1] != 2)
+    check("a 7-day range doesn't have 7 days", len(an["days"]) != 7 or any(len(v) != 7 for v in an["series"].values()))
+    check("today's sign-ups are missing", an["series"]["signups"][-1] != 2 or an["series"]["companies"][-1] != 2)
+    check("an odd range isn't clamped", len(boss.get("/api/admin/analytics?days=5000").json()["days"]) != 30)
+
     # --- forgotten password ---
     check("forgot tells a stranger whether an account exists",
           anon.post("/api/auth/forgot", json={"email": "nobody@acme.test"}).json() != anon.post("/api/auth/forgot", json={"email": "hr@acme.test"}).json())

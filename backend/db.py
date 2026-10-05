@@ -122,6 +122,15 @@ class AuthSession(Base):
     expires_at: Mapped[float] = mapped_column(Float)
     ip: Mapped[str] = mapped_column(String(64), default="")
     ua: Mapped[str] = mapped_column(String(300), default="")
+    last_seen_at: Mapped[float | None] = mapped_column(Float, nullable=True)     # updated at most once a minute
+
+
+class UserDay(Base):
+    """One row per person per day they used the app (staff accounts), for daily/weekly/monthly active counts."""
+    __tablename__ = "user_days"
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)       # YYYY-MM-DD in REPORT_TZ
+    user_id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
 
 
 class Job(Base):
@@ -410,6 +419,7 @@ def migrate() -> None:
     js = "JSON"
     want = {
         "users": {"login_count": "INTEGER DEFAULT 0"},
+        "sessions": {"last_seen_at": "FLOAT"},
         "memberships": {"active": "BOOLEAN DEFAULT TRUE"},
         "jobs": {"number": "INTEGER", "flow": js},
         "candidates": {"number": "INTEGER", "features": js, "skills_text": "TEXT DEFAULT ''", "years": "FLOAT",

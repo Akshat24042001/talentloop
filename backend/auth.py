@@ -11,6 +11,7 @@ Platform admins (PLATFORM_ADMIN_EMAILS) see every company in the admin console.
 The legacy ADMIN_KEY header still works for API automation and acts as a platform admin.
 """
 import base64
+import logging
 import hashlib
 import hmac
 import os
@@ -21,6 +22,8 @@ from sqlalchemy import and_
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
+
+log = logging.getLogger("auth")
 
 from fastapi import HTTPException, Request, Response
 
@@ -143,6 +146,44 @@ def _key_ok(req: Request) -> bool:
     return bool(key) and secrets.compare_digest(key.encode(), ADMIN_KEY.encode())
 
 
+# ---------------------------------------------------------------------------
+# "last seen" for platform analytics: at most one small write per session per minute, off the request path
+# ---------------------------------------------------------------------------
+_SEEN: dict[str, float] = {}
+_DAYS: set[tuple[str, str]] = set()
+SEEN_POOL = __import__("concurrent.futures", fromlist=["ThreadPoolExecutor"]).ThreadPoolExecutor(max_workers=1, thread_name_prefix="seen")
+
+
+def local_day(ts: float) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.fromtimestamp(ts, ZoneInfo(os.getenv("REPORT_TZ") or "Asia/Kolkata")).strftime("%Y-%m-%d")
+
+
+def _touch(tok_hash: str, user_id: str, org_id: str | None) -> None:
+    t = time.time()
+    if t - _SEEN.get(tok_hash, 0) < 60:
+        return
+    _SEEN[tok_hash] = t
+    if len(_SEEN) > 20000:
+        _SEEN.clear()
+    day = local_day(t)
+    new_day = (user_id, day) not in _DAYS
+    _DAYS.add((user_id, day))
+    if len(_DAYS) > 50000:
+        _DAYS.clear()
+
+    def write():
+        try:
+            with db.session() as s:
+                s.query(db.AuthSession).filter_by(token_hash=tok_hash).update({"last_seen_at": t})
+                if new_day and not s.get(db.UserDay, (day, user_id)):
+                    s.add(db.UserDay(day=day, user_id=user_id, org_id=org_id))
+        except Exception as e:                       # a lost "seen" mark must never break a request
+            log.debug("last-seen write skipped: %s", e)
+    SEEN_POOL.submit(write)
+
+
 def current(req: Request, s, required: bool = True) -> Ctx | None:
     """Who is calling. Raises 401 when required and nobody is signed in."""
     if _key_ok(req):
@@ -165,6 +206,7 @@ def current(req: Request, s, required: bool = True) -> Ctx | None:
                     sess.org_id = mem.org_id if mem else None
                 if org and org.disabled and not user.is_platform_admin:
                     raise HTTPException(403, "This company account is disabled. Contact support.")
+                _touch(sess.token_hash, user.id, org.id if org and mem else None)
                 return Ctx(user=user, org=org if mem else None, role=mem.role if mem else None, platform_admin=bool(user.is_platform_admin))
     if required:
         raise HTTPException(401, "Please sign in.")

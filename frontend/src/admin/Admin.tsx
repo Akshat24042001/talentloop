@@ -1,26 +1,22 @@
-import { Ban, Briefcase, Building2, CircleCheck, FileText, Search, Sparkles, Users, Video } from 'lucide-react'
+import { Ban, CircleCheck, Search } from 'lucide-react'
 import { useState } from 'react'
-import { Badge, Button, Card, CardBody, CardHeader, Input, Stat, toast } from '../components/ui'
-import { Ago, CardsSkeleton, ErrorBox, Loading, PageHeader, Tabs, useApi } from '../components/kit'
+import { Badge, Button, Card, Input, toast } from '../components/ui'
+import { Ago, Loading, PageHeader, Tabs, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { when } from '../lib/format'
 import { SampleData, SystemStatus } from './System'
 import AIModels from './AIModels'
+import PlatformAnalytics from './PlatformAnalytics'
 import { ask } from '../components/dialogs'
 
-interface Overview { orgs: number; users: number; active_users_7d: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; ai_calls_30d: number; signups_30d: number[]; storage: { s3: boolean; database: string } }
 interface OrgRow { id: string; name: string; slug: string; created_at: number; disabled: boolean; owner: string; members: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; last_activity?: number }
 interface UserRow { id: string; email: string; name: string; created_at: number; last_login_at?: number; login_count: number; disabled: boolean; platform_admin: boolean; memberships: { org: string; role_label: string }[] }
 
 export default function Admin() {
   const [tab, setTab] = useState<'orgs' | 'users'>('orgs')
-  const ov = useApi<Overview>('/api/admin/overview')
   const orgs = useApi<OrgRow[]>('/api/admin/orgs')
   const users = useApi<UserRow[]>('/api/admin/users')
   const [q, setQ] = useState('')
-  if (ov.error) return <ErrorBox error={ov.error} />
-  const d = ov.data
-  const max = Math.max(1, ...(d?.signups_30d || [0]))
   async function toggleOrg(o: OrgRow) { if (!await ask(`${o.disabled ? 'Enable' : 'Disable'} ${o.name}?`)) return; await api(`/api/admin/orgs/${o.id}`, { method: 'PATCH', json: { disabled: !o.disabled } }); toast('Updated'); orgs.reload() }
   async function toggleUser(u: UserRow) {
     if (!await ask(`${u.disabled ? 'Enable' : 'Disable'} ${u.email}?${u.disabled ? '' : ' They are signed out everywhere.'}`)) return
@@ -30,21 +26,9 @@ export default function Admin() {
   return (
     <>
       <PageHeader title="Platform admin" description="Every company and user on this TalentLoop installation." />
+      <PlatformAnalytics />
       <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"><SystemStatus /><SampleData /></div>
       <div className="mb-5"><AIModels /></div>
-      {!d ? <CardsSkeleton n={6} /> : <>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-          <Stat label="Companies" value={d.orgs} icon={<Building2 />} />
-          <Stat label="Users" value={d.users} sub={`${d.active_users_7d} active this week`} icon={<Users />} />
-          <Stat label="Jobs" value={d.jobs} sub={`${d.open_jobs} open`} icon={<Briefcase />} />
-          <Stat label="Resumes" value={d.candidates} sub={`${d.applications} applications`} icon={<FileText />} />
-          <Stat label="AI interviews" value={d.interviews} icon={<Video />} />
-          <Stat label="AI calls" value={d.ai_calls} sub={`${d.ai_calls_30d} in 30 days`} icon={<Sparkles />} />
-        </div>
-        <Card className="mt-4"><CardHeader title="Sign-ups, last 30 days" description={`Database: ${d.storage.database} · files: ${d.storage.s3 ? 'S3 bucket' : 'local disk'}`} /><CardBody>
-          <div className="flex h-20 items-end gap-1">{d.signups_30d.map((n, i) => <span key={i} title={`${n}`} className="flex-1 rounded-t-[3px] bg-[var(--series-1)]" style={{ height: `${Math.max(4, (n / max) * 100)}%`, opacity: n ? 1 : 0.25 }} />)}</div>
-        </CardBody></Card>
-      </>}
       <div className="mt-6 flex flex-wrap items-end justify-between gap-3">
         <Tabs className="flex-1" value={tab} onChange={setTab} tabs={[{ id: 'orgs', label: 'Companies', count: orgs.data?.length }, { id: 'users', label: 'Users', count: users.data?.length }]} />
         <div className="relative w-full sm:w-72"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input type="search" aria-label="Search" className="pl-9" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} /></div>

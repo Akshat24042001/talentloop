@@ -98,3 +98,26 @@ export function SplitBar({ parts }: { parts: { label: string; n: number; color: 
     </div>
   )
 }
+
+// One series over days: thin columns from a shared baseline, hover (or focus) a column for its day and value.
+// The whole column height is the hit target, so short bars are still easy to point at.
+export function ColumnChart({ values, labels, name, fmtLabel = (s: string) => s }: { values: number[]; labels: string[]; name: string; fmtLabel?: (s: string) => string }) {
+  const max = Math.max(1, ...values)
+  const ticks = [0, Math.floor((labels.length - 1) / 2), labels.length - 1]
+  return (
+    <div>
+      <div className="relative h-24 border-b border-slate-200 dark:border-ink-700" role="img" aria-label={`${name}: ${values.map((v, i) => `${fmtLabel(labels[i]!)} ${v}`).join(', ')}`}>
+        <span className="absolute -top-1 left-0 text-[10px] tabular-nums text-slate-500 dark:text-slate-400">{max}</span>
+        <div className="flex h-full items-end gap-[2px] pl-6">
+          {values.map((v, i) => (
+            <Tip key={labels[i]} label={<>{fmtLabel(labels[i]!)}: <b>{v}</b> {name.toLowerCase()}</>}>
+              <span tabIndex={0} className="flex h-full min-w-0 flex-1 cursor-default items-end outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                <i className={cn('block w-full rounded-t-[4px]', v ? 'bg-[var(--series-1)]' : 'bg-[var(--track)]')} style={{ height: v ? `${Math.max(4, (v / max) * 100)}%` : '2px' }} />
+              </span>
+            </Tip>))}
+        </div>
+      </div>
+      <div className="mt-1 flex justify-between pl-6 text-[10px] text-slate-500 dark:text-slate-400">{ticks.map((t, i) => <span key={i}>{fmtLabel(labels[t]!)}</span>)}</div>
+    </div>
+  )
+}

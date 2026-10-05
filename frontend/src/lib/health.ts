@@ -22,7 +22,7 @@ export function DevRibbon() {
   const h = useHealth()
   if (!h || h.production !== false) return null
   return createElement('div', { role: 'status', title: 'APP_ENV is not production: emails go only to the developer inbox, WhatsApp is off.',
-    className: 'pointer-events-none fixed bottom-3 left-3 z-[60] rounded-full bg-amber-400 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-950 shadow-lg ring-1 ring-amber-600/40' },
+    className: 'pointer-events-none fixed left-1/2 top-0 z-[60] -translate-x-1/2 rounded-b-lg bg-amber-400 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-950 shadow-lg ring-1 ring-amber-600/40' },
     h.env === 'testing' ? 'Testing' : 'Development')
 }
 export function healthProblems(h: Health): string[] {
