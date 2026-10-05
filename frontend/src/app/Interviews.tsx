@@ -2,7 +2,7 @@ import { CircleCheck, Download, Gauge, Link2, Plus, Search, Send, ShieldAlert, S
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SplitBar } from '../components/charts'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Input, Select, Spinner, Stat, useInterval } from '../components/ui'
-import { api, withKey } from '../lib/api'
+import { getData, pageCache, withKey } from '../lib/api'
 import { REC_LABEL, REC_TONE, STATUS_LABEL, STATUS_TONE, ago, initials, when } from '../lib/format'
 import { PageHeader, Ago, usePaged } from '../components/kit'
 import { useHealth } from '../lib/health'
@@ -17,14 +17,14 @@ interface Calib { pairs: number; within_1?: number; exact?: number; ai_minus_hr_
 
 export default function Interviews() {
   const health = useHealth()
-  const [rows, setRows] = useState<Row[] | null>(null)
-  const [cal, setCal] = useState<Calib | null>(null)
+  const [rows, setRows] = useState<Row[] | null>(() => (pageCache.get('/api/interviews') as Row[] | undefined) ?? null)
+  const [cal, setCal] = useState<Calib | null>(() => (pageCache.get('/api/calibration') as Calib | undefined) ?? null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState(''), [fs, setFs] = useState(''), [fr, setFr] = useState(''), [role, setRole] = useState(''), [sort, setSort] = useState('new')
   const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
 
   const load = useCallback(async () => {
-    try { const [r, c] = await Promise.all([api<Row[]>('/api/interviews'), api<Calib>('/api/calibration')]); setRows(r); setCal(c); setErr('') }
+    try { const [r, c] = await Promise.all([getData<Row[]>('/api/interviews'), getData<Calib>('/api/calibration')]); setRows(r); setCal(c); setErr('') }
     catch (e: any) { setErr(e.message) }
   }, [])
   useEffect(() => { load() }, [load])

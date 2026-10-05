@@ -1,7 +1,7 @@
 // Building blocks shared by the workspace pages.
 import { TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { api, pageCache } from '../lib/api'
+import { getData, pageCache } from '../lib/api'
 import { ago, initials, when } from '../lib/format'
 import { Alert, Button, Spinner, cn } from './ui'
 
@@ -87,7 +87,7 @@ export function useApi<T>(path: string | null, deps: unknown[] = []) {
     const n = ++seq.current
     if (!pageCache.has(path)) setLoading(true)
     else setData(pageCache.get(path) as T)
-    try { const d = await api<T>(path); pageCache.set(path, d); if (n === seq.current) { setData(d); setError('') } }
+    try { const d = await getData<T>(path); if (n === seq.current) { setData(d); setError('') } }
     catch (e: any) { if (n === seq.current) setError(e.message) }
     if (n === seq.current) setLoading(false)
   }, [path, ...deps])                          // eslint-disable-line react-hooks/exhaustive-deps

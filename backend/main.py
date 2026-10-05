@@ -79,6 +79,26 @@ async def _startup():
 
 
 @app.middleware("http")
+async def _timing(req: Request, call_next):
+    """Server-Timing on every API response (browser devtools > Network > Timing): total time, database queries and
+    their time. Requests slower than SLOW_REQUEST_MS (default 1500) are logged with the same numbers, so slow pages in
+    production can be traced to the database (round trips to Supabase) or to the code."""
+    if not req.url.path.startswith("/api/"):
+        return await call_next(req)
+    box = db.start_timing()
+    t0 = time.perf_counter()
+    resp = await call_next(req)
+    ms = (time.perf_counter() - t0) * 1000
+    resp.headers["Server-Timing"] = f"app;dur={ms:.0f}, db;dur={box[1]:.0f};desc=\"{box[0]} queries\""
+    if ms > SLOW_MS:
+        log.warning("slow request %s %s: %.0f ms, %d queries, %.0f ms in the database", req.method, req.url.path, ms, box[0], box[1])
+    return resp
+
+
+SLOW_MS = float(os.getenv("SLOW_REQUEST_MS", "1500"))
+
+
+@app.middleware("http")
 async def _no_stale_pages(req: Request, call_next):
     """Pages, scripts, styles and samples must be revalidated on every load (cheap: ETag -> 304). Without a
     Cache-Control header browsers guess a lifetime and can pair a new page with an old script after a deploy,

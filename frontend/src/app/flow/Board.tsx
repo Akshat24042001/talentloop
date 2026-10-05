@@ -25,7 +25,7 @@ const CLOSED = ['rejected', 'withdrawn'], DONE = ['offer', 'hired']
 
 export default function Board({ jobId, jobRef }: { jobId: string; jobRef?: string }) {
   const { query } = useLocation()
-  const { data, error, reload, setData } = useApi<Pipe>(`/api/jobs/${jobId}/pipeline`)
+  const { data, error, reload, setData } = useApi<Pipe>(`/api/jobs/${jobRef || jobId}/pipeline`)
   const [moving, setMoving] = useState<Set<string>>(new Set())
   const [topRound, setTopRound] = useState<Round | null>(null)
   const [view, setView] = useState<'board' | 'list'>((localStorage.getItem('tl.pipeView') as 'board' | 'list') || 'board')

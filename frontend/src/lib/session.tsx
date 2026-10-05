@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api } from './api'
+import { api, cacheOwner, clearCache, getData, pageCache } from './api'
 
 export interface Me {
   user: { id: string; email: string; name: string }
@@ -14,9 +14,12 @@ const Ctx = createContext<{ me: Me | null | undefined; refresh: () => Promise<Me
 })
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [me, setMe] = useState<Me | null | undefined>(undefined)     // undefined = loading, null = signed out
+  // The last known session shows the workspace at once after a refresh; it is checked with the server right away
+  // (and the server checks every request anyway).
+  const [me, setMe] = useState<Me | null | undefined>(() => (pageCache.get('/api/auth/me') as Me | undefined) ?? undefined)   // undefined = loading, null = signed out
   const refresh = useCallback(async () => {
-    try { const m = await api<Me>('/api/auth/me', { quiet401: true }); setMe(m); return m } catch { setMe(null); return null }
+    try { const m = await getData<Me>('/api/auth/me', { quiet401: true }); cacheOwner(`${m.user.id}:${m.org?.id || ''}`); setMe(m); return m }
+    catch { clearCache(); setMe(null); return null }
   }, [])
   useEffect(() => { refresh() }, [refresh])
   return <Ctx.Provider value={{ me, refresh, setMe }}>{children}</Ctx.Provider>
@@ -25,6 +28,7 @@ export const useSession = () => useContext(Ctx)
 export function useMe(): Me { return useContext(Ctx).me! }
 
 export async function signOut() {
+  clearCache()
   try { await api('/api/auth/logout', { method: 'POST' }) } catch { /* already signed out */ }
   location.href = '/login'
 }

@@ -45,17 +45,12 @@ export default function JobDetail({ id }: { id: string }) {
         title={<span className="flex flex-wrap items-center gap-3">{job.title}<Badge tone={st.tone}>{st.label}</Badge></span>}
         description={[job.department, job.location, job.employment_type, job.experience, job.salary].filter(Boolean).join(' · ')}
         actions={<>
+          {job.status === 'open' && !job.fields.internal_only && <LinkActions url={careers} label="Job link" copied="Job link copied" subject={`We're hiring: ${job.title}`} message={`We're hiring a ${job.title}. Details and apply:`} />}
           {job.permission !== 'view' && <Button href={`/app/jobs/${id}/edit`} icon={<Pencil />}>Edit JD</Button>}
           {job.permission === 'manage' && (job.status === 'open' ? <Button icon={<Pause />} onClick={() => setStatus('paused')}>Pause</Button>
             : <Button variant="primary" icon={<Play />} disabled={job.missing_to_publish.length > 0} onClick={() => setStatus('open')}>{job.status === 'draft' ? 'Publish' : 'Reopen'}</Button>)}
         </>} />
       {job.status === 'draft' && job.missing_to_publish.length > 0 && <Alert className="mb-4" tone="info" title="Draft">To publish, fill in: {job.missing_to_publish.join(', ')}.</Alert>}
-      {job.status === 'open' && !job.fields.internal_only && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700">
-          <span className="text-slate-500">Public job post:</span><a href={job.careers_url} target="_blank" rel="noopener" className="truncate font-medium text-brand-600 hover:underline dark:text-brand-300">{careers}</a>
-          <LinkActions className="ml-auto" url={careers} label="Copy" copied="Job link copied" subject={`We're hiring: ${job.title}`} message={`We're hiring a ${job.title}. Details and apply:`} />
-        </div>
-      )}
       <Tabs className="mb-5" value={tab} onChange={switchTab} tabs={[
         { id: 'matches', label: 'Best matches' }, { id: 'pipeline', label: 'Applicants', count: job.applications }, { id: 'flow', label: 'Hiring flow' }, { id: 'insights', label: 'Insights' },
         { id: 'overview', label: 'Job description' }, { id: 'drives', label: 'Campus drives' }, { id: 'team', label: 'Team access', count: job.collaborators.length }, { id: 'activity', label: 'Activity' }]} />
@@ -113,7 +108,7 @@ function Overview({ job }: { job: Job }) {
 
 function Matches({ job, canManage }: { job: Job; canManage: boolean }) {
   const [limit, setLimit] = useState(Math.max(job.top_n, 10))
-  const { data, error, reload, loading } = useApi<{ top_n: number; pool: number; ai_pending: number; ai_budget: number; items: MatchRow[]; matched_at: number; can_run_ai: boolean }>(`/api/jobs/${job.id}/matches?limit=${limit}`)
+  const { data, error, reload, loading } = useApi<{ top_n: number; pool: number; ai_pending: number; ai_budget: number; items: MatchRow[]; matched_at: number; can_run_ai: boolean }>(`/api/jobs/${job.ref}/matches?limit=${limit}`)
   const [busy, setBusy] = useState(false)
   async function runAI() {
     setBusy(true)

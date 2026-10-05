@@ -11,6 +11,9 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import contextvars
+import time as _time
+
 from sqlalchemy import (JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine,
                         event, inspect, text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -455,6 +458,30 @@ def _backfill_numbers() -> None:
                 rows = s.query(model).filter(model.org_id == org_id, model.number.is_(None)).order_by(model.created_at).all()
                 for r in rows:
                     r.number = next_number(s, org_id, kind)
+
+
+# Per-request database timing for the Server-Timing header (main.py). A mutable box in a context variable: request
+# handlers run in worker threads that copy the context, and they add to the same box.
+_timing_box: contextvars.ContextVar[list | None] = contextvars.ContextVar("db_timing", default=None)
+
+
+def start_timing() -> list:
+    box = [0, 0.0]
+    _timing_box.set(box)
+    return box
+
+
+@event.listens_for(engine, "before_cursor_execute")
+def _q_start(conn, cursor, statement, parameters, context, executemany):
+    conn.info["_t0"] = _time.perf_counter()
+
+
+@event.listens_for(engine, "after_cursor_execute")
+def _q_end(conn, cursor, statement, parameters, context, executemany):
+    box = _timing_box.get()
+    if box is not None:
+        box[0] += 1
+        box[1] += (_time.perf_counter() - conn.info.get("_t0", _time.perf_counter())) * 1000
 
 
 @contextmanager
