@@ -1,8 +1,8 @@
 // Platform console: people (accounts). Every account on the platform, and one account with its companies, roles,
 // devices and history, plus the fixes support needs: confirm email, reset password, sign out, disable, admin rights.
-import { Ban, CircleCheck, KeyRound, LogOut, MailCheck, Save, ShieldCheck, ShieldOff } from 'lucide-react'
+import { Ban, CircleCheck, KeyRound, LogOut, MailCheck, Save, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Stat, toast } from '../../components/ui'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Stat, toast } from '../../components/ui'
 import { Ago, ErrorBox, Loading, useApi } from '../../components/kit'
 import { ask } from '../../components/dialogs'
 import { api } from '../../lib/api'
@@ -46,7 +46,7 @@ const ROLES = [['owner', 'Owner'], ['admin', 'Admin'], ['recruiter', 'Recruiter 
 export function Person({ id }: { id: string }) {
   const me = useMe()
   const { data: u, error, reload } = useApi<UserFull>(`/api/console/users/${id}`)
-  const [f, setF] = useState({ name: '', email: '' })
+  const [f, setF] = useState({ name: '', email: '' }), [del, setDel] = useState(false), [typed, setTyped] = useState('')
   useEffect(() => { if (u) setF({ name: u.name, email: u.email }) }, [u])
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!u) return <Loading />
@@ -104,6 +104,7 @@ export function Person({ id }: { id: string }) {
           {!self && <Button icon={u.platform_admin ? <ShieldOff /> : <ShieldCheck />} disabled={u.platform_admin && u.admin_from_env}
             onClick={() => patch({ platform_admin: !u.platform_admin }, u.platform_admin ? `Remove ${u.email}'s platform admin rights?` : `Make ${u.email} a platform admin? They will see and control every company on TalentLoop.`)}>
             {u.platform_admin ? 'Remove platform admin' : 'Make platform admin'}</Button>}
+          {!self && <Button variant="ghost" className="text-red-600" icon={<Trash2 />} onClick={() => { setTyped(''); setDel(true) }}>Delete account</Button>}
           {u.platform_admin && u.admin_from_env && <p className="text-xs text-slate-500">Admin because this email is in PLATFORM_ADMIN_EMAILS on the server. Remove it there to take the rights away.</p>}
         </CardBody></Card>
         <Card><CardHeader title="Account details" /><CardBody className="space-y-3">
@@ -113,5 +114,10 @@ export function Person({ id }: { id: string }) {
         </CardBody></Card>
       </div>
     </div>
+    <Modal open={del} onOpenChange={setDel} title={`Delete ${u.email}?`} description="The account, its sign-ins and its company memberships are deleted for good. What they did stays in the audit log without their name. Companies and candidates are not touched."
+      footer={<><Button onClick={() => setDel(false)}>Keep it</Button><Button variant="danger" disabled={typed.trim().toLowerCase() !== u.email} onClick={async () => {
+        try { await api(`/api/console/users/${id}`, { method: 'DELETE', json: { confirm: typed } }); toast('Account deleted'); go('/admin/people') } catch (e: any) { toast(e.message) } }}>Delete for good</Button></>}>
+      <Field className="mt-4" label={<>Type <b>{u.email}</b> to confirm</>} htmlFor="del-email"><Input id="del-email" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" /></Field>
+    </Modal>
   </>)
 }

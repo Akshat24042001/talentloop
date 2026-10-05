@@ -102,8 +102,8 @@ service only. Pinging keeps it awake; it doesn't make the shared free CPU faster
 ## Platform console (/admin)
 
 Accounts in `PLATFORM_ADMIN_EMAILS` (or made platform admin in the console) get a separate console at `/admin`:
-overview and analytics, every company (edit profile, disable, delete with typed confirmation, manage members), every
-person (roles, pause, confirm email, email a reset code, sign out everywhere, disable, admin rights), candidates, jobs,
+overview and analytics, every company (create with an owner invite, edit profile, disable, delete with typed confirmation, invite and manage members), every
+person (roles, pause, confirm email, email a reset code, sign out everywhere, disable, admin rights, delete), candidates and jobs (view and edit; JD edits use the job schema), AI interviews (report, transcript, PDF), CSV reports of everything,
 AI interviews, outbox (retry) and the audit log across all companies, plus platform settings (sign-ups open/closed, a
 banner for every signed-in user, AI models, system status). Every change made there is written to the audit log as
 "Platform admin" with the admin's email. Server keys are never shown or edited there: they stay in Render.

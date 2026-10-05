@@ -1,6 +1,6 @@
 // The platform console (/admin): its own app, separate from any company's workspace. Platform admins run all of
 // TalentLoop from here: companies, people, candidates, jobs, interviews, messages, the audit log and platform settings.
-import { ArrowLeftRight, Briefcase, Building2, FileText, Gauge, LogOut, Mail, Menu, ScrollText, Search, Settings, Shield, Users, Video, X } from 'lucide-react'
+import { ArrowLeftRight, Briefcase, Building2, FileDown, FileText, Gauge, LogOut, Mail, Menu, ScrollText, Search, Settings, Shield, Users, Video, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, cn, toast } from '../../components/ui'
 import { Loading, useApi } from '../../components/kit'
@@ -14,13 +14,13 @@ import AIModels from '../AIModels'
 import { SampleData, SystemStatus } from '../System'
 import { Companies, Company } from './companies'
 import { People, Person } from './people'
-import { Audit, Candidates, Interviews, Jobs, Outbox } from './data'
+import { Audit, Candidates, Interviews, Jobs, Outbox, Reports } from './data'
 import { CandidatePanel, Head, JobPanel } from './parts'
 
 const NAV: { to: string; label: string; icon: typeof Gauge }[] = [
   { to: '/admin', label: 'Overview', icon: Gauge }, { to: '/admin/companies', label: 'Companies', icon: Building2 }, { to: '/admin/people', label: 'People', icon: Users },
   { to: '/admin/candidates', label: 'Candidates', icon: FileText }, { to: '/admin/jobs', label: 'Jobs', icon: Briefcase }, { to: '/admin/interviews', label: 'AI interviews', icon: Video },
-  { to: '/admin/outbox', label: 'Outbox', icon: Mail }, { to: '/admin/audit', label: 'Audit log', icon: ScrollText }, { to: '/admin/settings', label: 'Platform settings', icon: Settings },
+  { to: '/admin/outbox', label: 'Outbox', icon: Mail }, { to: '/admin/audit', label: 'Audit log', icon: ScrollText }, { to: '/admin/reports', label: 'Reports', icon: FileDown }, { to: '/admin/settings', label: 'Platform settings', icon: Settings },
 ]
 
 export default function Console({ path }: { path: string }) {
@@ -31,7 +31,7 @@ export default function Console({ path }: { path: string }) {
   if ((p = match('/admin/companies/:id', path))) page = <Company key={p.id} id={p.id!} />
   else if ((p = match('/admin/people/:id', path))) page = <Person key={p.id} id={p.id!} />
   else page = ({ '/admin': <Overview />, '/admin/companies': <Companies />, '/admin/people': <People />, '/admin/candidates': <Candidates />, '/admin/jobs': <Jobs />,
-    '/admin/interviews': <Interviews />, '/admin/outbox': <Outbox />, '/admin/audit': <Audit />, '/admin/settings': <PlatformSettings /> } as Record<string, ReactNode>)[path]
+    '/admin/interviews': <Interviews />, '/admin/outbox': <Outbox />, '/admin/audit': <Audit />, '/admin/reports': <Reports />, '/admin/settings': <PlatformSettings /> } as Record<string, ReactNode>)[path]
     ?? <div className="py-24 text-center"><h1 className="text-xl font-semibold">Not found</h1><Button className="mt-4" onClick={() => navigate('/admin')}>Back to the overview</Button></div>
   const active = (to: string) => to === '/admin' ? path === '/admin' : path === to || path.startsWith(to + '/')
   const nav = (

@@ -95,6 +95,49 @@ check("the deleted company still exists", s.get(db.Org, A) is not None if False 
 check("deleting one company touched another", boss.get(f"/api/console/candidates?org={Bq}").json()["total"] != before_beta)
 check("the deletion isn't in the platform audit log", not any("deleted" in a["detail"] for a in boss.get("/api/console/activity?action=platform_admin").json()["items"]))
 
+# --- create, invite, edit, report, export, delete account ---
+r = boss.post("/api/console/orgs", json={"name": "Gamma Ltd", "owner_email": "founder@gamma.test", "industry": "Health"})
+check("a platform admin can't create a company", r.status_code != 200, r.text[:200])
+G = r.json().get("id")
+with db.session() as s:
+    check("the new owner isn't emailed an invite", not s.query(db.Message).filter_by(template="member_invite", to="founder@gamma.test").count())
+check("a company owner can create companies", acme.post("/api/console/orgs", json={"name": "X", "owner_email": "x@x.test"}).status_code != 403 if False else beta.post("/api/console/orgs", json={"name": "X", "owner_email": "x@x.test"}).status_code != 403)
+nc = TestClient(app)
+r = nc.post(f"/api/invites/{boss.post(f'/api/console/orgs/{G}/invites', json={'email': 'hr@gamma.test', 'role': 'recruiter'}).json()['path'].split('/')[-1]}/accept", json={"password": "gamma-pass-1", "name": "HR"})
+check("an invite from the console doesn't work", r.status_code != 200 or r.json().get("org", {}).get("name") != "Gamma Ltd", r.text[:200])
+check("an unknown role is accepted", boss.post(f"/api/console/orgs/{G}/invites", json={"email": "z@gamma.test", "role": "god"}).status_code != 400)
+check("inviting a current member is accepted", boss.post(f"/api/console/orgs/{G}/invites", json={"email": "hr@gamma.test", "role": "viewer"}).status_code != 409)
+bc = boss.get(f"/api/console/candidates?org={Bq}").json()["items"][0]["id"]
+r = boss.patch(f"/api/console/candidates/{bc}", json={"name": "Edited Name", "years": "7.5", "tags": ["vip", "x"]})
+check("a candidate can't be edited", r.status_code != 200 or r.json()["name"] != "Edited Name" or r.json()["years"] != 7.5 or r.json()["tags"] != ["vip", "x"], r.text[:200])
+check("a candidate can be blanked out", boss.patch(f"/api/console/candidates/{bc}", json={"name": ""}).status_code != 400)
+check("a non-number experience is accepted", boss.patch(f"/api/console/candidates/{bc}", json={"years": "lots"}).status_code != 400)
+bj = boss.get(f"/api/console/jobs?org={Bq}").json()["items"][0]["id"]
+r = boss.put(f"/api/console/jobs/{bj}", json={"title": "Staff Engineer", "must_have_skills": "Go\n \nSQL", "experience_min": "5", "summary": "New summary", "workplace_type": "Remote"})
+jf = r.json()
+check("a job description can't be edited", r.status_code != 200 or jf["title"] != "Staff Engineer" or jf["fields"]["must_have_skills"] != ["Go", "SQL"] or jf["fields"]["summary"] != "New summary", r.text[:200])
+check("editing a JD wipes fields that weren't sent", not jf["fields"].get("responsibilities"))
+check("the edit form doesn't come from the job schema", not any(x["key"] == "workplace_type" and x["options"] for x in jf["edit_fields"]))
+check("a value outside the schema's options is accepted", boss.put(f"/api/console/jobs/{bj}", json={"workplace_type": "On the moon"}).status_code != 400)
+check("workplace edit isn't saved", jf["fields"].get("workplace_type") != "Remote" or "Remote" not in jf["location"])
+check("the company doesn't see the edited JD", beta.get(f"/api/jobs/{bj}").json().get("title") != "Staff Engineer")
+check("a job can lose its title", boss.put(f"/api/console/jobs/{bj}", json={"title": ""}).status_code != 400)
+for kind in ("companies", "people", "candidates", "jobs", "applications", "interviews", "audit"):
+    r = boss.get(f"/api/console/export/{kind}.csv")
+    check(f"the {kind} report doesn't download", r.status_code != 200 or "text/csv" not in r.headers.get("content-type", "") or len(r.text.splitlines()) < (1 if kind == "interviews" else 2), r.text[:120])   # no AI interviews in this data: header only
+    check(f"a company owner can download the {kind} report", beta.get(f"/api/console/export/{kind}.csv").status_code != 403)
+r = boss.get(f"/api/console/export/candidates.csv?org={Bq}")
+check("a company-filtered report includes other companies", any(line.startswith("Gamma") or line.startswith("HQ") for line in r.text.splitlines()[1:]))
+boss.patch(f"/api/console/candidates/{bc}", json={"name": "=HYPERLINK(\"http://evil\")"})
+check("a formula in the data runs in Excel", "\n=HYPERLINK" in boss.get("/api/console/export/candidates.csv").text or ",=HYPERLINK" in boss.get("/api/console/export/candidates.csv").text)
+gu = {u["email"]: u["id"] for u in boss.get("/api/admin/users").json()}
+check("the only owner's account can be deleted", boss.request("DELETE", f"/api/console/users/{gu['owner@beta.test']}", json={"confirm": "owner@beta.test"}).status_code != 400)
+check("an account is deleted without typing its email", boss.request("DELETE", f"/api/console/users/{gu['hr@gamma.test']}", json={"confirm": "nope"}).status_code != 400)
+check("a platform admin can delete their own account", boss.request("DELETE", f"/api/console/users/{gu['boss@talentloop.test']}", json={"confirm": "boss@talentloop.test"}).status_code != 400)
+r = boss.request("DELETE", f"/api/console/users/{gu['hr@gamma.test']}", json={"confirm": "hr@gamma.test"})
+check("an account can't be deleted", r.status_code != 200, r.text[:200])
+check("a deleted account can still sign in", nc.get("/api/auth/me").status_code != 401 or TestClient(app).post("/api/auth/login", json={"email": "hr@gamma.test", "password": "gamma-pass-1"}).status_code != 401)
+
 bugs = [n for n, b in RES if b]
 print(f"\n{'CONSOLE CHECKS PASSED' if not bugs else 'CONSOLE CHECKS FAILED'} ({len(RES)})")
 assert not bugs, f"{len(bugs)} check(s) failed: {bugs}"

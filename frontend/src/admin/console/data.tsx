@@ -1,13 +1,13 @@
 // Platform console: data across every company (candidates, jobs, AI interviews, audit log, outbox).
 // Each list filters by company and opens details in a side panel.
-import { RotateCcw } from 'lucide-react'
+import { Download, RotateCcw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, Badge, Button, Modal, Select, toast } from '../../components/ui'
 import { Ago } from '../../components/kit'
 import { useApi } from '../../components/kit'
 import { api } from '../../lib/api'
 import { ACTION_LABEL, JOB_STATUS } from '../../app/labels'
-import { CandidatePanel, CompanyLink, FilterBar, Head, JobPanel, JobStatus, OrgSelect, Paging, SearchBox, Table, label, type Paged } from './parts'
+import { CandidatePanel, CompanyLink, FilterBar, Head, InterviewPanel, JobPanel, JobStatus, OrgSelect, Paging, SearchBox, Table, label, type Paged } from './parts'
 
 /** Debounced text for search boxes, and a page that resets when any filter changes. */
 function useFilters<T extends Record<string, string>>(init: T) {
@@ -73,7 +73,7 @@ interface IvRow { id: string; candidate: string; email: string; role: string; st
 export function Interviews({ org }: { org?: string }) {
   const fl = useFilters({ org: org || '', status: '' })
   const { data } = useApi<Paged<IvRow>>(`/api/console/interviews?${fl.qs}`)
-  const [cand, setCand] = useState<string | null>(null)
+  const [iv, setIv] = useState<string | null>(null)
   return (<>
     {!org && <Head title="AI interviews" sub="Every AI interview on the platform." />}
     <FilterBar>
@@ -82,7 +82,7 @@ export function Interviews({ org }: { org?: string }) {
       <Select aria-label="Status" className="w-full sm:w-44" value={fl.f.status} onChange={e => fl.set('status', e.target.value)}>
         <option value="">Any status</option>{['created', 'in_progress', 'completed', 'scored', 'incomplete'].map(s => <option key={s} value={s}>{label(s)}</option>)}</Select>
     </FilterBar>
-    <Table rows={data?.items} onOpen={r => r.candidate_id ? setCand(r.candidate_id) : toast('This interview has no candidate record.')} empty="No interviews match." cols={[
+    <Table rows={data?.items} onOpen={r => setIv(r.id)} empty="No interviews match." cols={[
       { h: 'Candidate', cell: r => <><div className="font-semibold">{r.candidate || '-'}</div><div className="text-xs text-slate-500">{r.email}</div></> },
       ...(org ? [] : [{ h: 'Company', cell: (r: IvRow) => <CompanyLink id={r.org_id} name={r.company} /> }]),
       { h: 'Role', cell: r => r.role || '-' },
@@ -91,7 +91,7 @@ export function Interviews({ org }: { org?: string }) {
       { h: 'When', cell: r => <Ago ts={r.created_at} />, className: 'whitespace-nowrap text-xs text-slate-500' },
     ]} />
     <Paging data={data} page={fl.page} setPage={fl.setPage} />
-    <CandidatePanel id={cand} onClose={() => setCand(null)} />
+    <InterviewPanel id={iv} onClose={() => setIv(null)} />
   </>)
 }
 
@@ -149,5 +149,27 @@ export function Outbox({ org }: { org?: string }) {
       footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
       <pre className="mt-3 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm">{open?.body}</pre>
     </Modal>
+  </>)
+}
+
+const REPORTS: [string, string, string, boolean][] = [
+  ['companies', 'Companies', 'Every company with its people, jobs, candidates, applications, interviews and AI use.', false],
+  ['people', 'People', 'Every account: companies and roles, email confirmed, sign-ins, admin rights.', false],
+  ['candidates', 'Candidates', 'Every candidate with company, contact details, experience and source.', true],
+  ['jobs', 'Jobs', 'Every job with company, status, location and number of applicants.', true],
+  ['applications', 'Applications', 'Who applied to what, and where each application stands.', true],
+  ['interviews', 'AI interviews', 'Every AI interview with status, overall score and recommendation.', true],
+  ['audit', 'Audit log', 'Everything that happened (up to 100,000 most recent entries).', true],
+]
+export function Reports() {
+  const [org, setOrg] = useState('')
+  return (<>
+    <Head title="Reports" sub="Download any part of the platform as a spreadsheet (CSV, opens in Excel or Google Sheets). Downloads are written to the audit log." />
+    <FilterBar><OrgSelect value={org} onChange={setOrg} /><span className="text-xs text-slate-500">Company filter applies to the reports marked "by company".</span></FilterBar>
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{REPORTS.map(([k, t, d, byOrg]) => (
+      <div key={k} className="flex flex-col justify-between gap-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200 dark:bg-ink-900 dark:ring-ink-700">
+        <div><div className="flex items-center gap-2 font-semibold">{t}{byOrg && <Badge>by company</Badge>}</div><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{d}</p></div>
+        <Button size="sm" icon={<Download />} href={`/api/console/export/${k}.csv${byOrg && org ? `?org=${org}` : ''}`}>Download CSV</Button>
+      </div>))}</div>
   </>)
 }

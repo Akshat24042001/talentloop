@@ -1,8 +1,8 @@
 // Platform console: companies. The list, and one company with everything in it: profile, people, jobs, candidates,
 // interviews, messages and audit log, with the actions a platform admin needs (edit, disable, delete, manage people).
-import { Ban, CircleCheck, Save, Trash2 } from 'lucide-react'
+import { Ban, Building2, CircleCheck, Copy, Save, Trash2, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Stat, Switch, Textarea, toast } from '../../components/ui'
+import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Stat, Switch, Textarea, copyText, toast } from '../../components/ui'
 import { Ago, ErrorBox, Loading, Tabs, useApi } from '../../components/kit'
 import { HBarChart } from '../../components/charts'
 import { ask } from '../../components/dialogs'
@@ -14,11 +14,13 @@ import { FilterBar, Head, SearchBox, Table, go, label } from './parts'
 interface OrgRow { id: string; name: string; slug: string; created_at: number; disabled: boolean; owner: string; members: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; last_activity?: number }
 
 export function Companies() {
-  const { data } = useApi<OrgRow[]>('/api/admin/orgs')
-  const [q, setQ] = useState(''), [st, setSt] = useState('')
+  const { data, reload } = useApi<OrgRow[]>('/api/admin/orgs')
+  const [q, setQ] = useState(''), [st, setSt] = useState(''), [add, setAdd] = useState(false)
   const rows = (data || []).filter(o => (!q || `${o.name} ${o.owner} ${o.slug}`.toLowerCase().includes(q.toLowerCase())) && (!st || (st === 'disabled') === o.disabled))
   return (<>
-    <Head title="Companies" sub="Every company on TalentLoop. Open one to see and manage everything in it." />
+    <Head title="Companies" sub="Every company on TalentLoop. Open one to see and manage everything in it.">
+      <Button variant="primary" icon={<Building2 />} onClick={() => setAdd(true)}>New company</Button></Head>
+    {add && <NewCompany onClose={() => setAdd(false)} onDone={reload} />}
     <FilterBar>
       <SearchBox value={q} onChange={setQ} placeholder="Company, owner or careers address" />
       <Select aria-label="Status" className="w-full sm:w-40" value={st} onChange={e => setSt(e.target.value)}><option value="">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></Select>
@@ -104,6 +106,11 @@ export function Company({ id }: { id: string }) {
 }
 
 function People({ o, reload }: { o: OrgFull; reload: () => void }) {
+  const [inv, setInv] = useState(false)
+  async function revoke(id: string, email: string) {
+    if (!await ask(`Cancel the invite for ${email}? The link stops working.`, { confirm: 'Cancel invite' })) return
+    try { await api(`/api/console/invites/${id}`, { method: 'DELETE' }); toast('Invite cancelled'); reload() } catch (e: any) { toast(e.message) }
+  }
   async function patch(m: Member, body: Record<string, unknown>, q: string) {
     if (!await ask(q, { danger: body.active === false })) return
     try { await api(`/api/console/memberships/${m.id}`, { method: 'PATCH', json: body }); toast('Updated'); reload() } catch (e: any) { toast(e.message) }
@@ -113,6 +120,8 @@ function People({ o, reload }: { o: OrgFull; reload: () => void }) {
     try { await api(`/api/console/memberships/${m.id}`, { method: 'DELETE' }); toast('Removed'); reload() } catch (e: any) { toast(e.message) }
   }
   return (<>
+    <div className="mb-3 flex justify-end"><Button variant="primary" icon={<UserPlus />} onClick={() => setInv(true)}>Invite person</Button></div>
+    {inv && <InvitePerson o={o} onClose={() => setInv(false)} onDone={reload} />}
     <Table rows={o.members} onOpen={m => go(`/admin/people/${m.user_id}`)} cols={[
       { h: 'Person', cell: m => <><div className="font-semibold">{m.name || m.email} {!m.email_verified && <Badge tone="warning">Email not confirmed</Badge>} {m.disabled && <Badge tone="danger">Account disabled</Badge>}</div><div className="text-xs text-slate-500">{m.email}{m.title ? ` · ${m.title}` : ''}</div></> },
       { h: 'Role', cell: m => <div onClick={e => e.stopPropagation()}><Select aria-label={`Role of ${m.email}`} className="w-44 py-1.5 text-[13px]" value={m.role}
@@ -123,7 +132,7 @@ function People({ o, reload }: { o: OrgFull; reload: () => void }) {
           <Button size="sm" variant="ghost" onClick={() => patch(m, { active: !m.active }, m.active ? `Pause ${m.email}'s access to ${o.name}? They are signed out of it now.` : `Restore ${m.email}'s access to ${o.name}?`)}>{m.active ? 'Pause' : 'Restore'}</Button>
           <Button size="sm" variant="ghost" className="text-red-600" onClick={() => remove(m)}>Remove</Button></div> },
     ]} />
-    {o.invites.length > 0 && <Card className="mt-4"><CardHeader title="Pending invites" /><CardBody><ul className="space-y-1 text-sm">{o.invites.map(i => <li key={i.id} className="flex justify-between gap-2"><span>{i.email} · {i.role_label}</span><span className="text-xs text-slate-500">sent <Ago ts={i.created_at} /></span></li>)}</ul></CardBody></Card>}
+    {o.invites.length > 0 && <Card className="mt-4"><CardHeader title="Pending invites" /><CardBody><ul className="space-y-1 text-sm">{o.invites.map(i => <li key={i.id} className="flex items-center justify-between gap-2"><span>{i.email} · {i.role_label}</span><span className="flex items-center gap-2 text-xs text-slate-500">sent <Ago ts={i.created_at} /><Button size="sm" variant="ghost" onClick={() => revoke(i.id, i.email)}>Cancel</Button></span></li>)}</ul></CardBody></Card>}
   </>)
 }
 
@@ -156,5 +165,53 @@ function Profile({ o, reload }: { o: OrgFull; reload: () => void }) {
         <Button variant="primary" icon={<Save />} loading={busy} disabled={!dirty} onClick={save}>Save changes</Button></div>
       {o.disabled && <Alert className="md:col-span-2" tone="warning">This company is disabled: its people can't sign in.</Alert>}
     </CardBody></Card>
+  )
+}
+
+/** Shows the invite link once, to copy into a message if email is slow or not set up. */
+function LinkBox({ path, email }: { path: string; email: string }) {
+  const url = location.origin + path
+  return <Alert tone="success" title={`Invite sent to ${email}`}>They set their own password from the link (valid 14 days). If the email doesn't arrive, send them this link:
+    <div className="mt-2 flex gap-2"><Input readOnly value={url} aria-label="Invite link" onFocus={e => e.target.select()} /><Button icon={<Copy />} onClick={() => copyText(url, 'Invite link copied')}>Copy</Button></div></Alert>
+}
+
+function NewCompany({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [f, setF] = useState({ name: '', owner_email: '', website: '', industry: '', country: '' }), [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<{ id: string; path: string; email: string } | null>(null)
+  async function create() {
+    setBusy(true)
+    try { const r = await api('/api/console/orgs', { json: f }); setDone(r); onDone() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  return (
+    <Modal open onOpenChange={o => !o && onClose()} title="New company" description="Creates the company and emails its first owner an invite. They set their own password."
+      footer={done ? <><Button onClick={onClose}>Close</Button><Button variant="primary" onClick={() => go(`/admin/companies/${done.id}`)}>Open company</Button></>
+        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!f.name.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.owner_email)} onClick={create}>Create and invite</Button></>}>
+      {done ? <div className="mt-4"><LinkBox path={done.path} email={done.email} /></div> : <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Field label="Company name" htmlFor="nc-name"><Input id="nc-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} autoFocus /></Field>
+        <Field label="Owner's email" htmlFor="nc-email"><Input id="nc-email" type="email" value={f.owner_email} onChange={e => setF({ ...f, owner_email: e.target.value })} /></Field>
+        <Field label="Website (optional)" htmlFor="nc-web"><Input id="nc-web" value={f.website} onChange={e => setF({ ...f, website: e.target.value })} /></Field>
+        <Field label="Industry (optional)" htmlFor="nc-ind"><Input id="nc-ind" value={f.industry} onChange={e => setF({ ...f, industry: e.target.value })} /></Field>
+      </div>}
+    </Modal>
+  )
+}
+
+function InvitePerson({ o, onClose, onDone }: { o: { id: string; name: string }; onClose: () => void; onDone: () => void }) {
+  const [f, setF] = useState({ email: '', role: 'recruiter', title: '' }), [busy, setBusy] = useState(false), [done, setDone] = useState<{ path: string; email: string } | null>(null)
+  async function send() {
+    setBusy(true)
+    try { setDone(await api(`/api/console/orgs/${o.id}/invites`, { json: f })); onDone() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  return (
+    <Modal open onOpenChange={x => !x && onClose()} title={`Invite someone to ${o.name}`}
+      footer={done ? <Button onClick={onClose}>Close</Button> : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email)} onClick={send}>Send invite</Button></>}>
+      {done ? <div className="mt-4"><LinkBox path={done.path} email={done.email} /></div> : <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Field className="sm:col-span-2" label="Email" htmlFor="ip-email"><Input id="ip-email" type="email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} autoFocus /></Field>
+        <Field label="Role" htmlFor="ip-role"><Select id="ip-role" value={f.role} onChange={e => setF({ ...f, role: e.target.value })}>{ROLES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
+        <Field label="Job title (optional)" htmlFor="ip-title"><Input id="ip-title" value={f.title} onChange={e => setF({ ...f, title: e.target.value })} /></Field>
+      </div>}
+    </Modal>
   )
 }

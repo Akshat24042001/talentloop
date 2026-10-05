@@ -31,6 +31,14 @@ def _orgs(s) -> dict[str, str]:
     return dict(s.query(db.Org.id, db.Org.name).all())
 
 
+def jd_location(f: dict) -> str:
+    from . import jd_schema
+    try:
+        return jd_schema.location_text(f)
+    except Exception:
+        return ""
+
+
 def _audit(s, ctx, org_id: str | None, what: str, **ids) -> None:
     log_activity(s, ctx, "platform_admin", f"{what} (by {_who(ctx)})"[:2000], org_id=org_id, **ids)
 
@@ -428,7 +436,7 @@ def console_jobs(req: Request, q: str = "", org: str = "", status: str = "", pag
         apps = dict(s.query(db.Application.job_id, func.count()).filter(db.Application.job_id.in_([j.id for j in rows] or [""])).group_by(db.Application.job_id).all())
         return {"total": total, "page": page, "size": PAGE, "items": [
             {"id": j.id, "title": j.title, "department": j.department, "status": j.status, "company": names.get(j.org_id, ""), "org_id": j.org_id,
-             "location": (j.fields or {}).get("location", ""), "applications": apps.get(j.id, 0), "created_at": j.created_at, "published_at": j.published_at}
+             "location": jd_location(j.fields or {}), "applications": apps.get(j.id, 0), "created_at": j.created_at, "published_at": j.published_at}
             for j in rows]}
 
 
@@ -447,7 +455,7 @@ def console_job(jid: str, req: Request):
         return {"id": j.id, "title": j.title, "department": j.department, "status": j.status, "company": _orgs(s).get(j.org_id, ""), "org_id": j.org_id,
                 "fields": j.fields or {}, "rounds": [{"name": r.get("name"), "type": r.get("type")} for r in (j.flow or []) if isinstance(r, dict)],
                 "created_by": creator.email if creator else "", "created_at": j.created_at, "published_at": j.published_at,
-                "stages": stages, "applications": apps}
+                "stages": stages, "applications": apps, "edit_fields": job_edit_fields(), "location": jd_location(j.fields or {})}
 
 
 @router.patch("/api/console/jobs/{jid}")
@@ -564,3 +572,289 @@ def console_search(req: Request, q: str):
             "jobs": [{"id": j.id, "title": j.title, "company": names.get(j.org_id, "")} for j in s.query(db.Job).filter(func.lower(db.Job.title).like(like)).limit(8)],
         }
 
+
+
+# ---------------------------------------------------------------------------
+# create and invite
+# ---------------------------------------------------------------------------
+def _invite(s, ctx, org_id: str, email: str, role: str, title: str = "") -> dict:
+    from . import messages
+    from .api_accounts import INVITE_DAYS
+    from .flows import base_url
+    if role not in auth.ROLES:
+        raise HTTPException(400, "Unknown role")
+    u = s.query(db.User).filter_by(email=email).first()
+    if u and s.query(db.Membership).filter_by(user_id=u.id, org_id=org_id).first():
+        raise HTTPException(409, f"{email} is already in this company.")
+    tok = auth.secrets.token_urlsafe(24)
+    inv = db.Invite(org_id=org_id, email=email, role=role, title=title[:120], token_hash=auth.token_hash(tok), created_by=ctx.user_id,
+                    expires_at=time.time() + INVITE_DAYS * 86400)
+    s.add(inv)
+    org = s.get(db.Org, org_id)
+    link = f"{base_url()}/invite/{tok}"
+    messages.queue(s, org_id, to_email=email, subject=f"You're invited to {org.name} on TalentLoop",
+                   body=f"You've been invited to join {org.name} on TalentLoop as {auth.ROLE_LABEL[role]}.\n\nAccept here (valid {INVITE_DAYS} days):\n{link}",
+                   template="member_invite")
+    _audit(s, ctx, org_id, f"{email} invited as {auth.ROLE_LABEL[role]}")
+    return {"path": f"/invite/{tok}", "email": email, "expires_days": INVITE_DAYS}
+
+
+@router.post("/api/console/orgs")
+async def console_org_create(req: Request):
+    """New company with its first owner invited by email (they set their own password from the link)."""
+    body = await req.json()
+    name = str(body.get("name") or "").strip()[:200]
+    email = auth.norm_email(body.get("owner_email"))
+    if not name:
+        raise HTTPException(400, "A company needs a name.")
+    with db.session() as s:
+        ctx = _admin(req, s)
+        org = db.Org(name=name, slug=unique_slug(s, str(body.get("slug") or name)),
+                     settings={k: str(body.get(k) or "")[:200] for k in ("website", "industry", "size", "country") if body.get(k)})
+        s.add(org)
+        s.flush()
+        _audit(s, ctx, org.id, f"Company '{name}' created")
+        inv = _invite(s, ctx, org.id, email, "owner")
+        return {"id": org.id, "slug": org.slug, **inv}
+
+
+@router.post("/api/console/orgs/{org_id}/invites")
+async def console_org_invite(org_id: str, req: Request):
+    body = await req.json()
+    with db.session() as s:
+        ctx = _admin(req, s)
+        if not s.get(db.Org, org_id):
+            raise HTTPException(404, "Company not found")
+        return _invite(s, ctx, org_id, auth.norm_email(body.get("email")), str(body.get("role") or "recruiter"), str(body.get("title") or ""))
+
+
+@router.delete("/api/console/invites/{inv_id}")
+def console_invite_revoke(inv_id: str, req: Request):
+    with db.session() as s:
+        ctx = _admin(req, s)
+        inv = s.get(db.Invite, inv_id)
+        if not inv:
+            raise HTTPException(404, "Invite not found")
+        _audit(s, ctx, inv.org_id, f"Invite for {inv.email} revoked")
+        s.delete(inv)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# edit candidates and jobs
+# ---------------------------------------------------------------------------
+CAND_FIELDS = {"name": 200, "email": 320, "phone": 40, "location": 200, "headline": 300, "current_company": 200, "college": 200}
+
+
+@router.patch("/api/console/candidates/{cid}")
+async def console_candidate_update(cid: str, req: Request):
+    body = await req.json()
+    with db.session() as s:
+        ctx = _admin(req, s)
+        c = s.get(db.Candidate, cid)
+        if not c:
+            raise HTTPException(404, "Candidate not found")
+        done = []
+        for k, n in CAND_FIELDS.items():
+            if k in body and str(body[k] or "").strip()[:n] != (getattr(c, k) or ""):
+                v = str(body[k] or "").strip()[:n]
+                if k == "name" and not v:
+                    raise HTTPException(400, "A candidate needs a name.")
+                setattr(c, k, v.lower() if k == "email" else v)
+                done.append(k)
+        for k in ("years", "notice_days", "expected_salary"):
+            if k in body:
+                try:
+                    v = None if body[k] in (None, "") else float(body[k])
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"{k} must be a number")
+                if v != getattr(c, k):
+                    setattr(c, k, v)
+                    done.append(k)
+        if "tags" in body and isinstance(body["tags"], list):
+            c.tags = [str(t).strip()[:40] for t in body["tags"] if str(t).strip()][:30]
+            done.append("tags")
+        if done:
+            c.updated_at = time.time()
+            _audit(s, ctx, c.org_id, f"Candidate {c.name}: {', '.join(done)} edited", candidate_id=c.id)
+    return console_candidate(cid, req)
+
+
+JOB_EDITABLE = ("title", "department", "employment_type", "workplace_type", "locations", "experience_min", "experience_max", "education",
+                "salary_min", "salary_max", "summary", "responsibilities", "must_have_skills", "nice_to_have_skills", "tools", "benefits")
+
+
+def job_edit_fields() -> list[dict]:
+    """The JD fields the console can edit, straight from the job schema (labels, types, allowed options)."""
+    from . import jd_schema
+    out = []
+    for k in JOB_EDITABLE:
+        f = jd_schema.FIELDS.get(k)
+        if f:
+            out.append({"key": k, "label": f["label"], "type": "list" if f["type"] in jd_schema.LIST_TYPES else f["type"],
+                        "options": f.get("options") if f["type"] in ("select", "multiselect") else None})
+    return out
+
+
+@router.put("/api/console/jobs/{jid}")
+async def console_job_edit(jid: str, req: Request):
+    """Edit a job description. Values go through the job schema's own validation; fields not sent are kept."""
+    from . import jd_schema
+    body = await req.json()
+    sent = {k: body[k] for k in JOB_EDITABLE if k in body and jd_schema.FIELDS.get(k)}
+    for k, f in ((k, jd_schema.FIELDS[k]) for k in sent):
+        if f["type"] in jd_schema.LIST_TYPES and isinstance(sent[k], str):
+            sent[k] = sent[k].split("\n")
+    clean = jd_schema.clean(sent)
+    with db.session() as s:
+        ctx = _admin(req, s)
+        j = s.get(db.Job, jid)
+        if not j:
+            raise HTTPException(404, "Job not found")
+        f = dict(j.fields or {})
+        for k, v in sent.items():
+            empty = v in (None, "") or (isinstance(v, list) and not [x for x in v if str(x).strip()])
+            if k in clean and not empty:
+                f[k] = clean[k]
+            elif empty:
+                if k == "title":
+                    raise HTTPException(400, "A job needs a title.")
+                f.pop(k, None)
+            else:
+                raise HTTPException(400, f"{jd_schema.FIELDS[k]['label']}: '{v}' isn't an allowed value.")
+        j.title, j.department = f.get("title") or j.title, f.get("department") or ""
+        j.fields, j.updated_at = f, time.time()
+        _audit(s, ctx, j.org_id, f"Job description of '{j.title}' edited ({', '.join(sent)})"[:2000], job_id=j.id)
+    return console_job(jid, req)
+
+
+# ---------------------------------------------------------------------------
+# AI interview report
+# ---------------------------------------------------------------------------
+@router.get("/api/console/interviews/{iid}")
+def console_interview(iid: str, req: Request):
+    from . import exports
+    with db.session() as s:
+        _admin(req, s)
+        row = s.get(db.InterviewIndex, iid)
+        company = _orgs(s).get(row.org_id or "", "") if row else ""
+    rec = store.load(iid) if row else None
+    if not rec:
+        raise HTTPException(404, "Interview not found")
+    try:
+        transcript = exports.transcript_text(rec)
+    except Exception:
+        transcript = ""
+    plan = rec.get("plan") or {}
+    return {"id": iid, "company": company, "org_id": row.org_id, "candidate": row.candidate, "email": row.email, "role": row.role,
+            "status": rec.get("status"), "created_at": rec.get("created_at"), "summary": row.summary or {}, "report": rec.get("report") or {},
+            "questions": len(plan.get("questions") or []), "transcript": transcript[:60000]}
+
+
+@router.get("/api/console/interviews/{iid}/report.pdf")
+async def console_interview_pdf(iid: str, req: Request):
+    import asyncio
+    from fastapi.responses import Response
+    from . import exports
+    with db.session() as s:
+        _admin(req, s)
+    rec = store.load(iid)
+    if not rec:
+        raise HTTPException(404, "Interview not found")
+    pdf = await asyncio.to_thread(exports.report_pdf, rec)
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{exports.base_name(rec)}_report.pdf"'})
+
+
+# ---------------------------------------------------------------------------
+# reports: CSV downloads of everything, filtered by company
+# ---------------------------------------------------------------------------
+@router.get("/api/console/export/{kind}.csv")
+def console_export(kind: str, req: Request, org: str = ""):
+    import csv
+    import io
+    from datetime import datetime, timezone
+    from fastapi.responses import Response
+    day = lambda ts: datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if ts else ""  # noqa: E731
+    with db.session() as s:
+        ctx = _admin(req, s)
+        names = _orgs(s)
+        by_org = lambda q, m: q.filter(m.org_id == org) if org else q  # noqa: E731
+        if kind == "companies":
+            head = ["company", "careers_address", "created", "disabled", "people", "jobs", "candidates", "applications", "interviews", "ai_requests"]
+            cnt = lambda m: dict(s.query(m.org_id, func.count()).group_by(m.org_id).all())  # noqa: E731
+            mem, jobs, cands, apps, ivs, ai = cnt(db.Membership), cnt(db.Job), cnt(db.Candidate), cnt(db.Application), cnt(db.InterviewIndex), cnt(db.AIUsage)
+            rows = [[o.name, o.slug, day(o.created_at), o.disabled, mem.get(o.id, 0), jobs.get(o.id, 0), cands.get(o.id, 0), apps.get(o.id, 0), ivs.get(o.id, 0), ai.get(o.id, 0)]
+                    for o in s.query(db.Org).order_by(db.Org.created_at)]
+        elif kind == "people":
+            head = ["name", "email", "email_confirmed", "disabled", "platform_admin", "companies", "sign_ins", "last_sign_in", "joined"]
+            mems: dict[str, list[str]] = {}
+            for m in s.query(db.Membership):
+                mems.setdefault(m.user_id, []).append(f"{names.get(m.org_id, '')} ({auth.ROLE_LABEL.get(m.role, m.role)})")
+            rows = [[u.name, u.email, u.email_verified_at is not None, u.disabled, u.is_platform_admin, "; ".join(mems.get(u.id, [])), u.login_count or 0,
+                     day(u.last_login_at), day(u.created_at)] for u in s.query(db.User).order_by(db.User.created_at)]
+        elif kind == "candidates":
+            head = ["company", "name", "email", "phone", "location", "headline", "current_company", "years", "source", "sample", "added"]
+            rows = [[names.get(c.org_id, ""), c.name, c.email, c.phone, c.location, c.headline, c.current_company, c.years, c.source, c.source == "demo", day(c.created_at)]
+                    for c in by_org(s.query(db.Candidate), db.Candidate).order_by(db.Candidate.created_at)]
+        elif kind == "jobs":
+            head = ["company", "title", "department", "status", "location", "applications", "created", "published"]
+            apps = dict(s.query(db.Application.job_id, func.count()).group_by(db.Application.job_id).all())
+            rows = [[names.get(j.org_id, ""), j.title, j.department, j.status, jd_location(j.fields or {}), apps.get(j.id, 0), day(j.created_at), day(j.published_at)]
+                    for j in by_org(s.query(db.Job), db.Job).order_by(db.Job.created_at)]
+        elif kind == "applications":
+            head = ["company", "job", "candidate", "email", "stage", "source", "applied"]
+            q = s.query(db.Application, db.Job, db.Candidate).join(db.Job, db.Job.id == db.Application.job_id).join(db.Candidate, db.Candidate.id == db.Application.candidate_id)
+            rows = [[names.get(a.org_id, ""), j.title, c.name, c.email, a.stage, a.source, day(a.created_at)]
+                    for a, j, c in by_org(q, db.Application).order_by(db.Application.created_at)]
+        elif kind == "interviews":
+            head = ["company", "candidate", "email", "role", "status", "channel", "overall", "recommendation", "created"]
+            rows = [[names.get(i.org_id or "", ""), i.candidate, i.email, i.role, i.status, i.channel, (i.summary or {}).get("overall"), (i.summary or {}).get("recommendation"), day(i.created_at)]
+                    for i in by_org(s.query(db.InterviewIndex), db.InterviewIndex).order_by(db.InterviewIndex.created_at)]
+        elif kind == "audit":
+            head = ["when", "company", "who", "action", "detail"]
+            users = dict(s.query(db.User.id, db.User.email).all())
+            rows = [[day(a.at), names.get(a.org_id or "", "Platform" if not a.org_id else ""), users.get(a.user_id or "", "system"), a.action, a.detail]
+                    for a in by_org(s.query(db.Activity), db.Activity).order_by(db.Activity.at.desc()).limit(100000)]
+        else:
+            raise HTTPException(404, "Unknown report")
+        _audit(s, ctx, org or None, f"Report downloaded: {kind}{' for ' + names.get(org, '') if org else ' (all companies)'}, {len(rows)} rows")
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(head)
+    for r in rows:      # a leading = + - @ would run as a formula in Excel: neutralise it
+        w.writerow(["'" + v if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v for v in r])
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="talentloop-{kind}-{stamp}.csv"', "Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------------------
+# delete an account
+# ---------------------------------------------------------------------------
+@router.delete("/api/console/users/{uid}")
+async def console_user_delete(uid: str, req: Request):
+    body = await req.json()
+    with db.session() as s:
+        ctx = _admin(req, s)
+        u = s.get(db.User, uid)
+        if not u:
+            raise HTTPException(404, "Account not found")
+        if u.id == ctx.user_id:
+            raise HTTPException(400, "You can't delete your own account.")
+        if str(body.get("confirm") or "").strip().lower() != u.email:
+            raise HTTPException(400, "Type the account's email to delete it.")
+        if u.email in auth.PLATFORM_ADMINS:
+            raise HTTPException(400, "This email is in PLATFORM_ADMIN_EMAILS on the server. Remove it there first.")
+        for m in s.query(db.Membership).filter_by(user_id=uid):
+            if m.role == "owner" and not _owners_left(s, m.org_id, m.id):
+                raise HTTPException(400, f"They are the only owner of {s.get(db.Org, m.org_id).name}. Make someone else owner first, or delete that company.")
+        email, orgs = u.email, [m.org_id for m in s.query(db.Membership).filter_by(user_id=uid)]
+        s.query(db.AuthSession).filter_by(user_id=uid).delete()
+        s.query(db.Membership).filter_by(user_id=uid).delete()
+        s.query(db.UserDay).filter_by(user_id=uid).delete()
+        s.query(db.Activity).filter_by(user_id=uid).update({db.Activity.user_id: None}, synchronize_session=False)
+        s.query(db.Job).filter_by(created_by=uid).update({db.Job.created_by: None}, synchronize_session=False)
+        s.delete(u)
+        for org_id in orgs or [None]:
+            _audit(s, ctx, org_id, f"Account {email} deleted")
+    return {"ok": True}
