@@ -514,13 +514,27 @@ def admin_overview(req: Request):
         }
 
 
+_analytics_cache: dict[int, tuple[float, dict]] = {}
+
+
 @router.get("/api/admin/analytics")
 def admin_analytics(req: Request, days: int = 30):
-    """Platform-wide numbers and daily series for the platform admin. Days are in REPORT_TZ (default India time)."""
-    from datetime import date, timedelta
+    """Platform-wide numbers and daily series for the platform admin. Days are in REPORT_TZ (default India time).
+    About 26 queries, so the result is reused for 60 seconds (the page refreshes every minute anyway)."""
     days = days if days in (7, 30, 90) else 30
     with db.session() as s:
         _admin(req, s)
+    hit = _analytics_cache.get(days)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    out = _analytics(days)
+    _analytics_cache[days] = (time.time(), out)
+    return out
+
+
+def _analytics(days: int) -> dict:
+    from datetime import date, timedelta
+    with db.session() as s:
         t = time.time()
         today = date.fromisoformat(auth.local_day(t))
         labels = [(today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)]

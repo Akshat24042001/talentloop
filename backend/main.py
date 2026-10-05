@@ -51,6 +51,7 @@ db.migrate()   # idempotent: creates missing tables (also when the app is import
 refs.key()      # load (or create once) the key that encrypts ids in URLs, outside any request transaction
 store.ON_SAVE.append(ivindex.sync)
 store.ON_DELETE.append(ivindex.remove)
+from sqlalchemy.exc import DBAPIError  # noqa: E402
 from . import appenv  # noqa: E402
 if appenv.IS_PRODUCTION:
     log.info("APP_ENV=production: real recipients get email and WhatsApp")
@@ -83,6 +84,34 @@ async def _startup():
     if SWEEP_EVERY_SEC > 0:
         asyncio.create_task(_sweeper())
     asyncio.create_task(_messages_loop())
+
+
+class _RetryLostConnection:
+    """A pooled database connection that the server closed (pooler restart, network blip) fails once and is thrown
+    away. Reads are safe to repeat, so a GET or HEAD that failed that way, before any response was sent, runs once
+    more on a fresh connection instead of showing an error. Plain ASGI: Starlette's http middleware can't re-run."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") not in ("GET", "HEAD"):
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def watch(msg):
+            nonlocal started
+            if msg["type"] == "http.response.start":
+                started = True
+            await send(msg)
+        try:
+            await self.app(scope, receive, watch)
+        except DBAPIError as e:
+            if started or not e.connection_invalidated:
+                raise
+            log.warning("database connection was closed; retrying %s %s once", scope["method"], scope.get("path"))
+            db.engine.dispose()      # when one pooled connection is dead the others usually are too
+            await self.app(scope, receive, send)
 
 
 @app.middleware("http")
@@ -1356,3 +1385,5 @@ else:
             raise HTTPException(404)
         return PlainTextResponse("The web interface has not been built. Run: cd frontend && npm ci && npm run build",
                                  status_code=503)
+
+app.add_middleware(_RetryLostConnection)   # added last, so it wraps everything else

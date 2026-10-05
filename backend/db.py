@@ -47,8 +47,36 @@ if IS_SQLITE:
         cur.close()
 else:
     # prepare_threshold=None: works behind Supabase's pooler (PgBouncer/Supavisor) in transaction mode too.
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=5, max_overflow=5, pool_recycle=300,
-                           connect_args={"prepare_threshold": None})
+    # No pool_pre_ping: it costs one network round trip on every checkout (Render Singapore <-> Supabase Mumbai is
+    # ~50 ms). Instead a connection is checked only when it sat idle long enough for the pooler to have dropped it.
+    engine = create_engine(DATABASE_URL, pool_size=5, max_overflow=5, pool_recycle=300,
+                           connect_args={"prepare_threshold": None, "keepalives": 1, "keepalives_idle": 30,
+                                         "keepalives_interval": 10, "keepalives_count": 3})
+
+    @event.listens_for(engine, "checkin")
+    def _idle_from(dbapi_conn, record):
+        record.info["idle_since"] = _time.monotonic()
+
+    @event.listens_for(engine, "checkout")
+    def _ping_if_idle(dbapi_conn, record, proxy):
+        since = record.info.get("idle_since")
+        if since is not None and _time.monotonic() - since > 30:
+            try:
+                cur = dbapi_conn.cursor()
+                cur.execute("SELECT 1")
+                cur.close()
+                dbapi_conn.rollback()
+            except Exception as e:
+                from sqlalchemy import exc
+                raise exc.DisconnectionError() from e     # the pool throws this connection away and opens a new one
+
+    @event.listens_for(engine, "handle_error")
+    def _lost_connection(ctx):
+        """Treat 'the server closed this connection' errors (SQLSTATE 08xxx, 57P01-57P03: admin/crash shutdown, as when
+        the pooler restarts) as a lost connection, so the pool discards it and the request retry gets a fresh one."""
+        code = getattr(getattr(ctx, "original_exception", None), "sqlstate", None) or ""
+        if code.startswith("08") or code in ("57P01", "57P02", "57P03"):
+            ctx.is_disconnect = True
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
