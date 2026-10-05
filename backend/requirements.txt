@@ -16,3 +16,4 @@ openpyxl>=3.1
 tzdata>=2024.1
 pillow>=10.0
 anthropic>=1.0
+PyJWT>=2.8

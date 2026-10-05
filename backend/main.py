@@ -1286,6 +1286,33 @@ app.include_router(api_candidate.router)
 route_tags.apply(app.router, api_accounts.router, api_hiring.router, api_flows.router, api_portal.router, api_candidate.router)
 app.openapi_tags = route_tags.openapi_tags()
 
+
+def _openapi():
+    """API docs with sign-in: press Authorize on /docs, enter your email and password, and every request carries a JWT."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    spec = get_openapi(title="TalentLoop API", version="1.0", routes=app.routes, tags=app.openapi_tags,
+                       description="Sign in with **Authorize** (email as username) or call `POST /api/auth/token`, then send "
+                                   "`Authorization: Bearer <access_token>`. Access tokens last `JWT_ACCESS_MINUTES` (60); renew them with "
+                                   "`POST /api/auth/token/refresh`. The web app itself uses a secure cookie instead.")
+    spec.setdefault("components", {})["securitySchemes"] = {
+        "OAuth2Password": {"type": "oauth2", "flows": {"password": {"tokenUrl": "/api/auth/token", "scopes": {}}},
+                           "description": "Email in the username box."},
+        "BearerJWT": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "Paste an access token."},
+    }
+    open_paths = ("/api/auth/token", "/api/auth/signup", "/api/auth/login", "/api/auth/forgot", "/api/auth/reset", "/api/ping",
+                  "/healthz", "/api/health")
+    for path, ops in spec.get("paths", {}).items():
+        for op in ops.values():
+            if isinstance(op, dict):
+                op["security"] = [] if path.startswith(open_paths) else [{"OAuth2Password": []}, {"BearerJWT": []}]
+    app.openapi_schema = spec
+    return spec
+
+
+app.openapi = _openapi
+
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
 SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/forgot", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
               "/me", "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/ref/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]

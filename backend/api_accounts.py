@@ -73,6 +73,7 @@ def me_payload(s, ctx: auth.Ctx) -> dict:
     org = ctx.org
     return {
         "user": {"id": u.id, "email": u.email, "name": u.name} if u else {"id": None, "email": "api-key", "name": "API key"},
+        "email_verified": (u.email_verified_at is not None or not auth.verification_required()) if u else True,
         "org": {"id": org.id, "name": org.name, "slug": org.slug, "settings": org_settings(org)} if org else None,
         "role": ctx.role, "role_label": auth.ROLE_LABEL.get(ctx.role or "", ""), "platform_admin": ctx.platform_admin,
         "memberships": mems,
@@ -96,9 +97,13 @@ async def signup(req: Request, resp: Response):
     if not name or not company:
         raise HTTPException(400, "Your name and your company name are required.")
     with db.session() as s:
-        if s.query(db.User).filter_by(email=email).first():
+        old = s.query(db.User).filter_by(email=email).first()
+        if old and old.email_verified_at is None and not old.disabled:
+            _drop_unconfirmed(s, old)          # someone signed up with this address and never confirmed it: the owner of the inbox wins
+        elif old:
             raise HTTPException(409, "An account with this email already exists. Sign in instead.")
-        user = db.User(email=email, name=name, password_hash=auth.hash_password(pw), is_platform_admin=email in auth.PLATFORM_ADMINS)
+        user = db.User(email=email, name=name, password_hash=auth.hash_password(pw), is_platform_admin=email in auth.PLATFORM_ADMINS,
+                       email_verified_at=None if auth.verification_required() else time.time())
         settings = {k: str(body.get(k) or "")[:200] for k in ("website", "industry", "size", "country") if body.get(k)}
         org = db.Org(name=company, slug=unique_slug(s, company), settings=settings)
         s.add_all([user, org]); s.flush()
@@ -106,6 +111,8 @@ async def signup(req: Request, resp: Response):
         auth.start_session(s, resp, req, user, org.id)
         log_activity(s, None, "company_created", f"{company} by {email}", org_id=org.id)
         s.flush()
+        if user.email_verified_at is None:
+            _send_verify_code(s, user, org.id)
         return me_payload(s, auth.Ctx(user=user, org=org, role="owner", platform_admin=user.is_platform_admin))
 
 
@@ -159,7 +166,9 @@ async def switch_org(req: Request):
         mem = s.query(db.Membership).filter_by(user_id=ctx.user.id, org_id=str(body.get("org_id"))).first()
         if not mem or mem.active is False:
             raise HTTPException(404, "You are not a member of that company")
-        sess = s.get(db.AuthSession, auth.token_hash(req.cookies.get(auth.COOKIE, "")))
+        sess = s.get(db.AuthSession, ctx.sid) if ctx.sid else None
+        if not sess:
+            raise HTTPException(400, "No session to switch")
         sess.org_id = mem.org_id
     return {"ok": True}
 
@@ -175,7 +184,7 @@ async def change_password(req: Request):
         auth.validate_password(str(body.get("new") or ""))
         ctx.user.password_hash = auth.hash_password(str(body["new"]))
         # sign out everywhere else
-        keep = auth.token_hash(req.cookies.get(auth.COOKIE, ""))
+        keep = ctx.sid or ""
         s.query(db.AuthSession).filter(db.AuthSession.user_id == ctx.user.id, db.AuthSession.token_hash != keep).delete()
     return {"ok": True}
 
@@ -226,6 +235,8 @@ async def accept_invite(token: str, req: Request, resp: Response):
             user = db.User(email=inv.email, name=str(body.get("name") or inv.email.split("@")[0])[:200],
                            password_hash=auth.hash_password(str(body["password"])), is_platform_admin=inv.email in auth.PLATFORM_ADMINS)
             s.add(user); s.flush()
+        if user.email_verified_at is None:
+            user.email_verified_at = time.time()      # the invite link was emailed to this address
         if not s.query(db.Membership).filter_by(user_id=user.id, org_id=inv.org_id).first():
             s.add(db.Membership(user_id=user.id, org_id=inv.org_id, role=inv.role, title=inv.title))
         inv.accepted_at = time.time()
@@ -598,7 +609,8 @@ def admin_users(req: Request):
             mem.setdefault(m.user_id, []).append({"org": orgs.get(m.org_id, ""), "org_id": m.org_id, "role": m.role,
                                                   "role_label": auth.ROLE_LABEL.get(m.role, m.role)})
         return [{"id": u.id, "email": u.email, "name": u.name, "created_at": u.created_at, "last_login_at": u.last_login_at,
-                 "login_count": u.login_count or 0, "disabled": u.disabled, "platform_admin": u.is_platform_admin, "memberships": mem.get(u.id, [])}
+                 "login_count": u.login_count or 0, "disabled": u.disabled, "platform_admin": u.is_platform_admin, "memberships": mem.get(u.id, []),
+                 "email_verified": u.email_verified_at is not None}
                 for u in s.query(db.User).order_by(db.User.created_at.desc())]
 
 
@@ -631,6 +643,9 @@ async def admin_update_user(user_id: str, req: Request):
             u.disabled = bool(body["disabled"])
             if u.disabled:
                 s.query(db.AuthSession).filter_by(user_id=u.id).delete()
+        if body.get("email_verified") is True and u.email_verified_at is None:
+            u.email_verified_at = time.time()
+            log_activity(s, ctx, "settings_updated", f"Email of {u.email} marked as confirmed by a platform admin"[:300])
         if "platform_admin" in body and u.id != ctx.user_id:
             u.is_platform_admin = bool(body["platform_admin"])
     return {"ok": True}
@@ -739,8 +754,134 @@ async def reset_password(req: Request):
         if not user or len(code) != 6 or not any(hmac.compare_digest(code, _reset_code(user, x)) for x in (w, w - 1)):
             raise HTTPException(400, "That code isn't right or has expired. Ask for a new one.")
         user.password_hash = auth.hash_password(pw)
+        if user.email_verified_at is None:
+            user.email_verified_at = time.time()      # the code came to this inbox
         s.query(db.AuthSession).filter_by(user_id=user.id).delete()    # signed out everywhere
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# email confirmation at sign-up: a 6-digit code (or the link in the same email), valid for 15-30 minutes
+# ---------------------------------------------------------------------------
+def _verify_code(user: db.User, window: int) -> str:
+    import hashlib
+    import hmac
+    from . import refs
+    n = int.from_bytes(hmac.new(refs.key(), f"verify|{user.id}|{user.email}|{window}".encode(), hashlib.sha256).digest()[:6], "big")
+    return f"{n % 1_000_000:06d}"
+
+
+def _send_verify_code(s, user: db.User, org_id: str | None) -> None:
+    from . import messages
+    from .flows import base_url as app_base
+    code = _verify_code(user, int(time.time() // 900))
+    link = f"{app_base()}/app?verify={code}" if app_base() else ""
+    messages.queue(s, org_id or "", to_email=user.email, subject=f"{code} is your TalentLoop confirmation code",
+                   body=f"Hi {user.name or 'there'},\n\nConfirm your email to start using TalentLoop. Your code is {code}."
+                        + (f"\n\nOr open this link in the browser where you signed up:\n{link}" if link else "")
+                        + "\n\nThe code works for about 15 minutes. If you didn't sign up, ignore this email: nothing happens without the code.",
+                   template="email_verify")
+
+
+def _drop_unconfirmed(s, user: db.User) -> None:
+    """Remove an account that never confirmed its email, and any company only it belonged to (it could not have used it)."""
+    for m in s.query(db.Membership).filter_by(user_id=user.id).all():
+        others = s.query(db.Membership).filter(db.Membership.org_id == m.org_id, db.Membership.user_id != user.id).count()
+        org_id = m.org_id
+        s.delete(m)
+        if not others:
+            s.flush()
+            for model in (db.Activity, db.Message):
+                s.query(model).filter(model.org_id == org_id).delete(synchronize_session=False)
+            s.query(db.Org).filter_by(id=org_id).delete(synchronize_session=False)
+    s.query(db.AuthSession).filter_by(user_id=user.id).delete()
+    s.query(db.UserDay).filter_by(user_id=user.id).delete()
+    s.delete(user)
+    s.flush()
+
+
+@router.post("/api/auth/verify")
+@offload
+async def verify_email(req: Request):
+    body = await req.json()
+    import hmac
+    with db.session() as s:
+        ctx = auth.current(req, s)
+        if not ctx.user:
+            raise HTTPException(400, "Not available for API keys")
+        user = ctx.user
+        if user.email_verified_at is not None:
+            return me_payload(s, ctx)
+        auth.rate_limit(f"verify:{user.id}", 8, 900)
+        code = "".join(ch for ch in str(body.get("code") or "") if ch.isdigit())
+        w = int(time.time() // 900)
+        if len(code) != 6 or not any(hmac.compare_digest(code, _verify_code(user, x)) for x in (w, w - 1)):
+            raise HTTPException(400, "That code isn't right or has expired. Check the latest email, or send a new code.")
+        user.email_verified_at = time.time()
+        log_activity(s, ctx, "member_joined", f"{user.email} confirmed their email"[:300]) if ctx.org else None
+        return me_payload(s, ctx)
+
+
+@router.post("/api/auth/verify/resend")
+def resend_verify(req: Request):
+    with db.session() as s:
+        ctx = auth.current(req, s)
+        if not ctx.user or ctx.user.email_verified_at is not None:
+            return {"ok": True}
+        auth.rate_limit(f"verify-send:{ctx.user.id}", 1, 45)
+        auth.rate_limit(f"verify-send-h:{ctx.user.id}", 6, 3600)
+        _send_verify_code(s, ctx.user, ctx.org_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# JWT for API clients and Swagger ("Authorize" on /docs)
+# ---------------------------------------------------------------------------
+async def _token_body(req: Request) -> dict:
+    if (req.headers.get("content-type") or "").startswith("application/json"):
+        return await req.json()
+    return dict(await req.form())
+
+
+@router.post("/api/auth/token", summary="Get a JWT access token",
+             description="Email and password in, a JWT access token (send it as `Authorization: Bearer <token>`) and a refresh token out. "
+                         "Accepts the OAuth2 password form that Swagger's Authorize button sends (`username` = your email), or JSON "
+                         "`{\"email\", \"password\"}`. The account must have confirmed its email.")
+@offload
+async def token(req: Request):
+    body = await _token_body(req)
+    email = str(body.get("email") or body.get("username") or "").strip().lower()
+    auth.rate_limit(f"login:{auth.client_ip(req)}", 20, 600)
+    auth.rate_limit(f"login:{email}", 10, 600)
+    with db.session() as s:
+        user = s.query(db.User).filter_by(email=email).first()
+        if not user or not auth.check_password(str(body.get("password") or ""), user.password_hash):
+            raise HTTPException(401, "Wrong email or password.")
+        if user.disabled:
+            raise HTTPException(403, "This account is disabled. Contact support.")
+        if user.email_verified_at is None and auth.verification_required():
+            raise HTTPException(403, "Confirm your email first: sign in on the website and enter the code we emailed you.")
+        if email in auth.PLATFORM_ADMINS and not user.is_platform_admin:
+            user.is_platform_admin = True
+        mem = s.query(db.Membership).filter(db.Membership.user_id == user.id, db.Membership.active.isnot(False)) \
+            .order_by(db.Membership.created_at).first()
+        if not mem and not user.is_platform_admin and s.query(db.Membership).filter_by(user_id=user.id).first():
+            raise HTTPException(403, "Your access has been paused by your company admin.")
+        return auth.issue_tokens(s, req, user, mem.org_id if mem else None)
+
+
+@router.post("/api/auth/token/refresh", summary="Get a new access token",
+             description="Send `{\"refresh_token\"}` from /api/auth/token. Returns a fresh access token while the session is valid. "
+                         "Signing out, a password reset or a disabled account end the session and every token made from it.")
+async def token_refresh(req: Request):
+    body = await _token_body(req)
+    rt = str(body.get("refresh_token") or "")
+    with db.session() as s:
+        sess = s.get(db.AuthSession, auth.token_hash(rt)) if rt else None
+        user = s.get(db.User, sess.user_id) if sess else None
+        if not sess or sess.expires_at < time.time() or not user or user.disabled:
+            raise HTTPException(401, "This refresh token is not valid or has expired. Get a new one from /api/auth/token.")
+        return {**auth.access_token(user.id, sess.token_hash), "refresh_token": rt}
 
 
 # ---------------------------------------------------------------------------

@@ -403,7 +403,7 @@ def _safe_data(rr: db.RoundResult) -> dict:
 
 
 def _msg_json(m: db.Message) -> dict:
-    body = "(Code hidden: only the person it was sent to sees it.)" if m.template in ("candidate_login", "password_reset") else m.body
+    body = "(Code hidden: only the person it was sent to sees it.)" if m.template in ("candidate_login", "password_reset", "email_verify") else m.body
     return {"id": m.id, "channel": m.channel, "to": m.to, "subject": m.subject, "body": body, "template": m.template, "status": m.status,
             "error": m.error, "created_at": m.created_at, "sent_at": m.sent_at}
 

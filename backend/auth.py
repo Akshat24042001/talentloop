@@ -116,7 +116,71 @@ def end_session(s, req: Request, resp: Response) -> None:
     tok = req.cookies.get(COOKIE)
     if tok:
         s.query(db.AuthSession).filter_by(token_hash=token_hash(tok)).delete()
+    claims = _bearer_claims(req)
+    if claims:
+        s.query(db.AuthSession).filter_by(token_hash=claims["sid"]).delete()
     resp.delete_cookie(COOKIE, path="/")
+
+
+# ---------------------------------------------------------------------------
+# JWT for API clients (Swagger "Authorize", scripts, mobile apps). The browser keeps its HttpOnly cookie.
+# An access token is short-lived (JWT_ACCESS_MINUTES, default 60) and names a session row, so signing out,
+# a password reset, disabling the user or "sign out everywhere" revoke it at once, like a cookie session.
+# The refresh token is an opaque random string (only its hash is stored) that lasts SESSION_DAYS.
+# ---------------------------------------------------------------------------
+JWT_ISSUER = "talentloop"
+JWT_ACCESS_MINUTES = float(os.getenv("JWT_ACCESS_MINUTES", "60"))
+
+
+def _jwt_key() -> bytes:
+    env = os.getenv("JWT_SECRET", "").strip()
+    if env:
+        return hashlib.sha256(env.encode()).digest()
+    from . import refs
+    return hmac.new(refs.key(), b"jwt-signing-key", hashlib.sha256).digest()
+
+
+def issue_tokens(s, req: Request, user: db.User, org_id: str | None) -> dict:
+    """New session for an API client: a refresh token (opaque) and an access token (JWT)."""
+    refresh = secrets.token_urlsafe(32)
+    s.add(db.AuthSession(token_hash=token_hash(refresh), user_id=user.id, org_id=org_id, expires_at=time.time() + SESSION_DAYS * 86400,
+                         ip=client_ip(req)[:64], ua=("api: " + req.headers.get("user-agent", ""))[:300]))
+    user.last_login_at = time.time()
+    user.login_count = (user.login_count or 0) + 1
+    return {**access_token(user.id, token_hash(refresh)), "refresh_token": refresh}
+
+
+def access_token(user_id: str, sid: str) -> dict:
+    import jwt
+    t = int(time.time())
+    exp = t + int(JWT_ACCESS_MINUTES * 60)
+    tok = jwt.encode({"iss": JWT_ISSUER, "sub": user_id, "sid": sid, "typ": "access", "iat": t, "nbf": t, "exp": exp}, _jwt_key(), algorithm="HS256")
+    return {"access_token": tok, "token_type": "bearer", "expires_in": exp - t}
+
+
+def _bearer_claims(req: Request) -> dict | None:
+    h = req.headers.get("authorization") or ""
+    if not h.lower().startswith("bearer "):
+        return None
+    import jwt
+    try:
+        c = jwt.decode(h[7:].strip(), _jwt_key(), algorithms=["HS256"], issuer=JWT_ISSUER, options={"require": ["exp", "iat", "sub", "sid"]})
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Your access token is not valid or has expired. Get a new one from /api/auth/token or /api/auth/token/refresh.")
+    if c.get("typ") != "access":
+        raise HTTPException(401, "Not an access token.")
+    return c
+
+
+# ---------------------------------------------------------------------------
+# email confirmation: until confirmed, a signed-in account can only reach these
+# ---------------------------------------------------------------------------
+VERIFY_OPEN = {"/api/auth/me", "/api/auth/logout", "/api/auth/verify", "/api/auth/verify/resend", "/api/health"}
+
+
+def verification_required() -> bool:
+    from . import appenv
+    return not appenv.allowed_in_dev("SKIP_EMAIL_VERIFICATION")
 
 
 @dataclass
@@ -126,6 +190,7 @@ class Ctx:
     role: str | None          # role in `org`
     platform_admin: bool
     via_key: bool = False
+    sid: str | None = None    # the AuthSession row (token hash) behind this request: cookie or JWT
 
     @property
     def user_id(self) -> str | None:
@@ -188,17 +253,25 @@ def current(req: Request, s, required: bool = True) -> Ctx | None:
     """Who is calling. Raises 401 when required and nobody is signed in."""
     if _key_ok(req):
         return Ctx(user=None, org=None, role="owner", platform_admin=True, via_key=True)
+    claims = _bearer_claims(req)
     tok = req.cookies.get(COOKIE)
-    if tok:
+    sid = claims["sid"] if claims else (token_hash(tok) if tok else None)
+    if sid:
         # One round trip: session + user + the membership/company the session points at.
         row = s.query(db.AuthSession, db.User, db.Membership, db.Org) \
             .join(db.User, db.User.id == db.AuthSession.user_id) \
             .outerjoin(db.Membership, and_(db.Membership.user_id == db.User.id, db.Membership.org_id == db.AuthSession.org_id)) \
             .outerjoin(db.Org, db.Org.id == db.Membership.org_id) \
-            .filter(db.AuthSession.token_hash == token_hash(tok)).first()
+            .filter(db.AuthSession.token_hash == sid).first()
         if row:
             sess, user, mem, org = row
-            if sess.expires_at > time.time() and not user.disabled:
+            if claims and claims["sub"] != user.id:
+                row = None
+            elif sess.expires_at > time.time() and not user.disabled:
+                if user.email_verified_at is None and verification_required() and req.url.path not in VERIFY_OPEN:
+                    if required:
+                        raise HTTPException(403, "Confirm your email first: enter the code we emailed you.")
+                    return None
                 if mem is None or not mem.active:      # session's company gone or access paused: fall back to another
                     alt = s.query(db.Membership, db.Org).join(db.Org, db.Org.id == db.Membership.org_id) \
                         .filter(db.Membership.user_id == user.id, db.Membership.active.isnot(False)).order_by(db.Membership.created_at).first()
@@ -207,7 +280,8 @@ def current(req: Request, s, required: bool = True) -> Ctx | None:
                 if org and org.disabled and not user.is_platform_admin:
                     raise HTTPException(403, "This company account is disabled. Contact support.")
                 _touch(sess.token_hash, user.id, org.id if org and mem else None)
-                return Ctx(user=user, org=org if mem else None, role=mem.role if mem else None, platform_admin=bool(user.is_platform_admin))
+                return Ctx(user=user, org=org if mem else None, role=mem.role if mem else None, platform_admin=bool(user.is_platform_admin),
+                           sid=sess.token_hash)
     if required:
         raise HTTPException(401, "Please sign in.")
     return None

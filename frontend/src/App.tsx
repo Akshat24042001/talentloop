@@ -7,7 +7,7 @@ import { DialogHost } from './components/dialogs'
 import { setUnauthorizedHandler } from './lib/api'
 import { match, navigate, useLocation } from './lib/router'
 import { SessionProvider, useSession } from './lib/session'
-import { Forgot, Invite, Login, Signup } from './site/Auth'
+import { Forgot, Invite, Login, Signup, VerifyEmail } from './site/Auth'
 
 // Every page is its own chunk: the careers page or a candidate link never downloads the HR workspace.
 function named<T extends Record<string, unknown>>(load: () => Promise<T>, key: keyof T) {
@@ -79,6 +79,7 @@ function Workspace({ path }: { path: string }) {
     if (me === null) navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}`, { replace: true })
   }, [me])
   if (!me) return <Loading className="min-h-screen" />
+  if (me.email_verified === false) return <VerifyEmail />
   if (!me.org && !(me.platform_admin && path === '/admin')) return <NoCompany />
   if (path === '/admin' && !me.platform_admin) return <Shell><NotFound /></Shell>
   if (hit?.need && !me.can[hit.need]) return <Shell><NoAccess /></Shell>

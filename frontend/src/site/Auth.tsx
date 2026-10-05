@@ -4,7 +4,7 @@ import { Alert, Button, Field, Input, Logo } from '../components/ui'
 import { Loading } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
-import { useSession, type Me } from '../lib/session'
+import { signOut, useSession, type Me } from '../lib/session'
 
 function AuthLayout({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
   return (
@@ -144,6 +144,38 @@ export function Invite({ token }: { token: string }) {
         <Field label={info.has_account ? 'Your existing password' : 'Choose a password'} htmlFor="password" hint={info.has_account ? 'You already have a TalentLoop account; this company is added to it.' : 'At least 8 characters.'}>
           <Input id="password" type="password" required minLength={8} value={pw} onChange={e => setPw(e.target.value)} autoComplete={info.has_account ? 'current-password' : 'new-password'} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<Building2 />}>Join {info.org}</Button>
+      </form>
+    </AuthLayout>
+  )
+}
+
+// After sign-up: nothing in the workspace opens until the email is confirmed with the code we sent.
+export function VerifyEmail() {
+  const { me, setMe, refresh } = useSession()
+  const { query } = useLocation()
+  const [code, setCode] = useState((query.get('verify') || '').replace(/\D/g, '').slice(0, 6))
+  const [err, setErr] = useState(''), [busy, setBusy] = useState(false), [sent, setSent] = useState(''), [wait, setWait] = useState(0)
+  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait(w => w - 1), 1000); return () => clearTimeout(t) }, [wait])
+  async function submit(e?: FormEvent) {
+    e?.preventDefault(); setErr(''); setBusy(true)
+    try { const m = await api<Me>('/api/auth/verify', { json: { code }, quiet401: true }); setMe(m); await refresh(); navigate('/app?welcome=1', { replace: true }) }
+    catch (x: any) { setErr(x.message) }
+    setBusy(false)
+  }
+  useEffect(() => { if (code.length === 6 && query.get('verify')) submit() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  async function resend() {
+    setErr(''); setSent('')
+    try { await api('/api/auth/verify/resend', { method: 'POST', quiet401: true }); setSent('A new code is on its way.'); setWait(45) } catch (x: any) { setErr(x.message) }
+  }
+  return (
+    <AuthLayout title="Confirm your email" subtitle={`We sent a 6-digit code to ${me?.user.email}. Check spam too.`}
+      footer={<>Wrong email? <button type="button" className="font-semibold text-brand-600 hover:underline dark:text-brand-300" onClick={signOut}>Sign out</button> and sign up again.</>}>
+      <form onSubmit={submit} className="space-y-4">
+        {err && <Alert tone="danger">{err}</Alert>}
+        {sent && <Alert tone="success">{sent}</Alert>}
+        <Field label="6-digit code" htmlFor="v-code"><Input id="v-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required autoFocus value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
+        <Button variant="primary" className="w-full" type="submit" loading={busy} disabled={code.length !== 6} icon={<Mail />}>Confirm email</Button>
+        <button type="button" disabled={wait > 0} className="w-full text-center text-sm text-slate-500 hover:underline disabled:no-underline disabled:opacity-60 dark:text-slate-400" onClick={resend}>{wait > 0 ? `Send a new code in ${wait}s` : 'Send a new code'}</button>
       </form>
     </AuthLayout>
   )

@@ -52,6 +52,8 @@ by switching to production; retry them one by one from Outbox if needed.
 | `FAST_MODEL` | Server default only: Platform admin > AI models overrides it. The model that runs live interview turns. Free models are slow and rate-limited; a paid fast model is the biggest reliability win for AI interviews. Comma-separated list = fallbacks in order. | free OpenRouter models |
 | `SMART_MODEL` | Plans, scoring, reports. | free OpenRouter models |
 | `VISION_MODEL` | Reads photo and scanned resumes; reviews live-task screenshots. Any OpenRouter model that accepts images (check "image" input on openrouter.ai/models). | off |
+| `JWT_SECRET` | Signs API access tokens (JWT). Long random string (`openssl rand -hex 32`). If unset, a key derived from `URL_SECRET` / the stored key is used, which also works; changing it invalidates every access token (refresh tokens keep working). | derived |
+| `JWT_ACCESS_MINUTES` | How long a JWT access token lasts before it must be refreshed. | `60` |
 | `URL_SECRET` | Long random string that signs links (`openssl rand -hex 32`). If unset, one is generated and kept in the database, which also works. | stored in DB |
 | `AI_SLOT_CAPACITY` | How many booked AI interviews may overlap; set to your Vapi plan's concurrent-call limit. | `10` |
 
@@ -76,7 +78,7 @@ by switching to production; retry them one by one from Outbox if needed.
 `S3_PATH_STYLE`, `PERSISTENT_DISK`, `DATA_DIR` (`/data`), `SWEEP_EVERY_SEC`, `MESSAGES_EVERY_SEC`,
 `RETENTION_EVERY_SEC`, `FINISH_DELAY_SEC`.
 
-Development only (ignored when `APP_ENV=production`): `LLM_MOCK=1`, `ALLOW_SAMPLE_DATA=1`. Test only: `WEB_DIR`.
+Development only (ignored when `APP_ENV=production`): `LLM_MOCK=1`, `ALLOW_SAMPLE_DATA=1`, `SKIP_EMAIL_VERIFICATION=1` (lets new accounts in without confirming their email; never set it on a server other people can reach). Test only: `WEB_DIR`.
 
 ## Keeping the free Render service awake
 
@@ -84,3 +86,15 @@ Ping `GET` or `HEAD https://<your app>/api/ping` every 5 minutes (cron-job.org, 
 Actions schedule). It answers without touching the database, so it costs nothing. `/healthz` is the same.
 One service pinged around the clock uses about 744 of the 750 free instance hours a month, so do this for one free
 service only. Pinging keeps it awake; it doesn't make the shared free CPU faster.
+
+## Sign-up confirmation and API tokens
+
+- New accounts must confirm their email with a 6-digit code before anything in the workspace opens. Invite links and
+  password resets also count as confirmation (the email reached that inbox). Accounts that existed before this change
+  were marked confirmed once. A platform admin can mark an account confirmed in Platform admin > Users.
+- Signing up again with an address that was never confirmed replaces that unconfirmed account (and the company only it
+  belonged to). So nobody can reserve someone else's email, including a `PLATFORM_ADMIN_EMAILS` address.
+- The browser uses an HttpOnly cookie. API clients use JWT: `POST /api/auth/token` (email + password, or the OAuth2 form
+  Swagger's **Authorize** button sends) returns `access_token` (JWT, `JWT_ACCESS_MINUTES`) and `refresh_token`
+  (`SESSION_DAYS`). Send `Authorization: Bearer <access_token>`; renew with `POST /api/auth/token/refresh`. Each token is
+  tied to a session, so sign-out, password change/reset and disabling the user revoke it immediately.

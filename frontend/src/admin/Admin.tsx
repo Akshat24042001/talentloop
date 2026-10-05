@@ -10,7 +10,7 @@ import PlatformAnalytics from './PlatformAnalytics'
 import { ask } from '../components/dialogs'
 
 interface OrgRow { id: string; name: string; slug: string; created_at: number; disabled: boolean; owner: string; members: number; jobs: number; open_jobs: number; candidates: number; applications: number; interviews: number; ai_calls: number; last_activity?: number }
-interface UserRow { id: string; email: string; name: string; created_at: number; last_login_at?: number; login_count: number; disabled: boolean; platform_admin: boolean; memberships: { org: string; role_label: string }[] }
+interface UserRow { id: string; email: string; name: string; created_at: number; last_login_at?: number; login_count: number; disabled: boolean; platform_admin: boolean; email_verified?: boolean; memberships: { org: string; role_label: string }[] }
 
 export default function Admin() {
   const [tab, setTab] = useState<'orgs' | 'users'>('orgs')
@@ -21,6 +21,10 @@ export default function Admin() {
   async function toggleUser(u: UserRow) {
     if (!await ask(`${u.disabled ? 'Enable' : 'Disable'} ${u.email}?${u.disabled ? '' : ' They are signed out everywhere.'}`)) return
     try { await api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: { disabled: !u.disabled } }); toast('Updated'); users.reload() } catch (e: any) { toast(e.message) }
+  }
+  async function confirmUser(u: UserRow) {
+    if (!await ask(`Mark ${u.email} as confirmed without the emailed code? Only do this if you know the person owns this address.`)) return
+    try { await api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: { email_verified: true } }); toast('Marked as confirmed'); users.reload() } catch (e: any) { toast(e.message) }
   }
   const qq = q.toLowerCase()
   return (
@@ -52,12 +56,12 @@ export default function Admin() {
             <thead><tr className="text-left text-xs text-slate-500">{['User', 'Companies', 'Sign-ins', 'Last sign-in', 'Joined', ''].map(h => <th key={h} className="whitespace-nowrap px-4 py-3 font-medium">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100 dark:divide-ink-800">{users.data.filter(u => !qq || `${u.name} ${u.email} ${u.memberships.map(m => m.org).join(' ')}`.toLowerCase().includes(qq)).map(u => (
               <tr key={u.id} className={u.disabled ? 'opacity-50' : ''}>
-                <td className="px-4 py-3"><div className="font-semibold">{u.name} {u.platform_admin && <Badge tone="violet">Admin</Badge>}</div><div className="text-xs text-slate-500">{u.email}</div></td>
+                <td className="px-4 py-3"><div className="font-semibold">{u.name} {u.platform_admin && <Badge tone="violet">Admin</Badge>} {u.email_verified === false && <Badge tone="warning">Email not confirmed</Badge>}</div><div className="text-xs text-slate-500">{u.email}</div></td>
                 <td className="px-4 py-3 text-xs">{u.memberships.map((m, i) => <div key={i}>{m.org} <span className="text-slate-500">· {m.role_label}</span></div>)}</td>
                 <td className="tabular px-4 py-3">{u.login_count}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{u.last_login_at ? <Ago ts={u.last_login_at} /> : 'never'}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500"><Ago ts={u.created_at} /></td>
-                <td className="px-4 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => toggleUser(u)}>{u.disabled ? 'Enable' : 'Disable'}</Button></td>
+                <td className="whitespace-nowrap px-4 py-3 text-right">{u.email_verified === false && <Button size="sm" variant="ghost" onClick={() => confirmUser(u)}>Mark confirmed</Button>}<Button size="sm" variant="ghost" onClick={() => toggleUser(u)}>{u.disabled ? 'Enable' : 'Disable'}</Button></td>
               </tr>))}</tbody>
           </table>
         ))}

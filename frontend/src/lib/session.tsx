@@ -4,7 +4,7 @@ import { api, cacheOwner, clearCache, getData, pageCache } from './api'
 export interface Me {
   user: { id: string; email: string; name: string }
   org: { id: string; name: string; slug: string; settings: Record<string, any> } | null
-  role: string | null; role_label: string; platform_admin: boolean
+  role: string | null; role_label: string; platform_admin: boolean; email_verified?: boolean
   memberships: { org_id: string; name: string; slug: string; role: string; role_label?: string; title?: string; joined_at?: number }[]
   can: { manage_team: boolean; manage_jobs: boolean; see_all: boolean }
 }

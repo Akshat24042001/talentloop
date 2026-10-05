@@ -12,10 +12,13 @@ from backend.main import app
 from backend import llm, messages
 c = TestClient(app)
 c.post("/api/auth/signup", json={"email": "boss@talentloop.test", "password": "correct-horse-1", "name": "B", "company": "P"})
+from backend import db
+with db.session() as s:                      # production always asks for email confirmation; confirm directly here
+    for u in s.query(db.User): u.email_verified_at = 1.0
 h = c.get("/api/health").json()
 print(json.dumps({"mock": llm.MOCK, "docs": c.get("/docs").status_code, "openapi": c.get("/openapi.json").status_code,
                   "seed": c.post("/api/demo/seed").status_code, "env": h.get("env"), "production": h.get("production"),
-                  "dev_to": messages.status()["dev_email_to"], "msg_prod": messages.PRODUCTION}))
+                  "dev_to": messages.status()["dev_email_to"], "msg_prod": messages.PRODUCTION, "me_verified": c.get("/api/auth/me").json().get("email_verified")}))
 '''
 RES = []
 def check(name, bug_if, detail=""):
@@ -35,6 +38,7 @@ check("production serves the API docs", p["docs"] == 200 or p["openapi"] == 200,
 check("production loads sample data", p["seed"] != 403, str(p["seed"]))
 check("production isn't reported as production", p["env"] != "production" or p["production"] is not True)
 check("production still diverts email to the dev inbox", not p["msg_prod"] or p["dev_to"])
+check("the production check ran as an unconfirmed account", p["me_verified"] is not True)
 d = run("development")
 check("development has no fake AI", not d["mock"])
 check("development has no API docs", d["docs"] != 200 or d["openapi"] != 200)

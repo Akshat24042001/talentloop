@@ -85,6 +85,7 @@ class User(Base):
     created_at: Mapped[float] = mapped_column(Float, default=now)
     last_login_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     login_count: Mapped[int] = mapped_column(Integer, default=0)
+    email_verified_at: Mapped[float | None] = mapped_column(Float, nullable=True)   # None = has not confirmed the email yet
 
 
 class Membership(Base):
@@ -429,6 +430,11 @@ def migrate() -> None:
                          "portal_token_hash": "VARCHAR(64) DEFAULT ''", "portal_token": "VARCHAR(64) DEFAULT ''", "human_requested_at": "FLOAT", "human_request_note": "TEXT DEFAULT ''",
                          "accommodation": js, "decided_at": "FLOAT"},
     }
+    if "email_verified_at" not in {c["name"] for c in insp.get_columns("users")}:
+        # accounts made before email confirmation existed are trusted as they are (once, when the column is added)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email_verified_at FLOAT"))
+            conn.execute(text("UPDATE users SET email_verified_at = created_at"))
     for table, cols in want.items():
         have = {c["name"] for c in insp.get_columns(table)}
         for col, ddl in cols.items():
