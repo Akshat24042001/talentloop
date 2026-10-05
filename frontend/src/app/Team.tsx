@@ -76,7 +76,7 @@ export default function Team() {
         </div>
         <div className="space-y-5">
           {me.can.manage_team ? (
-            <Card><CardHeader title="Invite someone" description="We create a private link; send it by email or chat. It works once and expires in 7 days." /><CardBody className="space-y-3">
+            <Card><CardHeader title="Invite someone" description="We create a private link; send it by email or chat. It works once and expires in 14 days." /><CardBody className="space-y-3">
               <Field label="Email" htmlFor="inv-email"><Input id="inv-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="sales.manager@company.com" /></Field>
               <Field label="Role" htmlFor="inv-role" hint={ROLE_HELP[role]}><Select id="inv-role" value={role} onChange={e => setRole(e.target.value)}>{data.roles.filter(r => r.id !== 'owner' || me.role === 'owner').map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</Select></Field>
               <Field label="Job title (optional)" htmlFor="inv-title"><Input id="inv-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="Sales Manager" /></Field>

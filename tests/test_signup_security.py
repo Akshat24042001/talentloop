@@ -34,6 +34,10 @@ check("an unconfirmed account can't see who it is", a.get("/api/auth/me").status
 code, shown = code_for("hr@acme.test")
 check("no confirmation email is queued", not code)
 check("the outbox shows the confirmation code", code and code in shown)
+with db.session() as s_:
+    for m_ in s_.query(db.Message).filter(db.Message.template.in_(["email_verify", "password_reset", "candidate_login"])):
+        j_ = _msg_json(m_)
+        check(f"a {m_.template} subject shows a code", bool(re.search(r"\b\d{6}\b", j_["subject"])), j_["subject"])
 wrong = "000000" if code != "000000" else "111111"
 check("a wrong code confirms the email", a.post("/api/auth/verify", json={"code": wrong}).status_code != 400)
 check("a stranger's session confirms someone else", C().post("/api/auth/verify", json={"code": code}).status_code != 401)

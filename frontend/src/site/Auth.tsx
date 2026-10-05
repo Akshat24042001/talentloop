@@ -5,6 +5,7 @@ import { Loading } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
 import { confirmSignOut, useSession, type Me } from '../lib/session'
+import { DevMailNote } from '../lib/health'
 
 function AuthLayout({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
   return (
@@ -84,6 +85,7 @@ export function Forgot() {
         </form>
         : <form onSubmit={reset} className="space-y-4">
           {err && <Alert tone="danger">{err}</Alert>}
+          <DevMailNote />
           <Field label="6-digit code" htmlFor="f-code"><Input id="f-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
           <Field label="New password" htmlFor="f-pw" hint="At least 8 characters."><Input id="f-pw" type="password" autoComplete="new-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
           <Button variant="primary" className="w-full" type="submit" loading={busy} disabled={code.length !== 6 || pw.length < 8} icon={<KeyRound />}>Set new password</Button>
@@ -173,6 +175,7 @@ export function VerifyEmail() {
       <form onSubmit={submit} className="space-y-4">
         {err && <Alert tone="danger">{err}</Alert>}
         {sent && <Alert tone="success">{sent}</Alert>}
+        <DevMailNote />
         <Field label="6-digit code" htmlFor="v-code"><Input id="v-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required autoFocus value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} disabled={code.length !== 6} icon={<Mail />}>Confirm email</Button>
         <button type="button" disabled={wait > 0} className="w-full text-center text-sm text-slate-500 hover:underline disabled:no-underline disabled:opacity-60 dark:text-slate-400" onClick={resend}>{wait > 0 ? `Send a new code in ${wait}s` : 'Send a new code'}</button>

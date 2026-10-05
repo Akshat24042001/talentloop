@@ -25,6 +25,13 @@ export function DevRibbon() {
     className: 'pointer-events-none fixed left-1/2 top-0 z-[60] -translate-x-1/2 rounded-b-lg bg-amber-400 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-950 shadow-lg ring-1 ring-amber-600/40' },
     h.env === 'testing' ? 'Testing' : 'Development')
 }
+/** On a development server, screens that ask for an emailed code say where the email really goes (DEV_EMAIL_TO). */
+export function DevMailNote() {
+  const h = useHealth()
+  if (!h || h.production !== false) return null
+  return createElement('p', { role: 'note', className: 'rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/30' },
+    'Development server: every email goes to the developer inbox (DEV_EMAIL_TO), not to this address.')
+}
 export function healthProblems(h: Health): string[] {
   const bad: string[] = []
   if (!h.detail || !h.storage) return bad

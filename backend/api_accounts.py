@@ -299,7 +299,7 @@ async def create_invite(req: Request):
 
 @router.post("/api/team/invites/{inv_id}/renew")
 def renew_invite(inv_id: str, req: Request):
-    """A fresh link for a pending invite (the old link stops working) with a new 7-day expiry."""
+    """A fresh link for a pending invite (the old link stops working) with a new INVITE_DAYS expiry."""
     with db.session() as s:
         ctx = auth.current(req, s)
         auth.require(ctx, auth.MANAGE_TEAM, "manage invites")
@@ -793,7 +793,7 @@ def _send_verify_code(s, user: db.User, org_id: str | None) -> None:
     from .flows import base_url as app_base
     code = _verify_code(user, int(time.time() // 900))
     link = f"{app_base()}/app?verify={code}" if app_base() else ""
-    messages.queue(s, org_id or "", to_email=user.email, subject=f"{code} is your TalentLoop confirmation code",
+    messages.queue(s, org_id or "", to_email=user.email, subject="Your TalentLoop confirmation code",   # never the code itself: subjects show in the outbox
                    body=f"Hi {user.name or 'there'},\n\nConfirm your email to start using TalentLoop. Your code is {code}."
                         + (f"\n\nOr open this link in the browser where you signed up:\n{link}" if link else "")
                         + "\n\nThe code works for about 15 minutes. If you didn't sign up, ignore this email: nothing happens without the code.",
@@ -835,7 +835,7 @@ async def verify_email(req: Request):
         if len(code) != 6 or not any(hmac.compare_digest(code, _verify_code(user, x)) for x in (w, w - 1)):
             raise HTTPException(400, "That code isn't right or has expired. Check the latest email, or send a new code.")
         user.email_verified_at = time.time()
-        log_activity(s, ctx, "member_joined", f"{user.email} confirmed their email"[:300]) if ctx.org else None
+        log_activity(s, ctx, "email_confirmed", user.email[:300]) if ctx.org else None
         return me_payload(s, ctx)
 
 

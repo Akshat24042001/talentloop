@@ -7,6 +7,7 @@ import { fullWhen } from '../components/SlotPicker'
 import { when } from '../lib/format'
 import { ask as confirm } from '../components/dialogs'
 import { STATUS_TONE } from '../app/flow/types'
+import { DevMailNote } from '../lib/health'
 import { Frame, PageState, getJSON, send, type Brand } from './common'
 
 interface Step { name: string; type: string; status: string; status_label: string; link: string | null; deadline_at: number | null; booking: { starts_at: number; ends_at: number; interviewer: string } | null }
@@ -42,6 +43,7 @@ export default function MyApplications() {
           <Button type="submit" variant="primary" icon={<Mail />} loading={busy} disabled={!/^\S+@\S+\.\S+$/.test(email)}>Email me a code</Button>
         </form> : <form onSubmit={verify} className="space-y-3">
           <Alert tone="info">If {email} has applications with us, a code is on its way. Check spam too. It works for about 10 minutes.</Alert>
+          <DevMailNote />
           <Field label="6-digit code" htmlFor="me-code"><Input id="me-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
           {err && <Alert tone="danger">{err}</Alert>}
           <div className="flex flex-wrap gap-2"><Button type="submit" variant="primary" loading={busy} disabled={code.length !== 6}>Sign in</Button>

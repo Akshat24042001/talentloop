@@ -95,7 +95,7 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
           <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
             <Avatar name={me.user.name || me.user.email} size="sm" />
             <a href="/app/account" onClick={onNav} className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{me.user.name || me.user.email}</span><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{me.user.email}</span></a>
-            <button onClick={confirmSignOut} aria-label="Sign out" title="Sign out" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white"><LogOut className="size-4" /></button>
+            <button onClick={() => { onNav?.(); confirmSignOut() }} aria-label="Sign out" title="Sign out" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white"><LogOut className="size-4" /></button>
           </div>
         )}
       </div>

@@ -436,7 +436,8 @@ function Notes({ d, canEdit, onSaved }: { d: Detail; canEdit: boolean; onSaved: 
   )
 }
 
-export const MSG_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = { sent: 'success', queued: 'warning', failed: 'danger', not_configured: 'neutral' }
+// sent green, waiting blue, needs action amber (held, channel not set up), failed red, skipped on purpose grey
+export const MSG_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral' | 'brand'> = { sent: 'success', queued: 'brand', failed: 'danger', not_configured: 'warning', held: 'warning', skipped: 'neutral' }
 export const MSG_LABEL: Record<string, string> = { sent: 'Sent', queued: 'Queued', failed: 'Failed', not_configured: 'Channel not set up', held: 'Held (not sent)', skipped: 'Skipped (sample or dummy)' }
 function Messages({ msgs, onRetry }: { msgs: Msg[]; onRetry: () => void }) {
   if (!msgs.length) return null
