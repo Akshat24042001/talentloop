@@ -1,11 +1,14 @@
 // The full fit report for one candidate and one job: scores, how the fit score is built, requirement by
 // requirement comparison, skills, and the AI report. Downloadable as a PDF.
 import { CircleCheck, CircleDashed, CircleMinus, CircleX, Download, Printer, Sparkles, Video } from 'lucide-react'
-import { Alert, Badge, Button, Card, CardBody, CardHeader, cn } from '../components/ui'
+import { Badge, Button, Card, CardBody, CardHeader, cn } from '../components/ui'
 import { BackLink, ErrorBox, PageHeader, PageSkeleton, ScoreRing, useApi } from '../components/kit'
 import { when } from '../lib/format'
 import { useMe } from '../lib/session'
 import { VERDICT } from './labels'
+import { Distribution, Donut, Radar } from '../components/reportCharts'
+import { ResumeCheckSummary, type Verification } from './ResumeCheck'
+import { navigate } from '../lib/router'
 
 interface Signal { key: string; label: string; weight: number; score: number; points: number }
 interface Row { label: string; required: string; candidate: string; note: string; status: 'good' | 'partial' | 'gap' | 'info' }
@@ -16,6 +19,7 @@ interface Report {
   comparison: Row[]; rank: number | null; ranked: number; ai_score: number | null; ai_at: number | null
   ai: { verdict?: string; summary?: string; strengths?: string[]; gaps?: string[]; risks?: string[]; interview_questions?: string[] } | null
   application: { ref: string; stage: string } | null
+  verification?: Verification | null; shortlist_avg: Record<string, number>; shortlist_size: number; distribution: number[]; verdict_line?: { level: string; tone: 'success' | 'warning' | 'danger'; text: string }
 }
 
 const STATUS = {
@@ -29,6 +33,11 @@ const SKILL = {
   related: { label: 'Related', cls: 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/30', icon: CircleMinus },
   missing: { label: 'Missing', cls: 'bg-red-50 text-red-800 ring-red-200 dark:bg-red-500/15 dark:text-red-200 dark:ring-red-500/30', icon: CircleX },
 }
+
+const VL = { success: 'bg-emerald-50 text-emerald-900 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:ring-emerald-500/30',
+  warning: 'bg-amber-50 text-amber-900 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-100 dark:ring-amber-500/30',
+  danger: 'bg-red-50 text-red-900 ring-red-200 dark:bg-red-500/10 dark:text-red-100 dark:ring-red-500/30' }
+const SHORT: Record<string, string> = { skills: 'Skills', experience: 'Experience', relevance: 'Relevance', location: 'Location', logistics: 'Notice & pay' }
 
 export default function MatchReport({ jobId, candId }: { jobId: string; candId: string }) {
   const me = useMe()
@@ -49,7 +58,9 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
           <Button variant="primary" icon={<Download />} href={pdf} download>Download PDF</Button>
         </>} />
 
-      {d.knocked_out.length > 0 && <Alert tone="danger" className="mb-5" title="Screened out by the job's rules">{d.knocked_out.join('; ')}</Alert>}
+      {d.verdict_line && <div className={cn('mb-5 flex items-start gap-3 rounded-2xl p-4 ring-1', VL[d.verdict_line.tone])}>
+        <span className="mt-0.5 shrink-0 rounded-full bg-white/70 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide dark:bg-black/20">{d.verdict_line.level}</span>
+        <p className="text-[15px] font-medium leading-snug">{d.verdict_line.text}</p></div>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.score} size={64} label="Fit score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">Fit score</div><div className="text-sm font-semibold">Skills, experience, location, notice</div></div></Card>
@@ -58,6 +69,20 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Verdict</div><div className="mt-1.5">{v ? <Badge tone={v.tone}>{v.label}</Badge> : <span className="text-sm text-slate-500 dark:text-slate-400">After the AI report</span>}</div>
           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Must-haves: <b className="text-slate-800 dark:text-slate-100">{mustHit}/{must.length}</b>{d.application ? <> · <a className="font-medium text-brand-600 hover:underline dark:text-brand-400" href={`/app/jobs/${d.job.ref}?tab=pipeline&app=${d.application.ref}`}>in pipeline</a></> : ''}</div></Card>
       </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-3">
+        <Card><CardHeader title="Fit profile" description={d.shortlist_size ? `Against the average of the top ${d.shortlist_size} for this job` : 'Each signal, 0 to 100'} />
+          <CardBody><Radar axes={d.signals.map(s => SHORT[s.key] || s.label)} series={[{ label: d.candidate.name.split(' ')[0] || 'Candidate', values: d.signals.map(s => s.score), color: 'var(--series-1)' },
+            ...(d.shortlist_size ? [{ label: `Top ${d.shortlist_size} average`, values: d.signals.map(s => d.shortlist_avg[s.key] ?? 0), color: 'var(--series-2)', dashed: true }] : [])]} /></CardBody></Card>
+        <Card><CardHeader title="Must-have skills" description="Has it, related experience, or missing" />
+          <CardBody>{must.length ? <Donut center={`${mustHit}/${must.length}`} sub="has it" parts={[
+            { label: 'Has it', value: mustHit, color: 'var(--status-good)' }, { label: 'Related', value: must.filter(s => s.status === 'related').length, color: 'var(--status-warn)' },
+            { label: 'Missing', value: must.filter(s => s.status === 'missing').length, color: 'var(--status-critical)' }]} />
+            : <p className="text-sm text-slate-500 dark:text-slate-400">The job lists no must-have skills.</p>}</CardBody></Card>
+        <Card><CardHeader title="Against everyone scored" description="Fit scores of all candidates for this job" />
+          <CardBody><Distribution scores={d.distribution} mine={d.score} /></CardBody></Card>
+      </div>
+      {d.verification && <div className="mt-5"><ResumeCheckSummary v={d.verification} onOpen={() => navigate(`/app/candidates/${d.candidate.ref}?tab=check`)} /></div>}
 
       {d.ai?.summary && (
         <Card className="mt-5 bg-gradient-to-br from-brand-50/80 to-violet-50/60 p-5 ring-brand-100 dark:from-brand-500/10 dark:to-violet-500/10 dark:ring-brand-500/20">

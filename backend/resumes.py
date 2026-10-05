@@ -8,7 +8,8 @@ from . import skills
 
 MAX_RESUME_BYTES = 10 * 1024 * 1024
 RESUME_TYPES = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                ".txt": "text/plain", ".md": "text/plain", ".rtf": "application/rtf"}
+                ".txt": "text/plain", ".md": "text/plain", ".rtf": "application/rtf",
+                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 PHONE = re.compile(r"(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{2,5}\)?[\s-]?)?\d{3,5}[\s-]?\d{4,6}")

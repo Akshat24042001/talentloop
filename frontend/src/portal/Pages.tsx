@@ -355,7 +355,7 @@ export function DrivePage({ code }: { code: string }) {
             <Field label="Branch" htmlFor="dv-b"><Input id="dv-b" value={f.branch} onChange={set('branch')} /></Field>
             <Field label="Year of passing *" htmlFor="dv-y"><Input id="dv-y" required inputMode="numeric" value={f.graduation_year} onChange={set('graduation_year')} /></Field>
             <Field label="CGPA / %" htmlFor="dv-c"><Input id="dv-c" value={f.cgpa} onChange={set('cgpa')} /></Field>
-            <Field label="Resume (optional)" htmlFor="dv-r"><input id="dv-r" type="file" accept=".pdf,.docx,.txt" className="block w-full text-sm" onChange={e => setResume(e.target.files?.[0] || null)} /></Field>
+            <Field label="Resume (optional)" htmlFor="dv-r"><input id="dv-r" type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" className="block w-full text-sm" onChange={e => setResume(e.target.files?.[0] || null)} /></Field>
           </div>
           {merged.length > 0 && <div className="space-y-3">{multi && <div className="border-t border-slate-100 pt-3 text-sm font-semibold dark:border-ink-800">A few questions{chosen.length > 1 ? ` for ${chosen.map(r => r.title).join(' and ')}` : ''}</div>}
           {merged.map(m => { const [rk, qid] = m.targets[0]!, val = answers[rk]?.[qid] || '', setV = (v: string) => m.targets.forEach(([r, q]) => setAns(r, q, v)), q = m.q, id = `dq-${rk}-${qid}`; return (

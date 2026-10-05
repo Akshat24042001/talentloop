@@ -10,6 +10,7 @@ import type { Cand } from './JobDetail'
 import { ACTION_LABEL, SOURCE_LABEL, STAGE_TONE, actor } from './labels'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 import { ask } from '../components/dialogs'
+import ResumeCheck, { ResumeCheckSummary } from './ResumeCheck'
 
 interface Detail extends Cand {
   tags: string[]; resume_name?: string; resume_type?: string; resume_v?: string; college?: string; created_at: number; profile: Record<string, any>; parsed: Record<string, any>; resume_text: string
@@ -22,7 +23,7 @@ interface Detail extends Cand {
 export default function CandidateDetail({ id }: { id: string }) {
   const me = useMe()
   const { data: c, error, reload } = useApi<Detail>(`/api/candidates/${id}`)
-  const [tab, setTab] = useState<'apps' | 'fit' | 'resume' | 'text' | 'profile' | 'activity' | null>(c0Tab())
+  const [tab, setTab] = useState<'apps' | 'fit' | 'check' | 'resume' | 'text' | 'profile' | 'activity' | null>(c0Tab())
   const [editing, setEditing] = useState(false)
   const [addTo, setAddTo] = useState('')
   if (error) return <ErrorBox error={error} retry={reload} />
@@ -45,7 +46,7 @@ export default function CandidateDetail({ id }: { id: string }) {
           {me.can.manage_jobs && <Button variant="primary" onClick={() => setEditing(true)} icon={<Pencil />}>Edit</Button>}</>} />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
-          <Tabs className="mb-4" value={cur} onChange={setTab} tabs={[{ id: 'apps', label: 'Applied to', count: c.applications.length }, { id: 'fit', label: 'Best-fit jobs', count: c.best_jobs.length }, ...(c.has_resume ? [{ id: 'resume' as const, label: 'Resume' }] : []),
+          <Tabs className="mb-4" value={cur} onChange={setTab} tabs={[{ id: 'apps', label: 'Applied to', count: c.applications.length }, { id: 'fit', label: 'Best-fit jobs', count: c.best_jobs.length }, { id: 'check', label: 'Resume check', count: c.parsed?.verification?.findings?.length ?? null }, ...(c.has_resume ? [{ id: 'resume' as const, label: 'Resume' }] : []),
             { id: 'text', label: 'Resume text' }, { id: 'profile', label: 'Profile' }, { id: 'activity', label: 'Activity' }]} />
           {cur === 'apps' && (
             <div className="space-y-3">
@@ -105,9 +106,11 @@ export default function CandidateDetail({ id }: { id: string }) {
               <KV k="Parsed experience">{c.parsed.years != null ? `${c.parsed.years} yrs (${c.parsed.years_source})` : ''}</KV>
             </dl>
           </CardBody></Card>}
+          {cur === 'check' && <ResumeCheck cid={c.id} v={c.parsed?.verification} canRun={me.can.manage_jobs} onDone={reload} />}
           {cur === 'activity' && <Card><CardBody><ul className="space-y-2 text-sm">{c.activity.map(a => <li key={a.id}><Badge>{ACTION_LABEL[a.action] || a.action}</Badge> {a.detail} <span className="text-xs text-slate-500">· {actor(a)} · {when(a.at)}</span></li>)}</ul></CardBody></Card>}
         </div>
         <div className="space-y-4">
+          <ResumeCheckSummary v={c.parsed?.verification} onOpen={() => setTab('check')} />
           <Card><CardBody className="space-y-2 text-sm">
             {c.email && <a href={`mailto:${c.email}`} className="flex items-center gap-2 hover:underline"><Mail className="size-4 text-slate-500 dark:text-slate-400" />{c.email}</a>}
             {c.phone && <a href={`tel:${c.phone}`} className="flex items-center gap-2"><Phone className="size-4 text-slate-500 dark:text-slate-400" />{c.phone}</a>}
@@ -132,9 +135,9 @@ export default function CandidateDetail({ id }: { id: string }) {
   )
 }
 
-function c0Tab(): 'apps' | 'fit' | 'resume' | null {
+function c0Tab(): 'apps' | 'fit' | 'check' | 'resume' | null {
   const t = new URLSearchParams(location.search).get('tab')
-  return t === 'resume' || t === 'fit' || t === 'apps' ? t : null
+  return t === 'resume' || t === 'fit' || t === 'apps' || t === 'check' ? t : null
 }
 
 function ResumeViewer({ c }: { c: Detail }) {

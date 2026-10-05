@@ -89,7 +89,7 @@ function UploadDialog({ open, onClose, onDone }: { open: boolean; onClose: () =>
           className={`grid w-full place-items-center rounded-2xl border-2 border-dashed px-4 py-8 text-center transition-colors ${drag ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10' : 'border-slate-200 hover:border-brand-300 dark:border-ink-700'}`}>
           <FileUp className="size-6 text-brand-500" /><span className="mt-2 text-sm font-semibold">Drop files or click to choose</span><span className="text-xs text-slate-500">{files.length ? `${files.length} file${files.length > 1 ? 's' : ''} selected` : 'Max 10 MB each'}</span>
         </button>
-        <input ref={ref} type="file" multiple accept=".pdf,.docx,.txt,.md,.rtf" className="hidden" onChange={e => { pick(e.target.files); e.target.value = '' }} />
+        <input ref={ref} type="file" multiple accept=".pdf,.docx,.txt,.md,.rtf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={e => { pick(e.target.files); e.target.value = '' }} />
         {res && <Alert tone={res.failed.length ? 'warning' : 'success'} title={`${res.created} added, ${res.updated} updated${res.failed.length ? `, ${res.failed.length} failed` : ''}`}>
           {res.failed.slice(0, 5).map((f: any, i: number) => <div key={i} className="text-xs">{f.file}: {f.error}</div>)}</Alert>}
         <Button variant="primary" className="w-full" disabled={!files.length} loading={busy} onClick={go} icon={<Upload />}>{busy ? 'Reading resumes…' : `Upload ${files.length || ''}`}</Button>

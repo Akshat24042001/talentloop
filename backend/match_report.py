@@ -2,7 +2,7 @@
 report when one exists. Served as JSON for the report page and as a PDF for download."""
 import time
 
-from . import db, jd_schema, matching, refs
+from . import db, jd_schema, matching, refs, verify
 
 SIGNALS = (("skills", "Skills"), ("experience", "Experience"), ("relevance", "Keyword relevance"),
            ("location", "Location"), ("logistics", "Notice & salary"))
@@ -70,6 +70,12 @@ def build(s, job: db.Job, cand: db.Candidate, weights: dict, default_top_n: int)
         edu = "; ".join(filter(None, [" ".join(filter(None, [e.get("degree"), e.get("field")])) for e in (p.get("education") or []) if isinstance(e, dict)])) or cand.college or "Not stated"
         comparison.append({"label": "Education", "required": str(f["education"]), "candidate": edu, "note": "", "status": "info"})
 
+    # The shortlist's average on each signal (for the spider chart) and everyone's fit score (for the distribution).
+    rows = s.query(db.Match.score, db.Match.rank, db.Match.breakdown).filter(db.Match.job_id == job.id).all()
+    dist = sorted(round(float(r.score or 0)) for r in rows)
+    top_n = max(1, int(job.top_n or default_top_n or 5))
+    short = [r.breakdown or {} for r in rows if r.rank and r.rank <= top_n]
+    avg = {k: round(sum(float((b.get(k) or {}).get("score") or 0) for b in short) / len(short) * 100) for k, _ in SIGNALS} if short else {}
     m = s.query(db.Match).filter_by(job_id=job.id, candidate_id=cand.id).first()
     shortlisted = s.query(db.Match).filter(db.Match.job_id == job.id, db.Match.rank < 9999).count()
     app = s.query(db.Application).filter_by(job_id=job.id, candidate_id=cand.id).first()
@@ -78,11 +84,48 @@ def build(s, job: db.Job, cand: db.Candidate, weights: dict, default_top_n: int)
         "candidate": {"id": cand.id, "ref": refs.cand_ref(cand), "name": cand.name, "headline": cand.headline, "email": cand.email,
                       "location": cand.location, "years": cand.years, "current_company": cand.current_company},
         "score": score, "knocked_out": ko, "signals": signals, "skills": skills, "comparison": comparison,
+        "shortlist_avg": avg, "shortlist_size": len(short), "distribution": dist, "verification": verify.ensure(s, cand),
+        "verdict_line": verdict_line(score, ko, skills, comparison, cand),
         "rank": m.rank if m and m.rank < 9999 else None, "ranked": shortlisted,
         "ai": (m.ai_report if m else None), "ai_score": (m.ai_score if m else None), "ai_at": (m.ai_at if m else None),
         "application": {"ref": refs.app_ref(app.id), "stage": app.stage} if app else None,
         "generated_at": time.time(),
     }
+
+
+def verdict_line(score: float, ko: list, skills: list, comparison: list, cand) -> dict:
+    """One sentence on the fit, built only from the numbers above (no AI, so nothing is invented)."""
+    must = [x for x in skills if x["kind"] == "Must-have"]
+    hit = [x["skill"] for x in must if x["status"] == "matched"]
+    miss = [x["skill"] for x in must if x["status"] == "missing"]
+    rows = {r["label"]: r for r in comparison}
+    pros, cons = [], []
+    if must:
+        (pros if len(hit) >= 0.75 * len(must) else cons).append(
+            f"has {len(hit)} of {len(must)} must-have skills" if hit else f"none of the {len(must)} must-have skills")
+    if miss:
+        cons.append("no " + ", ".join(miss[:3]) + (f" and {len(miss) - 3} more" if len(miss) > 3 else ""))
+    ex = rows.get("Experience")
+    if ex and ex["status"] == "good":
+        pros.append(f"{ex['candidate']} of experience ({ex['required']} asked)")
+    elif ex and ex["status"] in ("partial", "gap"):
+        cons.append(f"{ex['candidate']} of experience vs {ex['required']} asked")
+    for label in ("Location", "Notice period", "Salary"):
+        r = rows.get(label)
+        if r and r["status"] == "gap":
+            cons.append(f"{label.lower()} {r['candidate']} vs {r['required']}")
+        elif r and r["status"] == "good" and label == "Location" and len(pros) < 3:
+            pros.append(f"based in {r['candidate']}")
+    if ko:
+        return {"level": "Screened out", "tone": "danger", "text": "Screened out by the job's rules: " + "; ".join(ko[:2]) + "."}
+    level, tone = ("Strong fit", "success") if score >= 75 else ("Possible fit", "warning") if score >= 55 else ("Weak fit", "danger")
+    parts = []
+    if pros:
+        parts.append("; ".join(pros[:2]))
+    if cons:
+        parts.append(("Watch: " if level != "Weak fit" else "Main gaps: ") + "; ".join(cons[:2]))
+    text = ". ".join(p[0].upper() + p[1:] for p in parts) or "Not enough in the resume to compare with the job"
+    return {"level": f"{level} · {round(score)}/100", "tone": tone, "text": text + "."}
 
 
 def pdf(d: dict, company: str) -> bytes:
@@ -108,6 +151,12 @@ def pdf(d: dict, company: str) -> bytes:
     story += [bt]
     if d.get("knocked_out"):
         story += [Spacer(1, 6), Paragraph(t("Screened out: " + "; ".join(d["knocked_out"])), st["base"])]
+    if d.get("verdict_line"):
+        story += [Spacer(1, 6), Paragraph(t(f"{d['verdict_line']['level']}: {d['verdict_line']['text']}"), st["base"])]
+    vf = d.get("verification") or {}
+    if vf:
+        story += [Paragraph("Resume check", st["h2"]), Paragraph(t(f"{vf.get('level')} ({vf.get('score')}/100)."), st["base"])]
+        story += [Paragraph(t(f"{x['title']}" + (f": {x['evidence']}" if x.get("evidence") else "")), st["bullet"], bulletText="•") for x in (vf.get("findings") or [])[:5]]
     if ai.get("summary"):
         story += [Paragraph("AI summary", st["h2"]), Paragraph(t(ai["summary"]), st["base"])]
 

@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from . import assessments, auth, db, flows, jd_schema, tzfmt, matching, references, refs, resumes, scheduling, store, worker
+from . import assessments, auth, db, flows, jd_schema, tzfmt, matching, references, refs, resumes, scheduling, store, verify, worker
 from .offload import offload
 from .api_accounts import org_settings
 
@@ -1035,7 +1035,7 @@ async def drive_register(code: str, req: Request, data: str = Form(...), resume:
     if resume is not None and resume.filename:
         raw = await resume.read()
         check_resume(raw, resume.filename)
-        text = await asyncio.to_thread(resumes.extract_text, raw, resume.filename)
+        text = await verify.read_resume_text(raw, resume.filename)
     pic = await photo.read() if photo is not None and photo.filename else None
     if need_photo and not pic:
         raise HTTPException(400, "Please take a live photo with your camera.")

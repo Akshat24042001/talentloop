@@ -37,12 +37,11 @@ export default function Settings() {
 function OrgSettings({ tab }: { tab: string }) {
   const { refresh } = useSession()
   const [org, setOrg] = useState<{ name: string; slug: string; settings: Record<string, any> } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(false), [logoBusy, setLogoBusy] = useState(false)
   useEffect(() => { api('/api/org').then(setOrg) }, [])
   if (!org) return <Loading />
   const s = org.settings
   const set = (k: string, v: unknown) => setOrg(o => ({ ...o!, settings: { ...o!.settings, [k]: v } }))
-  const [logoBusy, setLogoBusy] = useState(false)
   async function uploadLogo(f: File) {
     setLogoBusy(true)
     try { const fd = new FormData(); fd.append('file', f); const r = await api('/api/org/logo', { body: fd }); set('logo_url', r.logo_url); toast('Logo uploaded') } catch (e: any) { toast(e.message) }

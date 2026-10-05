@@ -185,7 +185,7 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
           <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 p-5 hover:border-brand-300 dark:border-ink-700">
             <FileUp className="size-6 text-brand-500" />
             <span className="min-w-0 flex-1 text-sm"><span className="block font-semibold">{file ? file.name : 'Attach your resume'}</span><span className="text-slate-500 dark:text-slate-400">{parsing ? 'Reading it to fill the form for you…' : 'PDF, DOCX or TXT, max 10 MB. We fill in the next steps from it.'}</span></span>
-            <input type="file" accept=".pdf,.docx,.txt" className="sr-only" onChange={e => { const x = e.target.files?.[0]; if (x) onFile(x) }} />
+            <input type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" className="sr-only" onChange={e => { const x = e.target.files?.[0]; if (x) onFile(x) }} />
           </label>
         ) : (
           <div className="space-y-4 rounded-2xl bg-slate-50 p-4 dark:bg-ink-850">

@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -12,11 +13,12 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import defer
 
-from . import auth, db, docs_pdf, jd_schema, llm, matching, refs, resumes, skills, store
+from . import auth, db, docs_pdf, jd_schema, llm, matching, refs, resumes, skills, store, verify
 from .offload import offload
 from .api_accounts import log_activity, org_settings
 
 router = APIRouter()
+log = logging.getLogger("hiring")
 STAGES = ["applied", "screening", "shortlisted", "interview", "offer", "hired", "rejected", "withdrawn"]
 STAGE_LABEL = {"applied": "Applied", "screening": "Screening", "shortlisted": "Shortlisted", "interview": "Interview", "offer": "Offer",
                "hired": "Hired", "rejected": "Rejected", "withdrawn": "Withdrawn"}
@@ -455,7 +457,7 @@ def _save_resume(org_id: str, cand_id: str, raw: bytes, filename: str) -> tuple[
 def check_resume(raw: bytes, filename: str) -> None:
     ext = Path(filename or "").suffix.lower()
     if ext not in resumes.RESUME_TYPES:
-        raise HTTPException(400, "Upload a PDF, DOCX or TXT resume.")
+        raise HTTPException(400, "Upload a PDF, DOCX, TXT or a photo (PNG, JPG) of the resume.")
     if len(raw) > resumes.MAX_RESUME_BYTES:
         raise HTTPException(413, "The resume is larger than 10 MB.")
     if ext == ".pdf" and not raw.startswith(b"%PDF"):
@@ -488,6 +490,11 @@ def upsert_candidate(s, org_id: str, *, text: str, parsed: dict, profile: dict, 
             store.delete_files(old_file)          # the replaced resume is not kept
     if profile.get("college"):
         cand.college = str(profile["college"])[:200]
+    if text or raw is not None:                   # resume check (file and text, no network): redone for every new resume
+        try:
+            cand.parsed = {**(cand.parsed or {}), "verification": verify.quick(s, cand, cand.resume_text or "", raw, filename)}
+        except Exception:
+            log.exception("[%s] resume check failed", cand.id)
     matching.compute_features(cand)
     cand.updated_at = time.time()
     return cand, created
@@ -506,9 +513,9 @@ async def upload_resumes(req: Request, files: list[UploadFile] = File(...)):
         raw = await f.read()
         try:
             check_resume(raw, f.filename or "")
-            text = await asyncio.to_thread(resumes.extract_text, raw, f.filename or "")
+            text = await verify.read_resume_text(raw, f.filename or "")
             if len(text.strip()) < 40:
-                raise HTTPException(400, "No readable text (scanned image?)")
+                raise HTTPException(400, "No readable text. Scanned and photo resumes need VISION_MODEL to be set." if not llm.VISION_MODEL else "No readable text in that file.")
             parsed = resumes.parse(text)
             with db.session() as s:
                 cand, created = upsert_candidate(s, org_id, text=text, parsed=parsed, profile={}, source="bulk", raw=raw, filename=f.filename or "")
@@ -542,6 +549,21 @@ async def create_candidate(req: Request):
         return cand_summary(cand)
 
 
+@router.post("/api/candidates/{cid}/verify")
+async def verify_candidate(cid: str, req: Request):
+    """Full resume check: file and text again, plus GitHub, the people-data provider and an AI read of the claims."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "run a resume check")
+        c = refs.resolve(s, db.Candidate, ctx.org_id, cid)
+        if not c or c.org_id != ctx.org_id:
+            raise HTTPException(404, "Candidate not found")
+        if not (c.resume_text or "").strip():
+            raise HTTPException(400, "This candidate has no resume text to check.")
+        cand_id = c.id
+    return await verify.full(cand_id)
+
+
 @router.get("/api/candidates/{cid}")
 def candidate_detail(cid: str, req: Request):
     with db.session() as s:
@@ -570,6 +592,7 @@ def candidate_detail(cid: str, req: Request):
         reports = {m.job_id: m.ai_report for m in s.query(db.Match).filter(db.Match.candidate_id == c.id, db.Match.ai_report.isnot(None))}
         for b in best:
             b["ai_report"] = reports.get(b["job_id"])
+        verify.ensure(s, c)              # candidates added before the resume check
         return {**cand_summary(c), "profile": c.profile or {}, "parsed": c.parsed or {}, "resume_text": (c.resume_text or "")[:20000],
                 "applications": apps, "best_jobs": best, "best_fit_min_score": st["best_fit_min_score"],
                 "activity": activity_rows(s, s.query(db.Activity).filter(db.Activity.candidate_id == c.id), 30)}
@@ -1137,7 +1160,7 @@ async def _intake(req: Request, org: db.Org, data: str, resume: UploadFile | Non
         raw = await resume.read()
         check_resume(raw, resume.filename)
         fname = resume.filename
-        text = await asyncio.to_thread(resumes.extract_text, raw, fname)
+        text = await verify.read_resume_text(raw, fname)
     built = resumes.profile_text(profile)
     if not raw:
         if not (profile.get("experience") or profile.get("skills") or profile.get("summary")):
@@ -1203,7 +1226,7 @@ async def public_parse_resume(req: Request, resume: UploadFile = File(...)):
     auth.rate_limit(f"parse:{auth.client_ip(req)}", 30, 3600)
     raw = await resume.read()
     check_resume(raw, resume.filename or "")
-    text = await asyncio.to_thread(resumes.extract_text, raw, resume.filename or "")
+    text = await verify.read_resume_text(raw, resume.filename or "")
     p = resumes.parse(text)
     return {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"],
             "total_experience_years": p["years"], "notice_days": p["notice_days"], "links": p["links"]}
@@ -1220,7 +1243,7 @@ async def parse_jd(req: Request, file: UploadFile = File(...)):
         auth.require(ctx_of(req, s), auth.MANAGE_JOBS, "create jobs")
     raw = await file.read()
     check_resume(raw, file.filename or "")
-    text = await asyncio.to_thread(resumes.extract_text, raw, file.filename or "")
+    text = await verify.read_resume_text(raw, file.filename or "")
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         raise HTTPException(400, "No readable text in that file.")
