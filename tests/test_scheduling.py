@@ -251,6 +251,19 @@ check("a sign-in code works twice", C().post("/api/me/verify", json={"email": "r
 ok(cand.post("/api/me/logout"))
 check("signing out doesn't sign out", cand.get("/api/me").status_code != 401)
 
+
+# ---- placement officer sign-in at /me
+dj = ok(hr.post("/api/drives", json={"job_ids": [job["id"]], "college": "MIT Pune", "settings": {"placement_officer": "Dr Rao", "officer_email": "tpo@mitpune.test"}}))
+ok(pub.post("/api/me/code", json={"email": "tpo@mitpune.test"}))
+tm = mails("candidate_login", "tpo@mitpune.test")
+check("a placement officer gets no sign-in code", not tm)
+tpo = C()
+if tm:
+    ok(tpo.post("/api/me/verify", json={"email": "tpo@mitpune.test", "code": re.search(r"\b(\d{6})\b", tm[-1][2]).group(1)}))
+mine_t = tpo.get("/api/me").json() if tm else {}
+check("the placement officer doesn't see their drive", [d["college"] for d in mine_t.get("drives", [])] != ["MIT Pune"], str(mine_t)[:200])
+check("the placement officer's drive has no results link", not any("/results/" in d["results_link"] for d in mine_t.get("drives", [])))
+
 bugs = [n for n, b, _ in RES if b]
 print(f"\n{'SCHEDULING CHECKS PASSED' if not bugs else 'SCHEDULING CHECKS FAILED'} ({len(RES)})")
 assert not bugs, f"{len(bugs)} scheduling check(s) failed: {bugs}"

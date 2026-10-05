@@ -131,7 +131,7 @@ function DriveEditor({ d, jobs, onClose, onSaved }: { d: Partial<Drive>; jobs: J
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Placement officer" htmlFor="dr-po"><Input id="dr-po" value={f.placement_officer} onChange={e => setF({ ...f, placement_officer: e.target.value })} /></Field>
-          <Field label="Their email" htmlFor="dr-pe"><Input id="dr-pe" type="email" value={f.officer_email} onChange={e => setF({ ...f, officer_email: e.target.value })} /></Field>
+          <Field label="Their email" htmlFor="dr-pe" hint="They can sign in at /me with this email to see live results."><Input id="dr-pe" type="email" value={f.officer_email} onChange={e => setF({ ...f, officer_email: e.target.value })} /></Field>
         </div>
         <Switch id="dr-ph" checked={f.require_photo} onChange={v => setF({ ...f, require_photo: v })} label="Live photo at registration" description="Taken with the camera and shown next to test snapshots so your team can compare." />
         <Switch id="dr-sc" checked={f.show_scores} onChange={v => setF({ ...f, show_scores: v })} label="Show test scores on the results page" description="Off: the placement officer sees who took the test and progressed, without scores." />

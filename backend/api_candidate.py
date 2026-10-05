@@ -51,6 +51,11 @@ def me_email(req: Request) -> str | None:
     return email
 
 
+def _drives_for(s, email: str) -> list:
+    """Campus drives where this email is the placement officer (set on the drive by HR)."""
+    return [d for d in s.query(db.Drive).limit(20000) if str((d.settings or {}).get("officer_email") or "").strip().lower() == email]
+
+
 def _apps_for(s, email: str):
     cands = s.query(db.Candidate).filter(db.Candidate.email == email).all()
     if not cands:
@@ -68,9 +73,10 @@ async def send_code(req: Request):
     auth.rate_limit(f"me-code-email:{email}", 4, 3600)
     with db.session() as s:
         apps = [a for a in _apps_for(s, email) if (o := s.get(db.Org, a.org_id)) and not o.disabled]
-        if apps:                                         # the reply is the same either way: no account discovery
+        org_id = apps[0].org_id if apps else next((d.org_id for d in _drives_for(s, email)), None)
+        if org_id:                                       # the reply is the same either way: no account discovery
             code = _code(email, int(time.time() // WINDOW))
-            messages.queue(s, apps[0].org_id, to_email=email, subject="Your TalentLoop sign-in code",
+            messages.queue(s, org_id, to_email=email, subject="Your TalentLoop sign-in code",
                            body=f"Your TalentLoop sign-in code is {code}.\n\nIt works once, for about 10 minutes. If you didn't ask for it, ignore this email.",
                            template="candidate_login")
     return {"ok": True}
@@ -129,4 +135,13 @@ def my_applications(req: Request):
                         "booking": {"starts_at": b["starts_at"], "ends_at": b["ends_at"], "interviewer": b.get("interviewer", "")} if b else None}
             out.append({"id": refs.app_ref(a.id), "org": brand(org), "job": job.title, "stage": a.stage, "stage_label": CAND_STAGE.get(a.stage, a.stage),
                         "applied_at": a.created_at, "status_link": flows.status_link(a), "step": step, "timezone": tzfmt.org_tz(org)})
-    return {"email": email, "applications": out}
+        drives = []
+        for d in _drives_for(s, email):
+            org = s.get(db.Org, d.org_id)
+            if not org or org.disabled:
+                continue
+            from .api_flows import drive_jobs
+            drives.append({"college": d.college, "org": brand(org), "roles": [j.title for j in drive_jobs(s, d)],
+                           "results_link": f"{flows.base_url()}/results/{d.share_code}", "register_link": f"{flows.base_url()}/drive/{d.code}",
+                           "opens_at": d.opens_at, "registered": s.query(db.Application).filter(db.Application.drive_id == d.id).count()})
+    return {"email": email, "applications": out, "drives": drives}
