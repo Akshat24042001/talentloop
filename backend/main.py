@@ -219,7 +219,8 @@ def ping():
 def health(req: Request):
     """Liveness for the host's health check, plus what pages need (demo mode, public link base). Server
     configuration (models, storage, keys, errors) is only shown to platform admins."""
-    base = {"ok": True, **appenv.public(), "mock": llm.MOCK, "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"),
+    ps = api_console.platform_settings()
+    base = {"ok": True, **appenv.public(), "banner": ps["banner"], "banner_tone": ps["banner_tone"], "signups_open": ps["signups_open"], "mock": llm.MOCK, "public_url": public_url(), "app_url": (os.getenv("APP_URL") or "").strip().rstrip("/"),
             "reconnect_window_sec": RECONNECT_WINDOW_SEC}
     with db.session() as s:
         ctx = auth.current(req, s, required=False)
@@ -1283,7 +1284,9 @@ app.include_router(api_hiring.router)
 app.include_router(api_flows.router)
 app.include_router(api_portal.router)
 app.include_router(api_candidate.router)
-route_tags.apply(app.router, api_accounts.router, api_hiring.router, api_flows.router, api_portal.router, api_candidate.router)
+from . import api_console  # noqa: E402
+app.include_router(api_console.router)
+route_tags.apply(app.router, api_console.router, api_accounts.router, api_hiring.router, api_flows.router, api_portal.router, api_candidate.router)
 app.openapi_tags = route_tags.openapi_tags()
 
 
@@ -1314,7 +1317,7 @@ def _openapi():
 app.openapi = _openapi
 
 # The web app is one page (index.html) with its own routes; the server returns it for each of them.
-SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/login", "/forgot", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
+SPA_ROUTES = ["/app", "/app/{rest:path}", "/admin", "/admin/{rest:path}", "/login", "/forgot", "/signup", "/invite/{rest:path}", "/careers/{rest:path}",
               "/me", "/r/{rest:path}", "/status/{rest:path}", "/decide/{rest:path}", "/ref/{rest:path}", "/feedback/{rest:path}", "/drive/{rest:path}", "/results/{rest:path}"]
 
 

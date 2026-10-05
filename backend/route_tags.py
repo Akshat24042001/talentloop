@@ -10,7 +10,7 @@ RULES: list[tuple[tuple[str, ...], str]] = [
     (("/api/me",), "Candidate and placement-officer sign-in (/me)"),
     (("/api/public/",), "Public: careers page, job posts, logos"),
     (("/api/r/", "/api/status/", "/api/decide/", "/api/feedback/", "/api/ref/", "/api/results/", "/api/drive/"), "Guest links: candidates, approvers, interviewers, referees, placement officers"),
-    (("/api/platform", "/api/admin", "/api/demo"), "Platform admin"),
+    (("/api/platform", "/api/admin", "/api/console", "/api/demo"), "Platform admin"),
     (("/api/org",), "Company settings"),
     (("/api/team", "/api/invites", "/api/invite", "/api/members", "/api/memberships", "/api/switch"), "Team and roles"),
     (("/api/drives", "/api/jobs/{job_id}/drives"), "Campus drives"),

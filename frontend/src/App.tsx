@@ -13,7 +13,7 @@ import { Forgot, Invite, Login, Signup, VerifyEmail } from './site/Auth'
 function named<T extends Record<string, unknown>>(load: () => Promise<T>, key: keyof T) {
   return lazy(() => load().then(m => ({ default: m[key] as ComponentType<any> })))
 }
-const Admin = lazy(() => import('./admin/Admin'))
+const Console = lazy(() => import('./admin/console/Console'))
 const CandidateDetail = lazy(() => import('./app/CandidateDetail'))
 const Candidates = lazy(() => import('./app/Candidates'))
 const Dashboard = lazy(() => import('./app/Dashboard'))
@@ -63,7 +63,6 @@ const APP: Route[] = [
   ['/app/team', () => <Team />, 'Team'],
   ['/app/settings', () => <Settings />, 'Settings', 'manage_team'],
   ['/app/account', () => <Account />, 'Your account'],
-  ['/admin', () => <Admin />, 'Platform admin'],
 ]
 
 function find(routes: Route[], path: string) {
@@ -80,8 +79,10 @@ function Workspace({ path }: { path: string }) {
   }, [me])
   if (!me) return <Loading className="min-h-screen" />
   if (me.email_verified === false) return <VerifyEmail />
-  if (!me.org && !(me.platform_admin && path === '/admin')) return <NoCompany />
-  if (path === '/admin' && !me.platform_admin) return <Shell><NotFound /></Shell>
+  if (path === '/admin' || path.startsWith('/admin/')) return me.platform_admin
+    ? <Suspense fallback={<Loading className="min-h-screen" />}><Console path={path} /></Suspense>
+    : <div className="min-h-screen"><NotFound /></div>
+  if (!me.org) return <NoCompany />
   if (hit?.need && !me.can[hit.need]) return <Shell><NoAccess /></Shell>
   return <Shell><Suspense fallback={<PageSkeleton />}>{hit ? hit.node : <NotFound />}</Suspense></Shell>
 }
@@ -105,7 +106,7 @@ function NotFound() {
 function Routes() {
   const { path } = useLocation()
   useEffect(() => { setUnauthorizedHandler(() => { if (path.startsWith('/app') || path.startsWith('/admin')) navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}`, { replace: true }) }) }, [path])
-  if (path === '/app' || path.startsWith('/app/') || path === '/admin') return <Workspace path={path} />
+  if (path === '/app' || path.startsWith('/app/') || path === '/admin' || path.startsWith('/admin/')) return <Workspace path={path} />
   let p
   if (path === '/login') return <Login />
   if (path === '/forgot') return <Forgot />

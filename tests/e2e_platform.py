@@ -211,6 +211,8 @@ def main():
             fd.fill("#name", "Founder"); fd.fill("#email", "founder@e2e.test"); fd.fill("#company", "TalentLoop HQ"); fd.fill("#password", "founder-pass-1")
             fd.get_by_role("button", name="Create workspace").click()
             fd.get_by_role("link", name="Platform admin").click()
+            expect(fd.get_by_text("Platform analytics")).to_be_visible(timeout=15000)
+            fd.get_by_role("link", name="Companies").click()
             expect(fd.get_by_role("table").get_by_text("Acme Corp", exact=True)).to_be_visible(timeout=15000)
             row = fd.locator("tr", has_text="Acme Corp")
             expect(row).to_contain_text("priya@acme.test")

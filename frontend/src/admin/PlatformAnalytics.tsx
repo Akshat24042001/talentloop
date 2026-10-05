@@ -2,13 +2,14 @@
 import { Activity, Briefcase, Building2, FileText, Sparkles, Users, Video } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Badge, Card, CardBody, CardHeader, Stat } from '../components/ui'
+import { navigate } from '../lib/router'
 import { Ago, CardsSkeleton, ErrorBox, Tabs, useApi } from '../components/kit'
 import { ColumnChart, HBarChart } from '../components/charts'
 
 type Range = '7' | '30' | '90'
 interface Data {
   days: string[]; tz: string; online_now: number; tracking_since: string | null
-  online: { name: string; email: string; company: string; last_seen_at: number; platform_admin: boolean }[]
+  online: { id: string; name: string; email: string; company: string; last_seen_at: number; platform_admin: boolean }[]
   active: { today: number; d7: number; d30: number }
   totals: { companies: number; companies_disabled: number; users: number; resumes: number; sample_resumes: number; applications: number; jobs_open: number; interviews: number; ai_calls: number }
   series: Record<'active_users' | 'active_companies' | 'signups' | 'companies' | 'resumes' | 'applications' | 'interviews' | 'ai_calls', number[]>
@@ -40,7 +41,8 @@ export default function PlatformAnalytics() {
       </div>
       {!d ? <CardsSkeleton n={8} /> : <>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
-          <Stat label="Online now" value={<span className="inline-flex items-center gap-2">{d.online_now}{d.online_now > 0 && <i className="size-2 animate-pulse rounded-full bg-emerald-500" aria-hidden />}</span>} sub="active in the last 5 minutes" icon={<Activity />} />
+          <button type="button" className="rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" onClick={() => document.getElementById('online-now')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+            <Stat label="Online now" value={<span className="inline-flex items-center gap-2">{d.online_now}{d.online_now > 0 && <i className="size-2 animate-pulse rounded-full bg-emerald-500" aria-hidden />}</span>} sub="active in the last 5 minutes · see who" icon={<Activity />} /></button>
           <Stat label="Active today" value={d.active.today} sub="people who used it today" icon={<Users />} />
           <Stat label="Active this week" value={d.active.d7} sub="last 7 days" icon={<Users />} />
           <Stat label="Active this month" value={d.active.d30} sub="last 30 days" icon={<Users />} />
@@ -60,11 +62,11 @@ export default function PlatformAnalytics() {
           </CardBody></Card>
         })}</div>
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <Card><CardHeader title="Online now" description="Signed-in people active in the last 5 minutes" /><CardBody>
+          <Card id="online-now"><CardHeader title="Online now" description="Signed-in people active in the last 5 minutes. Click a person to manage their account." /><CardBody>
             {d.online.length ? <ul className="space-y-2 text-sm">{d.online.map(p => (
-              <li key={p.email} className="flex items-center justify-between gap-2"><div className="min-w-0"><div className="truncate font-medium">{p.name || p.email} {p.platform_admin && <Badge tone="violet">Admin</Badge>}</div>
+              <li key={p.email}><button type="button" onClick={() => navigate(`/admin/people/${p.id}`)} className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-2 rounded-lg px-2 py-1 text-left hover:bg-slate-50 dark:hover:bg-ink-850"><div className="min-w-0"><div className="truncate font-medium">{p.name || p.email} {p.platform_admin && <Badge tone="violet">Admin</Badge>}</div>
                 <div className="truncate text-xs text-slate-500 dark:text-slate-400">{p.company || 'no company'} · {p.email}</div></div>
-                <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400"><Ago ts={p.last_seen_at} /></span></li>))}</ul>
+                <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400"><Ago ts={p.last_seen_at} /></span></button></li>))}</ul>
               : <p className="text-sm text-slate-500 dark:text-slate-400">Nobody right now.</p>}
           </CardBody></Card>
           <Card><CardHeader title="Most active companies" description={`Person-days of use, last ${range} days`} /><CardBody>

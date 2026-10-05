@@ -122,6 +122,14 @@ function tourSteps(me: NonNullable<ReturnType<typeof useSession>['me']>): TourSt
   return s
 }
 
+/** The platform admin's announcement (Platform console > Platform settings), shown to every signed-in user. */
+function PlatformBanner() {
+  const h = useHealth() as (ReturnType<typeof useHealth> & { banner?: string; banner_tone?: 'info' | 'warning' | 'danger' }) | null
+  if (!h?.banner) return null
+  return <div role="status" className={cn('mb-5 rounded-xl px-4 py-3 text-sm font-medium ring-1', h.banner_tone === 'danger' ? 'bg-red-50 text-red-800 ring-red-200 dark:bg-red-500/10 dark:text-red-200 dark:ring-red-500/30'
+    : h.banner_tone === 'warning' ? 'bg-amber-50 text-amber-900 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/30' : 'bg-brand-50 text-brand-800 ring-brand-200 dark:bg-brand-500/10 dark:text-brand-200 dark:ring-brand-500/30')}>{h.banner}</div>
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const { path } = useLocation()
   const [open, setOpen] = useState(false)
@@ -145,7 +153,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
-      <main className="lg:pl-64"><div className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-8">{children}</div></main>
+      <main className="lg:pl-64"><div className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-8"><PlatformBanner />{children}</div></main>
     </>
   )
 }

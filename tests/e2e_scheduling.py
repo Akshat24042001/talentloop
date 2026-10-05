@@ -139,7 +139,7 @@ def main():
             expect(cand.get_by_role("link", name="Start now")).to_be_visible()
             shot(cand, "05-ai-booked")
             cand.get_by_role("button", name="Change the time").click()
-            cand.locator("button[aria-pressed=false]").filter(has_text=re.compile(r"\d:\d\d")).nth(2).click()
+            cand.locator("button[aria-pressed=false]").filter(has_text=re.compile(r"\d:\d\d")).first.click()   # any other free time (late in the day only a few are left)
             cand.get_by_role("button", name=re.compile(r"^Book ")).click()
             expect(cand.get_by_text("Booked", exact=True)).to_be_visible()
             assert "IST" in last_mail("zara@sched.test", "ai_interview_scheduled")

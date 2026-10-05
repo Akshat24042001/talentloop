@@ -98,3 +98,12 @@ service only. Pinging keeps it awake; it doesn't make the shared free CPU faster
   Swagger's **Authorize** button sends) returns `access_token` (JWT, `JWT_ACCESS_MINUTES`) and `refresh_token`
   (`SESSION_DAYS`). Send `Authorization: Bearer <access_token>`; renew with `POST /api/auth/token/refresh`. Each token is
   tied to a session, so sign-out, password change/reset and disabling the user revoke it immediately.
+
+## Platform console (/admin)
+
+Accounts in `PLATFORM_ADMIN_EMAILS` (or made platform admin in the console) get a separate console at `/admin`:
+overview and analytics, every company (edit profile, disable, delete with typed confirmation, manage members), every
+person (roles, pause, confirm email, email a reset code, sign out everywhere, disable, admin rights), candidates, jobs,
+AI interviews, outbox (retry) and the audit log across all companies, plus platform settings (sign-ups open/closed, a
+banner for every signed-in user, AI models, system status). Every change made there is written to the audit log as
+"Platform admin" with the admin's email. Server keys are never shown or edited there: they stay in Render.

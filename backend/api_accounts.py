@@ -96,6 +96,9 @@ async def signup(req: Request, resp: Response):
     company = str(body.get("company") or "").strip()[:200]
     if not name or not company:
         raise HTTPException(400, "Your name and your company name are required.")
+    from .api_console import platform_settings
+    if not platform_settings()["signups_open"] and email not in auth.PLATFORM_ADMINS:
+        raise HTTPException(403, "New sign-ups are paused right now. Ask the TalentLoop team for an invite.")
     with db.session() as s:
         old = s.query(db.User).filter_by(email=email).first()
         if old and old.email_verified_at is None and not old.disabled:
@@ -551,7 +554,7 @@ def admin_analytics(req: Request, days: int = 30):
             if u.id in seen:
                 continue
             seen.add(u.id)
-            people.append({"name": u.name, "email": u.email, "company": org_names.get(sess.org_id or "", ""), "last_seen_at": sess.last_seen_at,
+            people.append({"id": u.id, "name": u.name, "email": u.email, "company": org_names.get(sess.org_id or "", ""), "last_seen_at": sess.last_seen_at,
                            "platform_admin": u.is_platform_admin})
         sample = db.Candidate.source == "demo"
         top = s.query(db.Candidate.org_id, func.count()).filter(db.Candidate.created_at > t - days * 86400, ~sample) \
