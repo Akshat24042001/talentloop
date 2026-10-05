@@ -2,7 +2,7 @@
 import os
 import time
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from sqlalchemy import func
 
 from . import auth, db, store
@@ -571,3 +571,53 @@ async def admin_update_user(user_id: str, req: Request):
 def platform_status() -> dict:
     return {"database": "sqlite" if db.IS_SQLITE else "postgres", "persistent_db": not db.IS_SQLITE or os.getenv("PERSISTENT_DISK") == "1",
             "platform_admins_configured": bool(auth.PLATFORM_ADMINS)}
+
+
+# ---------------------------------------------------------------------------
+# company logo upload (careers page, candidate pages, emails)
+# ---------------------------------------------------------------------------
+@router.post("/api/org/logo")
+async def upload_logo(req: Request, file: UploadFile = File(...)):
+    """PNG, JPG or WebP up to 2 MB. Re-encoded to PNG (at most 512 px) so only a clean image is ever served; SVG is
+    refused because an SVG can carry scripts."""
+    raw = await file.read()
+    if len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(413, "The logo must be under 2 MB.")
+    import hashlib
+    import io
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(raw))
+        if im.format not in ("PNG", "JPEG", "WEBP"):
+            raise ValueError
+        im.thumbnail((512, 512))
+        if im.mode not in ("RGB", "RGBA"):
+            im = im.convert("RGBA")
+        out = io.BytesIO()
+        im.save(out, "PNG", optimize=True)
+    except Exception:
+        raise HTTPException(400, "Upload a PNG, JPG or WebP image.") from None
+    data = out.getvalue()
+    h = hashlib.sha1(data).hexdigest()[:12]
+    with db.session() as s:
+        ctx = auth.current(req, s)
+        auth.require(ctx, auth.MANAGE_TEAM, "change company settings")
+        org = s.get(db.Org, auth.require_org(ctx))
+        store.put_file(f"{org.id}/branding/logo-{h}.png", data, "image/png")
+        url = f"/api/public/logo/{org.id}/{h}.png"
+        org.settings = {**(org.settings or {}), "logo_url": url}
+        log_activity(s, ctx, "settings_updated", "logo uploaded")
+    return {"logo_url": url}
+
+
+@router.get("/api/public/logo/{org_id}/{name}")
+def public_logo(org_id: str, name: str):
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", org_id) or not re.fullmatch(r"[0-9a-f]{12}\.png", name):
+        raise HTTPException(404, "Not found")
+    p = store.get_file(f"{org_id}/branding/logo-{name}")
+    if not p:
+        raise HTTPException(404, "Not found")
+    from fastapi.responses import FileResponse
+    return FileResponse(p, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000, immutable",
+                                                             "Content-Security-Policy": "default-src 'none'", "X-Content-Type-Options": "nosniff"})

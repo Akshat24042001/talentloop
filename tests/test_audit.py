@@ -440,6 +440,21 @@ check("one candidate can be 'compared'", hr.get(f"/api/jobs/{lj['id']}/compare",
 check("another job's candidate shows up in a comparison", len(ok(hr.get(f"/api/jobs/{lj['id']}/compare", params={"ids": f"{sim_apps[0]},{sim_apps[1]},{ra}"}))["items"]) != 2)
 check("another company can compare this job's candidates", other.get(f"/api/jobs/{lj['id']}/compare", params={"ids": ",".join(sim_apps[:2])}).status_code != 404)
 
+
+# Company logo upload
+import io as _io
+from PIL import Image as _Img
+_b = _io.BytesIO(); _Img.new("RGB", (1600, 600), "blue").save(_b, "JPEG")
+lg = hr.post("/api/org/logo", files={"file": ("logo.jpg", _b.getvalue(), "image/jpeg")})
+check("a JPG logo can't be uploaded", lg.status_code != 200, lg.text[:150])
+lurl = lg.json().get("logo_url", "") if lg.status_code == 200 else ""
+pg_ = pub.get(lurl) if lurl else None
+check("the uploaded logo isn't publicly viewable as a PNG", not pg_ or pg_.status_code != 200 or pg_.headers.get("content-type") != "image/png")
+check("a huge logo is served at full size", pg_ is not None and pg_.status_code == 200 and max(_Img.open(_io.BytesIO(pg_.content)).size) > 512)
+check("an SVG logo (can carry scripts) is accepted", hr.post("/api/org/logo", files={"file": ("x.svg", b"<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>", "image/svg+xml")}).status_code == 200)
+check("a logo can be uploaded without signing in", pub.post("/api/org/logo", files={"file": ("logo.jpg", _b.getvalue(), "image/jpeg")}).status_code == 200)
+check("the careers page doesn't use the uploaded logo", lurl and lurl not in pub.get(f"/api/public/orgs/{ok(hr.get('/api/org'))['slug']}").text)
+
 bugs = [n for n, b, _ in RES if b]
 assert not bugs, f"{len(bugs)} audit check(s) failed: {bugs}"
 print(f"\nAUDIT CHECKS PASSED ({len(RES)})")

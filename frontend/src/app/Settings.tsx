@@ -1,4 +1,4 @@
-import { Copy, Save } from 'lucide-react'
+import { Copy, ImageIcon, Save, Upload } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, copyText, toast } from '../components/ui'
 import { Loading, PageHeader, Tabs, TagInput, useApi } from '../components/kit'
@@ -42,6 +42,12 @@ function OrgSettings({ tab }: { tab: string }) {
   if (!org) return <Loading />
   const s = org.settings
   const set = (k: string, v: unknown) => setOrg(o => ({ ...o!, settings: { ...o!.settings, [k]: v } }))
+  const [logoBusy, setLogoBusy] = useState(false)
+  async function uploadLogo(f: File) {
+    setLogoBusy(true)
+    try { const fd = new FormData(); fd.append('file', f); const r = await api('/api/org/logo', { body: fd }); set('logo_url', r.logo_url); toast('Logo uploaded') } catch (e: any) { toast(e.message) }
+    setLogoBusy(false)
+  }
   async function save() {
     setBusy(true)
     try { const r = await api('/api/org', { method: 'PATCH', json: { name: org!.name, slug: org!.slug, settings: org!.settings } }); setOrg(r); await refresh(); toast('Settings saved') } catch (e: any) { toast(e.message) }
@@ -72,7 +78,20 @@ function OrgSettings({ tab }: { tab: string }) {
           <Field label="Careers page address" htmlFor="s-slug" hint={careers}><div className="flex gap-2"><Input id="s-slug" value={org.slug} onChange={e => setOrg({ ...org, slug: e.target.value })} /><Button icon={<Copy />} onClick={() => copyText(careers, 'Link copied')}>Copy</Button></div></Field>
           <Field label="Headline" htmlFor="s-head"><Input id="s-head" value={s.careers_headline || ''} onChange={e => set('careers_headline', e.target.value)} placeholder="Build the future of payments with us" /></Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Logo URL" htmlFor="s-logo"><Input id="s-logo" value={s.logo_url || ''} onChange={e => set('logo_url', e.target.value)} placeholder="https://…/logo.png" /></Field>
+            <Field label="Logo" hint="PNG, JPG or WebP, up to 2 MB. Shown on your careers page and candidate pages. Saved straight away.">
+              <div className="flex items-center gap-3">
+                <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50 ring-1 ring-slate-200 dark:bg-ink-850 dark:ring-ink-700">
+                  {s.logo_url ? <img src={s.logo_url} alt="Company logo" className="max-h-14 max-w-14 object-contain" /> : <ImageIcon className="size-6 text-slate-400" />}</span>
+                <div className="flex flex-wrap gap-2">
+                  <label className="inline-flex"><span className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm ring-1 ring-inset ring-slate-200 hover:bg-slate-50 dark:bg-ink-850 dark:text-slate-100 dark:ring-ink-700 dark:hover:bg-ink-800">
+                    <Upload className="size-4" />{logoBusy ? 'Uploading…' : s.logo_url ? 'Replace' : 'Upload logo'}</span>
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={logoBusy} onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = '' }} /></label>
+                  {s.logo_url && <Button variant="ghost" onClick={() => set('logo_url', '')}>Remove</Button>}
+                </div>
+              </div>
+              <details className="mt-2"><summary className="cursor-pointer text-xs font-medium text-slate-500 dark:text-slate-400">Or use an image link</summary>
+                <Input className="mt-2" id="s-logo" aria-label="Logo URL" value={s.logo_url || ''} onChange={e => set('logo_url', e.target.value)} placeholder="https://…/logo.png" /></details>
+            </Field>
             <Field label="Brand color" htmlFor="s-color"><div className="flex gap-2"><input type="color" aria-label="Pick color" value={s.brand_color || '#2848e6'} onChange={e => set('brand_color', e.target.value)} className="h-10 w-12 rounded-lg" /><Input id="s-color" value={s.brand_color || ''} onChange={e => set('brand_color', e.target.value)} /></div></Field>
           </div>
           <Button href={`/careers/${org.slug}`} target="_blank">Preview careers page</Button>
