@@ -106,7 +106,7 @@ def list_jobs(req: Request, status: str = "", q: str = ""):
         apps = dict(s.query(db.Application.job_id, func.count()).filter(db.Application.job_id.in_(ids or [""])).group_by(db.Application.job_id).all())
         new = dict(s.query(db.Application.job_id, func.count()).filter(db.Application.job_id.in_(ids or [""]),
                                                                         db.Application.created_at > time.time() - 7 * 86400).group_by(db.Application.job_id).all())
-        ai = dict(s.query(db.Match.job_id, func.count()).filter(db.Match.job_id.in_(ids or [""]), db.Match.ai_report.isnot(None)).group_by(db.Match.job_id).all())
+        ai = dict(s.query(db.Match.job_id, func.count()).filter(db.Match.job_id.in_(ids or [""]), db.Match.ai_report.isnot(None), db.Match.ai_hash != "").group_by(db.Match.job_id).all())
         top = {}
         for m in s.query(db.Match).filter(db.Match.job_id.in_(ids or [""]), db.Match.rank == 1):
             top[m.job_id] = m.score
@@ -255,7 +255,13 @@ def job_pdf(job_id: str, req: Request):
 def ai_unavailable(e: Exception) -> str:
     """A message HR can act on when the AI provider refuses (rate limit, daily free limit, no credit, outage)."""
     msg = str(e).lower()
-    if "429" in msg or "rate limit" in msg or "per-day" in msg or "quota" in msg:
+    if isinstance(e, llm.QuotaExhausted) or "per-day" in msg or "daily" in msg:
+        others = [llm.PROVIDERS[p]["label"] for p in ("anthropic", "openai", "gemini", "xai") if llm.available(p)]
+        return ("OpenRouter's daily free limit is used up: free models allow 50 requests a day in total, shared by interviews, plans, "
+                "scoring and these reports, and it resets daily. Adding $10 of credit to OpenRouter lifts it to 1,000 a day."
+                + (f" {', '.join(others)} is set up but could not answer either; check that key in Platform admin > AI models." if others and llm.backups_on()
+                   else " Or add another provider's key (Anthropic, OpenAI or Gemini): the app then uses it automatically when OpenRouter refuses."))
+    if "429" in msg or "rate limit" in msg or "quota" in msg:
         return ("The AI provider is rate-limiting us (free models allow about 20 requests a minute and 50 a day without "
                 "credit). Try again in a minute, or add OpenRouter credit for a higher limit.")
     if "401" in msg or "invalid api key" in msg or "no auth" in msg:
@@ -633,7 +639,7 @@ def candidate_detail(cid: str, req: Request):
         vis = auth.visible_job_ids(s, ctx)
         if vis is not None:
             best = [b for b in best if b["job_id"] in vis]
-        reports = {m.job_id: m.ai_report for m in s.query(db.Match).filter(db.Match.candidate_id == c.id, db.Match.ai_report.isnot(None))}
+        reports = {m.job_id: m.ai_report for m in s.query(db.Match).filter(db.Match.candidate_id == c.id, db.Match.ai_report.isnot(None), db.Match.ai_hash != "")}
         for b in best:
             b["ai_report"] = reports.get(b["job_id"])
         verify.ensure(s, c)              # candidates added before the resume check
@@ -928,11 +934,11 @@ async def match_ai_one(job_id: str, cid: str, req: Request):
             st = org_settings(org_of(s, ctx))
             matching.run(s, org_id, st["match_weights"], st["match_top_n"], [jid])
     res = await matching.run_ai_one(org_id, jid, cand_id)
-    if res.get("error"):
-        raise HTTPException(503, res["error"])
     with db.session() as s:
-        log_activity(s, ctx, "ai_reports", f"AI match report for {name}", org_id=org_id, job_id=jid, candidate_id=cand_id)
-    return res
+        log_activity(s, ctx, "ai_reports" if res.get("generated") else "ai_reports_failed",
+                     f"AI match report for {name}" if res.get("generated") else f"AI match report for {name} failed: {str(res.get('error'))[:200]}",
+                     org_id=org_id, job_id=jid, candidate_id=cand_id)
+    return res            # {generated, score} or {generated: 0, error, fallback}: the page shows the reason and the automatic summary
 
 
 @router.get("/api/jobs/{job_id}/match/{cid}")
@@ -1055,7 +1061,7 @@ def dashboard(req: Request):
             "pipeline": [{"id": st, "label": STAGE_LABEL[st], "count": stage_counts.get(st, 0)} for st in STAGES if st != "withdrawn"],
             "interviews": {"total": sum(iv.values()), "completed": sum(iv.get(k, 0) for k in ("completed", "scored", "incomplete")),
                            "in_progress": iv.get("in_progress", 0)},
-            "ai_reports": s.query(db.Match).filter(db.Match.org_id == org_id, db.Match.ai_report.isnot(None)).count(),
+            "ai_reports": s.query(db.Match).filter(db.Match.org_id == org_id, db.Match.ai_report.isnot(None), db.Match.ai_hash != "").count(),
             "attention": attention[:6], "activity": activity_rows(s, act_q, 12),
         }
 

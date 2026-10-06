@@ -9,7 +9,7 @@ import { ask } from '../components/dialogs'
 
 type Role = 'fast' | 'smart' | 'vision'
 interface Provider { id: string; label: string; available: boolean; env: string; note: string; site: string }
-interface State { providers: Provider[]; config: Record<Role, { provider: string; models: string[] }>; source: 'admin' | 'environment'; suggest: Record<string, Record<Role, string[]>>; note: string; mock: boolean }
+interface State { providers: Provider[]; config: Record<Role, { provider: string; models: string[] }>; source: 'admin' | 'environment'; suggest: Record<string, Record<Role, string[]>>; note: string; mock: boolean; backup: { on: boolean; targets: { provider: string; model: string }[]; last: { provider: string; model: string; at: number; because: string } | null; blocked: Record<string, string> } }
 interface Model { id: string; name: string; free: boolean; vision: boolean | null; context?: number }
 const ROLES: { id: Role; title: string; help: string }[] = [
   { id: 'fast', title: 'Fast: live interviews and plans', help: 'Answers every turn of an AI interview, so speed matters most. Pick small, quick models.' },
@@ -50,6 +50,14 @@ export default function AIModels() {
             </div>))}</div>
         </div>
         {data.note && <Alert tone="info">{data.note}</Alert>}
+        {Object.entries(data.backup.blocked).map(([k, why]) => <Alert key={k} tone="warning" title={`${k} is refusing requests right now`}>{why}. The app stops asking it for a few minutes so it doesn't use up what is left.</Alert>)}
+        <Alert tone={data.backup.on && data.backup.targets.length ? 'success' : 'info'} title="Backup provider">
+          {data.backup.on && data.backup.targets.length
+            ? <>If the main provider fails a one-off job (match reports, scoring, resume reads, JD writing), the app asks <b>{data.backup.targets.map(t => `${t.provider} (${t.model})`).join(' or ')}</b> instead. That uses the paid key on this server, one small request per job. Live interview turns never use it. Switch it off with <code>LLM_BACKUP=off</code> on Render.</>
+            : data.backup.on ? <>No second provider has a key, so there is nothing to fall back to. Add <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code> (with a model chosen above) and failed reports are retried there automatically.</>
+            : <>Backup is switched off (<code>LLM_BACKUP=off</code>).</>}
+          {data.backup.last && <div className="mt-1 text-xs">Last used: {data.backup.last.provider} ({data.backup.last.model}) {new Date(data.backup.last.at * 1000).toLocaleString()}.</div>}
+        </Alert>
         {ROLES.map(r => <RoleEditor key={r.id} role={r} providers={data.providers} suggest={data.suggest} value={cfg[r.id]}
           onChange={v => setCfg({ ...cfg, [r.id]: v })} saved={JSON.stringify(cfg[r.id]) === JSON.stringify(data.config[r.id])} />)}
         <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-ink-800">

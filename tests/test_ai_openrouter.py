@@ -151,9 +151,10 @@ def run(c):
     other = next(j for j in ok(c.get("/api/jobs")) if j["title"] == "Data Analyst")
     MODE["fail"] = True
     r = ok(c.post("/api/match/ai-reports", json={"job_ids": [other["id"]]}))
-    assert r["generated"] == 0 and r["failed"] == 3 and "rate-limiting" in r["error"], r
+    assert r["generated"] == 0 and r["failed"] == 3 and "daily free limit" in r["error"] and "$10" in r["error"], r
+    assert r["fallback"] == 3, "each failed report keeps an automatic summary (counted as still waiting for the AI)"
     w = c.post(f"/api/jobs/{other['id']}/ai-write")
-    assert w.status_code == 503 and "rate-limiting" in w.json()["detail"], w.text
+    assert w.status_code == 503 and "daily free limit" in w.json()["detail"], w.text
     assert ok(c.get(f"/api/jobs/{other['id']}/matches"))["ai_pending"] == 5, "a failed report must stay pending"
     MODE["fail"] = False
     usage = ok(c.get("/api/dashboard"))["ai_reports"]

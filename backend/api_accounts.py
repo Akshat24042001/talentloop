@@ -911,7 +911,9 @@ def _llm_state() -> dict:
     from . import llm
     return {"providers": [{"id": k, "label": p["label"], "available": llm.available(k), "env": p["env"], "note": p["note"], "site": p["site"],
                            "base_url": p["base_url"]} for k, p in llm.PROVIDERS.items() if k != "custom" or p["base_url"]],
-            "config": llm.CONFIG, "source": llm.SOURCE, "suggest": llm.SUGGEST, "note": llm.MODEL_CHECK.get("note", ""), "mock": llm.MOCK}
+            "config": llm.CONFIG, "source": llm.SOURCE, "suggest": llm.SUGGEST, "note": llm.MODEL_CHECK.get("note", ""), "mock": llm.MOCK,
+            "backup": {"on": llm.backups_on(), "targets": [{"provider": llm.PROVIDERS[p]["label"], "model": m} for p, m in llm._backup_targets(llm.FAST_MODEL)],
+                       "last": llm.LAST_BACKUP or None, "blocked": {llm.PROVIDERS[k]["label"]: v[1] for k, v in llm._BLOCKED.items() if v[0] > time.time()}}}
 
 
 @router.get("/api/platform/llm")

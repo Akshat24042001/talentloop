@@ -52,6 +52,7 @@ by switching to production; retry them one by one from Outbox if needed.
 | Setting | Why | Default |
 |---|---|---|
 | `FAST_MODEL` | Server default only: Platform admin > AI models overrides it. The model that runs live interview turns. Free models are slow and rate-limited; a paid fast model is the biggest reliability win for AI interviews. Comma-separated list = fallbacks in order. | free OpenRouter models |
+| `LLM_BACKUP` | `off` stops the automatic backup. By default, when the main AI provider fails a one-off job (match reports, interview scoring, resume reads, JD writing), the app retries it once on another provider whose key is set (`ANTHROPIC_API_KEY`: Claude Haiku for quick jobs, Claude for heavy ones; or `OPENAI_API_KEY`). That uses that key's paid credit, one small request per job. Live interview turns and interview plans never use it. Platform admin > AI models shows what the backup would use. | on |
 | `SMART_MODEL` | Plans, scoring, reports. | free OpenRouter models |
 | `VISION_MODEL` | Reads photo and scanned resumes; reviews live-task screenshots. Any OpenRouter model that accepts images (check "image" input on openrouter.ai/models). | off |
 | `JWT_SECRET` | Signs API access tokens (JWT). Long random string (`openssl rand -hex 32`). If unset, a key derived from `URL_SECRET` / the stored key is used, which also works; changing it invalidates every access token (refresh tokens keep working). | derived |
@@ -109,3 +110,8 @@ person (roles, pause, confirm email, email a reset code, sign out everywhere, di
 AI interviews, outbox (retry) and the audit log across all companies, plus platform settings (sign-ups open/closed, a
 banner for every signed-in user, AI models, system status). Every change made there is written to the audit log as
 "Platform admin" with the admin's email. Server keys are never shown or edited there: they stay in Render.
+
+
+### Free OpenRouter models: the daily limit
+
+Models whose id ends in `:free` are limited to 20 requests a minute, and to **50 requests a day** unless the account has bought at least $10 of credit once (then 1,000 a day) ([OpenRouter limits](https://openrouter.ai/docs/api-reference/limits)). Every AI feature draws from the same allowance: each interview turn, each plan, each score and each match report. A few test interviews can use it up, after which every AI call fails until the next day. The app then stops asking OpenRouter for a few minutes, uses the backup provider if one is configured, and for match reports keeps an automatic summary built from the match data so the page is never empty.

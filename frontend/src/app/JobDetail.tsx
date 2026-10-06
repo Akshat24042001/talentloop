@@ -11,7 +11,7 @@ import Board from './flow/Board'
 import FlowBuilder from './flow/FlowBuilder'
 import { JobDrives } from './Drives'
 import JobInsights from './JobInsights'
-import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
+import { BreakdownBars, ReportView, SkillChips, WriteReportButton, type AIReport, type Breakdown } from './match'
 import { LinkActions } from '../components/LinkActions'
 import { ask } from '../components/dialogs'
 
@@ -135,10 +135,10 @@ function Matches({ job, canManage }: { job: Job; canManage: boolean }) {
       {!data.items.length ? <Card><Empty icon={<Users />} title="No matching candidates yet" action={canManage && <Button href="/app/candidates?upload=1" icon={<Plus />}>Upload resumes</Button>}>Upload resumes or share the careers page. Candidates who share no skills or keywords with this job are not listed.</Empty></Card> : (
         <>
           <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400">Shortlist · top {data.top_n}</h3>
-          {shortlist.map(m => <MatchCard key={m.candidate.id} m={m} job={job} onAdd={addToPipeline} canManage={canManage} />)}
+          {shortlist.map(m => <MatchCard key={m.candidate.id} m={m} job={job} onAdd={addToPipeline} canManage={canManage} canAI={data.can_run_ai} onDone={reload} />)}
           {rest.length > 0 && <>
             <h3 className="pt-2 text-sm font-semibold text-slate-500 dark:text-slate-400">Next best</h3>
-            {rest.map(m => <MatchCard key={m.candidate.id} m={m} job={job} onAdd={addToPipeline} canManage={canManage} compact />)}
+            {rest.map(m => <MatchCard key={m.candidate.id} m={m} job={job} onAdd={addToPipeline} canManage={canManage} canAI={data.can_run_ai} onDone={reload} compact />)}
           </>}
           {data.items.length >= limit && <Button className="w-full" loading={loading} onClick={() => setLimit(l => l + 20)}>Show more</Button>}
         </>
@@ -147,7 +147,7 @@ function Matches({ job, canManage }: { job: Job; canManage: boolean }) {
   )
 }
 
-function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Job; onAdd: (c: Cand) => void; canManage: boolean; compact?: boolean }) {
+function MatchCard({ m, job, onAdd, canManage, canAI, onDone, compact }: { m: MatchRow; job: Job; onAdd: (c: Cand) => void; canManage: boolean; canAI: boolean; onDone: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(!compact)
   const c = m.candidate
   return (
@@ -168,6 +168,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
         <div className="flex flex-wrap gap-2">
           {!compact || open ? null : <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>Details</Button>}
           <Button size="sm" variant="ghost" icon={<FileBarChart />} href={`/app/jobs/${job.ref}/match/${c.ref}`}>Full report</Button>
+          {canManage && canAI && !m.knocked_out && <WriteReportButton jobRef={job.ref} candRef={c.ref} has={!!m.ai_report} auto={m.ai_report?.source === 'rules'} onDone={onDone} />}
           {canManage && !m.application && <Button size="sm" icon={<UserPlus />} onClick={() => onAdd(c)}>Shortlist</Button>}
           {canManage && <Tip label="Send an AI first-round interview"><Button size="sm" variant="subtle" icon={<Video />} href={`/app/interviews/new?job=${job.ref}&candidate=${c.ref}${m.application ? `&application=${m.application.ref || m.application.id}` : ''}`}>Interview</Button></Tip>}
         </div>
@@ -175,7 +176,7 @@ function MatchCard({ m, job, onAdd, canManage, compact }: { m: MatchRow; job: Jo
       {open && (
         <div className="grid gap-4 border-t border-slate-100 p-4 dark:border-ink-800 sm:p-5 lg:grid-cols-[minmax(0,320px)_1fr]">
           <BreakdownBars b={m.breakdown} />
-          {m.ai_report ? <ReportView r={m.ai_report} compact /> : <p className="self-center text-sm text-slate-500 dark:text-slate-400">{compact ? 'Outside the shortlist: no AI report (saves tokens). Raise the shortlist size in the JD to include it.' : 'No AI report yet. Use "Write AI reports" above.'}</p>}
+          {m.ai_report ? <ReportView r={m.ai_report} compact /> : <p className="self-center text-sm text-slate-500 dark:text-slate-400">{compact ? 'Outside the shortlist, so no AI report is written automatically. Use "Write AI report" on this card for just this person.' : 'No AI report yet. Use "Write AI report" on this card, or write all of them above.'}</p>}
         </div>
       )}
     </Card>

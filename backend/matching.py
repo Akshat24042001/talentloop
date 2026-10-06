@@ -444,6 +444,60 @@ def _mock_report(bd: dict, score: float) -> dict:
             "risks": [], "interview_questions": [f"Tell me about a project where you used {x}." for x in (sk.get("must_missing") or sk.get("must_matched") or ["your main skill"])[:3]]}
 
 
+def _rules_report(bd: dict, score: float, cand_name: str = "") -> dict:
+    """A report built only from the match data (no AI): what matched, what is missing, what to ask. Used when every AI
+    provider refuses, so the button always produces something useful. No verdict and no AI score: those need the
+    resume read. Every line states a fact from the match; nothing is inferred."""
+    sk, ex, lo, lg = (bd.get(k) or {} for k in ("skills", "experience", "location", "logistics"))
+    hit, miss, rel = sk.get("must_matched") or [], sk.get("must_missing") or [], sk.get("must_related") or {}
+    total = len(hit) + len(miss) + len(rel)
+    strengths, gaps, risks, qs = [], [], [], []
+    if hit:
+        strengths.append("Resume shows the must-have skills: " + ", ".join(hit[:6]))
+    if sk.get("nice_matched"):
+        strengths.append("Also has nice-to-have skills: " + ", ".join(sk["nice_matched"][:5]))
+    if ex.get("note") == "in range" and ex.get("years") is not None:
+        strengths.append(f"{ex['years']:g} years of experience, within the range asked for")
+    if lo.get("note") in ("same city", "remote role"):
+        strengths.append("Location fits" + (" (remote role)" if lo["note"] == "remote role" else ": same city"))
+    elif lo.get("note") == "willing to relocate":
+        strengths.append("Based elsewhere but willing to relocate")
+    if miss:
+        gaps.append("No sign of these must-have skills in the resume: " + ", ".join(miss[:6]))
+    for k, v in list(rel.items())[:3]:
+        gaps.append(f"{k}: only related experience ({v})" if isinstance(v, str) else f"{k}: only related experience")
+    if ex.get("note") == "below range":
+        risks.append(f"{ex.get('years'):g} years is below the experience asked for" if ex.get("years") is not None else "Below the experience asked for")
+    if ex.get("note") == "above range":
+        risks.append("More experienced than the range asked for (check salary and level fit)")
+    if ex.get("note") == "unknown":
+        risks.append("Years of experience could not be read from the resume")
+    if lo.get("note") == "different city":
+        risks.append("Based in a different city" + (f" ({lo.get('candidate')})" if lo.get("candidate") else "") + " and not marked as willing to relocate")
+    if lg.get("notice") and lg["notice"] != "unknown" and (lg.get("score") or 1) < 0.9:
+        risks.append(f"Notice period ({lg['notice']}) is longer than the job allows")
+    if lg.get("salary") == "above budget":
+        risks.append("Salary expectation is above the budget")
+    for x in (miss[:2] + list(rel)[:1]) or hit[:1]:
+        qs.append(f"Walk me through a recent project where you used {x}. What exactly did you build, and what was your part?")
+    if ex.get("note") in ("unknown", "below range"):
+        qs.append("Walk me through your roles and how long you were in each.")
+    who = cand_name or "The candidate"
+    return {"source": "rules", "score": None, "verdict": None,
+            "summary": (f"{who} matches {len(hit)} of {total} must-have skills" if total else f"{who} was ranked on the job's keywords and experience")
+                       + f" and scored {round(score)}/100 on the match. Automatic summary from the match data only: the AI reader was unavailable, so the resume was not read in depth.",
+            "strengths": strengths[:5], "gaps": gaps[:5], "risks": risks[:5], "interview_questions": qs[:4]}
+
+
+def _save_rules(m: db.Match, cand: db.Candidate) -> bool:
+    """Keep the automatic summary on the match unless a real AI report is already there. ai_hash stays empty, so the
+    match still counts as waiting for its AI report."""
+    if m.ai_report and (m.ai_report.get("source") != "rules") and m.ai_hash:
+        return False
+    m.ai_report, m.ai_score, m.ai_model, m.ai_at, m.ai_hash = _rules_report(m.breakdown or {}, m.score or 0, cand.name), None, "rules", db.now(), ""
+    return True
+
+
 async def _one_report(job: db.Job, cand: db.Candidate, row: db.Match, sem: asyncio.Semaphore) -> tuple[dict | None, str, int, int]:
     async with sem:
         if llm.MOCK:
@@ -456,6 +510,9 @@ async def _one_report(job: db.Job, cand: db.Candidate, row: db.Match, sem: async
             log.warning("match report failed for %s/%s: %s", job.id, cand.id, e)
             _LAST_ERROR["error"] = e
             return None, model, len(prompt), 0
+        bk = out.pop("_backup", None)
+        if bk:
+            model = bk                                   # a backup provider answered: bill and show the model that really did
         try:
             out["score"] = max(0, min(100, int(round(float(out.get("score", 0))))))
         except (TypeError, ValueError):
@@ -499,10 +556,12 @@ async def run_ai_one(org_id: str, job_id: str, cand_id: str) -> dict:
             s.add(db.AIUsage(org_id=org_id, kind="match_report", model=model, input_chars=inp, output_chars=outp))
         if not rep:
             from .api_hiring import ai_unavailable
-            return {"generated": 0, "error": ai_unavailable(_LAST_ERROR.get("error") or RuntimeError("no answer"))}
+            why = ai_unavailable(_LAST_ERROR.get("error") or RuntimeError("no answer"))
+            kept = _save_rules(m, c)
+            return {"generated": 0, "fallback": kept, "error": why}
         m.ai_report, m.ai_score, m.ai_model, m.ai_at = rep, rep.get("score"), model, db.now()
         m.ai_hash = report_hash(j, c.content_hash or content_hash(c))
-        return {"generated": 1, "score": rep.get("score")}
+        return {"generated": 1, "score": rep.get("score"), "model": model}
 
 
 def pending_count(s, org_id: str, job_ids: list[str]) -> dict[str, int]:
@@ -521,15 +580,17 @@ async def run_ai(org_id: str, job_ids: list[str], budget: int) -> dict:
         work = [(j, cands[cid], m) for j, cid, m in work if cid in cands]
         sem = asyncio.Semaphore(4)
         results = await asyncio.gather(*[_one_report(j, c, m, sem) for j, c, m in work])
-        done = 0
+        done = fallback = 0
         for (j, c, m), (rep, model, inp, outp) in zip(work, results):
             if rep:
                 m.ai_report, m.ai_score, m.ai_model, m.ai_at = rep, rep.get("score"), model, db.now()
                 m.ai_hash = report_hash(j, c.content_hash or content_hash(c))
                 done += 1
+            elif _save_rules(m, c):
+                fallback += 1
             if model != "mock":
                 s.add(db.AIUsage(org_id=org_id, kind="match_report", model=model, input_chars=inp, output_chars=outp))
-        out = {"generated": done, "failed": len(work) - done, "skipped_over_budget": max(0, len(todo) - len(work)), "pending_before": len(todo)}
+        out = {"generated": done, "failed": len(work) - done, "fallback": fallback, "skipped_over_budget": max(0, len(todo) - len(work)), "pending_before": len(todo)}
         if out["failed"] and _LAST_ERROR.get("error"):
             from .api_hiring import ai_unavailable
             out["error"] = ai_unavailable(_LAST_ERROR["error"])

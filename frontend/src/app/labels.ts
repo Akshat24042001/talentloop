@@ -4,7 +4,7 @@ export const ACTION_LABEL: Record<string, string> = {
   job_created: 'Job created', job_edited: 'JD edited', job_status: 'Status', job_deleted: 'Job deleted', collaborator_added: 'Access given',
   collaborator_removed: 'Access removed', candidate_added: 'Candidate', candidate_updated: 'Resume updated', candidate_deleted: 'Deleted',
   candidate_added_to_job: 'Added to job', application_received: 'Applied', talent_pool_joined: 'Talent pool', stage_changed: 'Stage',
-  ai_reports: 'AI reports', member_invited: 'Invited', member_joined: 'Joined', email_confirmed: 'Email confirmed', member_updated: 'Role', member_removed: 'Removed',
+  ai_reports: 'AI reports', ai_reports_failed: 'AI report failed', member_invited: 'Invited', member_joined: 'Joined', email_confirmed: 'Email confirmed', member_updated: 'Role', member_removed: 'Removed',
   settings_updated: 'Settings', interview_created: 'Interview', demo_seeded: 'Samples', company_created: 'Workspace',
   application_removed: 'Removed from job', flow_changed: 'Flow changed', template_saved: 'Template saved', round_started: 'Round started',
   round_submitted: 'Round finished', references_added: 'Referees named', reference_received: 'Reference received', referee_reminded: 'Referee reminded', round_decided: 'Decision', top_n_applied: 'Top N passed', selected: 'Selected', rejected: 'Not progressed',

@@ -1,14 +1,14 @@
 // The full fit report for one candidate and one job: scores, how the fit score is built, requirement by
 // requirement comparison, skills, and the AI report. Downloadable as a PDF.
 import { CircleCheck, CircleDashed, CircleMinus, CircleX, Download, Printer, Sparkles, Video } from 'lucide-react'
-import { Badge, Button, Card, CardBody, CardHeader, cn, toast } from '../components/ui'
-import { api } from '../lib/api'
+import { Badge, Button, Card, CardBody, CardHeader, cn } from '../components/ui'
 import { useState } from 'react'
 import { BackLink, ErrorBox, PageHeader, PageSkeleton, ScoreRing, useApi } from '../components/kit'
 import { when } from '../lib/format'
 import { useMe } from '../lib/session'
 import { VERDICT } from './labels'
 import { Distribution, Donut, Radar } from '../components/reportCharts'
+import { WriteReportButton } from './match'
 import { ResumeCheckSummary, type Verification } from './ResumeCheck'
 import { navigate } from '../lib/router'
 
@@ -19,7 +19,7 @@ interface Report {
   candidate: { id: string; ref: string; name: string; headline?: string; email?: string; location?: string; years?: number | null; current_company?: string }
   score: number; knocked_out: string[]; signals: Signal[]; skills: { skill: string; kind: string; status: 'matched' | 'related' | 'missing' }[]
   comparison: Row[]; rank: number | null; ranked: number; ai_score: number | null; ai_at: number | null
-  ai: { verdict?: string; summary?: string; strengths?: string[]; gaps?: string[]; risks?: string[]; interview_questions?: string[] } | null
+  ai: { source?: string; verdict?: string | null; summary?: string; strengths?: string[]; gaps?: string[]; risks?: string[]; interview_questions?: string[] } | null
   application: { ref: string; stage: string } | null
   verification?: Verification | null; shortlist_avg: Record<string, number>; shortlist_size: number; distribution: number[]; verdict_line?: { level: string; tone: 'success' | 'warning' | 'danger'; text: string }
 }
@@ -44,7 +44,6 @@ const SHORT: Record<string, string> = { skills: 'Skills', experience: 'Experienc
 export default function MatchReport({ jobId, candId }: { jobId: string; candId: string }) {
   const me = useMe()
   const { data: d, error, reload } = useApi<Report>(`/api/jobs/${jobId}/match/${candId}`)
-  const [writing, setWriting] = useState(false)
   const [printing, setPrinting] = useState(false)
   // Print the same PDF that Download gives, so both buttons produce one identical, complete report.
   function printPdf() {
@@ -58,11 +57,6 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
       try { f.contentWindow!.focus(); f.contentWindow!.print() } catch { window.open(f.src, '_blank') }
     }
     document.body.appendChild(f)
-  }
-  async function writeAi() {
-    setWriting(true)
-    try { const r = await api<{ score: number | null }>(`/api/jobs/${jobId}/match/${candId}/ai-report`, { method: 'POST' }); toast(r.score != null ? `AI report written. AI score ${r.score}.` : 'AI report written.'); reload() }
-    catch (e: any) { toast(e.message) } finally { setWriting(false) }
   }
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!d) return <PageSkeleton />
@@ -87,7 +81,7 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.score} size={64} label="Fit score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">Fit score</div><div className="text-sm font-semibold">Skills, experience, location, notice</div></div></Card>
         <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.ai_score} size={64} label="AI score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">AI score</div><div className="text-sm font-semibold">{d.ai_score != null ? 'Reads the whole resume' : 'Not run yet'}</div>
-          {me.can.manage_jobs && <Button className="mt-1.5 print:hidden" size="sm" icon={<Sparkles />} loading={writing} onClick={writeAi}>{d.ai_score != null ? 'Rewrite' : 'Write AI report'}</Button>}</div></Card>
+          {me.can.manage_jobs && <span className="mt-1.5 inline-block print:hidden"><WriteReportButton jobRef={jobId} candRef={candId} has={d.ai_score != null} auto={d.ai?.source === 'rules'} onDone={reload} /></span>}</div></Card>
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Shortlist rank</div><div className="mt-1 text-2xl font-semibold tabular">{d.rank ? `#${d.rank}` : '-'}<span className="text-sm font-normal text-slate-500 dark:text-slate-400">{d.rank ? ` of ${d.ranked}` : ' not ranked'}</span></div></Card>
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Verdict</div><div className="mt-1.5">{v ? <Badge tone={v.tone}>{v.label}</Badge> : <span className="text-sm text-slate-500 dark:text-slate-400">After the AI report</span>}</div>
           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Must-haves: <b className="text-slate-800 dark:text-slate-100">{mustHit}/{must.length}</b>{d.application ? <> · <a className="font-medium text-brand-600 hover:underline dark:text-brand-400" href={`/app/jobs/${d.job.ref}?tab=pipeline&app=${d.application.ref}`}>in pipeline</a></> : ''}</div></Card>
@@ -109,7 +103,7 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
 
       {d.ai?.summary && (
         <Card className="mt-5 bg-gradient-to-br from-brand-50/80 to-violet-50/60 p-5 ring-brand-100 dark:from-brand-500/10 dark:to-violet-500/10 dark:ring-brand-500/20">
-          <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-brand-600 dark:text-brand-300" />AI summary{d.ai_at && <span className="font-normal text-slate-500 dark:text-slate-400">· {when(d.ai_at)}</span>}</div>
+          <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-brand-600 dark:text-brand-300" />{d.ai.source === 'rules' ? 'Automatic summary (no AI yet)' : 'AI summary'}{d.ai_at && <span className="font-normal text-slate-500 dark:text-slate-400">· {when(d.ai_at)}</span>}</div>
           <p className="mt-2 leading-relaxed text-slate-700 dark:text-slate-200">{d.ai.summary}</p>
         </Card>)}
 

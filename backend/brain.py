@@ -222,7 +222,7 @@ async def _generate_plan(inp: dict) -> dict:
     async def attempt(model: str) -> dict:
         left = max(3.0, PLAN_DEADLINE_SEC - (loop.time() - t0))
         out = await llm.complete_json(prompts.PLAN_SYSTEM, user, model, temperature=0.3, max_tokens=2600,
-                                      timeout=left, fallbacks=[], fast=True)
+                                      timeout=left, fallbacks=[], fast=True, backup=False)
         plan = normalize_plan(out, inp.get("duration_min"))
         plan["source"], plan["model"] = "ai", model
         return plan
@@ -716,7 +716,7 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list 
     )
     return await asyncio.wait_for(
         llm.complete_json(prompts.TURN_SYSTEM, user, llm.FAST_MODEL, temperature=0.3, max_tokens=300,
-                          timeout=TURN_TIMEOUT),
+                          timeout=TURN_TIMEOUT, backup=False),
         timeout=TURN_TIMEOUT + 1,
     )
 

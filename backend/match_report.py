@@ -159,7 +159,7 @@ def pdf(d: dict, company: str) -> bytes:
         story += [Paragraph("Resume check", st["h2"]), Paragraph(t(f"{vf.get('level')} ({vf.get('score')}/100)."), st["base"])]
         story += [Paragraph(t(f"{x['title']}" + (f": {x['evidence']}" if x.get("evidence") else "")), st["bullet"], bulletText="•") for x in (vf.get("findings") or [])[:5]]
     if ai.get("summary"):
-        story += [Paragraph("AI summary", st["h2"]), Paragraph(t(ai["summary"]), st["base"])]
+        story += [Paragraph("Automatic summary (the AI has not read this resume yet)" if ai.get("source") == "rules" else "AI summary", st["h2"]), Paragraph(t(ai["summary"]), st["base"])]
 
     # The same three charts the page shows: fit profile, must-haves, and where this candidate sits among everyone scored.
     grey, ink, avgc = colors.HexColor("#9aa3b2"), colors.HexColor("#5f6878"), colors.HexColor("#c2410c")

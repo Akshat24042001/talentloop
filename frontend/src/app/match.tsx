@@ -1,7 +1,8 @@
 // Match display shared by the job page, the match center and the candidate page.
 import { ChevronDown, CircleCheck, CircleX, Sparkles } from 'lucide-react'
-import { useState } from 'react'
-import { Badge, cn } from '../components/ui'
+import { useState, type ReactNode } from 'react'
+import { Badge, Button, cn, toast } from '../components/ui'
+import { api } from '../lib/api'
 import { VERDICT } from './labels'
 
 export interface Breakdown {
@@ -12,7 +13,7 @@ export interface Breakdown {
   logistics: { score: number; notice?: string; salary?: string }
   applied?: boolean; knocked_out?: string[]
 }
-export interface AIReport { score: number | null; verdict: string; summary: string; strengths: string[]; gaps: string[]; risks: string[]; interview_questions: string[] }
+export interface AIReport { source?: string; score: number | null; verdict: string | null; summary: string; strengths: string[]; gaps: string[]; risks: string[]; interview_questions: string[] }
 
 export function BreakdownBars({ b }: { b: Breakdown }) {
   const rows: [string, number, string][] = [
@@ -45,17 +46,19 @@ export function SkillChips({ b }: { b: Breakdown }) {
   )
 }
 
-export function ReportView({ r, compact }: { r: AIReport; compact?: boolean }) {
+export function ReportView({ r, compact, retry }: { r: AIReport; compact?: boolean; retry?: ReactNode }) {
   const [open, setOpen] = useState(!compact)
-  const v = VERDICT[r.verdict]
+  const v = r.verdict ? VERDICT[r.verdict] : null
+  const auto = r.source === 'rules'
   return (
     <div className="rounded-xl bg-gradient-to-br from-brand-50/80 to-violet-50/60 p-4 ring-1 ring-brand-100 dark:from-brand-500/10 dark:to-violet-500/10 dark:ring-brand-500/20">
       <button className="flex w-full items-center justify-between gap-2 text-left" onClick={() => setOpen(o => !o)} aria-expanded={open}>
-        <span className="flex flex-wrap items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-brand-600 dark:text-brand-300" />AI match report
+        <span className="flex flex-wrap items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-brand-600 dark:text-brand-300" />{auto ? 'Automatic summary' : 'AI match report'}{auto && <Badge tone="warning">No AI yet</Badge>}
           {v && <Badge tone={v.tone}>{v.label}</Badge>}{r.score != null && <span className="tabular text-slate-500">{r.score}/100</span>}</span>
         <ChevronDown className={cn('size-4 text-slate-500 dark:text-slate-400 transition-transform', open && 'rotate-180')} />
       </button>
       <p className="mt-2 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{r.summary}</p>
+      {retry && <div className="mt-2">{retry}</div>}
       {open && (
         <div className="mt-3 grid gap-4 text-sm sm:grid-cols-2">
           <List title="Strengths" items={r.strengths} tone="text-emerald-700 dark:text-emerald-300" />
@@ -70,4 +73,22 @@ export function ReportView({ r, compact }: { r: AIReport; compact?: boolean }) {
 function List({ title, items, tone }: { title: string; items: string[]; tone: string }) {
   if (!items?.length) return null
   return <div><div className={cn('mb-1 text-xs font-semibold uppercase tracking-wide', tone)}>{title}</div><ul className="space-y-1 text-slate-700 dark:text-slate-200">{items.map((x, i) => <li key={i} className="flex gap-2"><span className="mt-2 size-1 shrink-0 rounded-full bg-current opacity-50" />{x}</li>)}</ul></div>
+}
+
+/** Write (or rewrite) the AI report for one candidate on one job. Always leaves something useful: if every AI provider
+ * refuses, the server keeps an automatic summary from the match data and says why. Returns true when it changed anything. */
+export async function writeAiReport(jobRef: string, candRef: string): Promise<boolean> {
+  try {
+    const r = await api<{ generated: number; score?: number | null; model?: string; error?: string; fallback?: boolean }>(`/api/jobs/${jobRef}/match/${candRef}/ai-report`, { method: 'POST' })
+    if (r.generated) { toast(r.score != null ? `AI report written. AI score ${r.score}.` : 'AI report written.'); return true }
+    toast(`${r.error || 'The AI did not answer.'}${r.fallback ? ' An automatic summary from the match data was saved meanwhile.' : ''}`)
+    return !!r.fallback
+  } catch (e: any) { toast(e.message); return false }
+}
+
+export function WriteReportButton({ jobRef, candRef, has, auto, onDone, size = 'sm', variant }: { jobRef: string; candRef: string; has: boolean; auto?: boolean; onDone: () => void; size?: 'sm' | 'md'; variant?: 'primary' | 'secondary' | 'subtle' | 'ghost' }) {
+  const [busy, setBusy] = useState(false)
+  return <Button size={size} variant={variant || (has && !auto ? 'ghost' : 'subtle')} icon={<Sparkles />} loading={busy}
+    onClick={async () => { setBusy(true); const changed = await writeAiReport(jobRef, candRef); setBusy(false); if (changed) onDone() }}>
+    {has && !auto ? 'Rewrite AI report' : auto ? 'Try the AI again' : 'Write AI report'}</Button>
 }

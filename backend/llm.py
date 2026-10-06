@@ -25,7 +25,7 @@ import re
 import time
 
 import httpx
-from openai import AsyncOpenAI, BadRequestError, NotFoundError
+from openai import AsyncOpenAI, BadRequestError, NotFoundError, RateLimitError
 
 log = logging.getLogger("llm")
 
@@ -374,12 +374,74 @@ class BadAnswer(ValueError):
     """The provider answered, but the answer is empty, cut off or not JSON (as opposed to an HTTP error)."""
 
 
+class QuotaExhausted(RuntimeError):
+    """The provider's daily allowance (for example OpenRouter's free-model limit) is used up."""
+
+
+_BLOCKED: dict[str, tuple[float, str]] = {}      # provider -> (until, why): after a daily-limit refusal, don't keep knocking
+BLOCK_SEC = 300
+LAST_BACKUP: dict = {}                           # the last time a backup provider answered (shown to the platform admin)
+
+
+def _daily_limit(e: Exception) -> bool:
+    m = str(e).lower()
+    return "per-day" in m or "per day" in m or "daily" in m or ("quota" in m and "exceed" in m)
+
+
+def _blocked(pid: str) -> str:
+    until, why = _BLOCKED.get(pid, (0.0, ""))
+    return why if until > time.time() else ""
+
+
+def backups_on() -> bool:
+    return (os.getenv("LLM_BACKUP") or "on").strip().lower() not in ("off", "0", "false", "no")
+
+
+def _backup_targets(model: str, role_hint: str = "") -> list[tuple[str, str]]:
+    """Other providers whose key is set, each with its suggested model for this kind of work: used only when the main
+    provider fails a one-off job (never a live interview turn). Turn off with LLM_BACKUP=off."""
+    main = provider_of(model)
+    role = role_hint or ("fast" if model in FAST_CHAIN else "smart")
+    out = []
+    for pid in ("anthropic", "openai", "gemini", "xai", "openrouter", "custom"):
+        if pid == main or not available(pid) or _blocked(pid):
+            continue
+        ms = SUGGEST.get(pid, {}).get(role) or []
+        if ms:
+            out.append((pid, ms[0]))
+    return out
+
+
 async def complete_json(system: str, user: str, model: str, temperature: float = 0.2,
                         max_tokens: int = 1500, timeout: float = 60.0, fallbacks: list[str] | None = None,
-                        fast: bool = False) -> dict:
+                        fast: bool = False, backup: bool = True) -> dict:
     """fallbacks: models to try if `model` fails (None = the rest of its chain, [] = none).
-    fast: ask for low/hidden reasoning and the highest-throughput provider (plans, live turns)."""
-    pid = provider_of(model)
+    fast: ask for low/hidden reasoning and the highest-throughput provider (plans, live turns).
+    backup: when the main provider fails, try another configured provider (not for live interview turns)."""
+    try:
+        return await _complete_json(system, user, model, temperature, max_tokens, timeout, fallbacks, fast)
+    except Exception as first:
+        if not backup or not backups_on() or MOCK:
+            raise
+        for pid, m in _backup_targets(model):
+            try:
+                out = await _complete_json(system, user, m, temperature, max_tokens, timeout, [], fast, pid=pid)
+            except Exception as e:
+                log.warning("backup %s %s failed too: %s", pid, m, e)
+                continue
+            LAST_BACKUP.update(provider=pid, model=m, at=time.time(), because=str(first)[:200])
+            log.warning("AI backup used: %s %s answered after %s %s failed (%s)", pid, m, provider_of(model), model, str(first)[:120])
+            out.setdefault("_backup", f"{pid}:{m}")
+            return out
+        raise first
+
+
+async def _complete_json(system: str, user: str, model: str, temperature: float = 0.2,
+                         max_tokens: int = 1500, timeout: float = 60.0, fallbacks: list[str] | None = None,
+                         fast: bool = False, pid: str | None = None) -> dict:
+    pid = pid or provider_of(model)
+    if (why := _blocked(pid)):
+        raise QuotaExhausted(why)
     chain = [model] + ([m for m in fallbacks if m != model] if fallbacks is not None else [m for m in _chain_of(model) if m != model])
     if PROVIDERS[pid]["kind"] == "anthropic":
         err = None
@@ -413,10 +475,21 @@ async def complete_json(system: str, user: str, model: str, temperature: float =
         except BadAnswer as e:                     # an answer, but unusable: OpenRouter won't fall back by itself
             err = e
             log.warning("%s", e)
+        except RateLimitError as e:
+            if _daily_limit(e):                    # every model of this account shares the limit: don't try them all
+                _BLOCKED[pid] = (time.time() + BLOCK_SEC, f"OpenRouter's daily free-model limit is used up ({str(e)[:100]})")
+                log.warning("openrouter daily limit reached: %s", e)
+                raise QuotaExhausted(_BLOCKED[pid][1]) from e
+            raise
         for m in chain[1:3]:
             k = {**kwargs, "model": m, "extra_body": {x: v for x, v in kwargs.get("extra_body", {}).items() if x != "models"}}
             try:
                 return await _openai_json(pid, k)
+            except RateLimitError as e:
+                if _daily_limit(e):
+                    _BLOCKED[pid] = (time.time() + BLOCK_SEC, f"OpenRouter's daily free-model limit is used up ({str(e)[:100]})")
+                    raise QuotaExhausted(_BLOCKED[pid][1]) from e
+                err = e
             except Exception as e:
                 err = e
                 log.warning("openrouter %s failed: %s", m, e)
