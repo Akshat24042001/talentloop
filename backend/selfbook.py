@@ -14,7 +14,7 @@ from .scheduling import AI_STEP, ics
 EARLY_SEC = 10 * 60          # the interview opens this long before the booked time
 CUTOFF_SEC = 30 * 60         # the time can't be changed this close to it
 CHANGES = 3
-DAY_FROM, DAY_TO = 8, 22     # company hours offered to the candidate
+DAY_FROM, DAY_TO = 9, 20     # defaults; the company sets its own in Settings > Hiring > Interview booking hours
 
 
 def _org(rec: dict):
@@ -51,7 +51,10 @@ def can_change(rec: dict) -> tuple[bool, str]:
 
 def slots(rec: dict) -> list[float]:
     """Start times every 30 minutes in company hours, from 30 minutes from now until the link's deadline."""
-    tz = tzfmt.org_tz(_org(rec))
+    org = _org(rec)
+    tz = tzfmt.org_tz(org)
+    bh = ((org.settings or {}).get("booking_hours") if org is not None else None) or {}
+    d_from, d_to, weekdays = int(bh.get("from", DAY_FROM)), int(bh.get("to", DAY_TO)), bh.get("weekdays_only", True) is not False
     now = time.time()
     t = (int(now + CUTOFF_SEC) // AI_STEP + 1) * AI_STEP
     last = min(float(rec.get("expires_at") or now + 7 * 86400), now + 14 * 86400) - _minutes(rec) * 60
@@ -59,7 +62,7 @@ def slots(rec: dict) -> list[float]:
     while t <= last and len(out) < 600:
         lt = tzfmt.local(t, tz)
         h = lt.hour + lt.minute / 60
-        if DAY_FROM <= h and h + _minutes(rec) / 60 <= DAY_TO:
+        if d_from <= h and h + _minutes(rec) / 60 <= d_to and (not weekdays or lt.weekday() < 5):
             out.append(float(t))
         t += AI_STEP
     return out

@@ -140,6 +140,27 @@ from backend.main import _CandidateGate  # noqa: E402
 _CandidateGate.forget(o4["id"])
 check("links made before access codes stop working", TestClient(app).get(f"/api/interviews/{o4['id']}/public").status_code != 200)
 
+# the company decides when candidates can book
+from backend import tzfmt  # noqa: E402
+r = hr.patch("/api/org", json={"settings": {"booking_hours": {"from": 15, "to": 12}}})
+check("booking hours that end before they start are accepted", r.status_code != 400, r.text[:120])
+r = hr.patch("/api/org", json={"settings": {"booking_hours": {"from": 10, "to": 13, "weekdays_only": False}}})
+check("the company's booking hours aren't saved", r.status_code != 200, r.text[:120])
+o5 = hr.post("/api/interviews", json={"plan": plan, "inputs": {}, "expires_hours": 300, "settings": {"candidate_email": "h@gmail.com", "opening": "pick"}}).json()
+k5 = o5["candidate_path"].split("k=")[1]
+c5 = TestClient(app)
+c5.post(f"/api/interviews/{k5}/unlock", json={"code": o5["access_code"]})
+sl = c5.get(f"/api/interviews/{k5}/slots").json()["slots"]
+with db.session() as s_:
+    tz_ = tzfmt.org_tz(s_.query(db.Org).first())
+hrs_ = [tzfmt.local(t, tz_) for t in sl]
+check("the candidate is offered times outside the company's hours", any(not (10 <= h.hour + h.minute / 60 and h.hour + h.minute / 60 + 0.25 <= 13) for h in hrs_), str([h.strftime('%H:%M') for h in hrs_[:6]]))
+check("no times are offered inside the company's hours", len(sl) == 0)
+check("weekends are skipped although the company allows them", not any(h.weekday() >= 5 for h in hrs_))
+hr.patch("/api/org", json={"settings": {"booking_hours": {"from": 9, "to": 20, "weekdays_only": True}}})
+sl2 = c5.get(f"/api/interviews/{k5}/slots").json()["slots"]
+check("weekends are offered although the company says weekdays only", any(tzfmt.local(t, tz_).weekday() >= 5 for t in sl2))
+
 bad = [n for n, f in RES if f]
 assert not bad, f"{len(bad)} access check(s) failed: {bad}"
 print(f"INTERVIEW ACCESS CHECKS PASSED ({len(RES)})")

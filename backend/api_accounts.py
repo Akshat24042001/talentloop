@@ -18,6 +18,8 @@ DEFAULT_SETTINGS = {
     "match_top_n": 5, "ai_reports_per_run": 25,
     # the AI match report may look at the candidate's own links and public professional pages (GitHub, their site, a web search)
     "public_lookup": True,
+    # when candidates may book a standalone AI interview (company time zone): hours of the day and which days
+    "booking_hours": {"from": 9, "to": 20, "weekdays_only": True},
     # A candidate's "best-fit jobs" list only shows open jobs they score at least this on (0-100) and are not screened out of
     "best_fit_min_score": 55,
     "match_weights": {"skills": 45, "experience": 20, "relevance": 20, "location": 10, "logistics": 5},
@@ -455,6 +457,12 @@ async def update_org(req: Request):
                 v = max(0, min(100, int(v or 0)))
             if k == "public_lookup":
                 v = bool(v)
+            if k == "booking_hours":
+                v = v if isinstance(v, dict) else {}
+                a, b = max(0, min(23, int(v.get("from", 9)))), max(1, min(24, int(v.get("to", 20))))
+                if b <= a:
+                    raise HTTPException(400, "Booking hours must end after they start.")
+                v = {"from": a, "to": b, "weekdays_only": bool(v.get("weekdays_only", True))}
             if k == "ai_reports_per_run":
                 v = max(0, min(500, int(v or 0)))
             if k in ("retention_days", "recording_retention_days"):

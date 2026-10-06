@@ -4,6 +4,7 @@ import { Download, Plus, Save, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, toast } from '../components/ui'
 import { Loading, useApi } from '../components/kit'
+import { Stepper } from '../components/pickers'
 import { api } from '../lib/api'
 
 const FIELD_LABEL: Record<string, string> = { phone: 'Phone', location: 'Current city', expected_salary: 'Expected salary', notice_days: 'Notice period',
@@ -20,7 +21,7 @@ export default function HiringSettings() {
     setBusy(true)
     try {
       const r = await api('/api/org', { method: 'PATCH', json: { settings: { faq: faq.filter(x => x.q.trim() && x.a.trim()), application_fields: s!.application_fields, hrone_columns: cols.filter(x => x.header.trim()),
-        recording_retention_days: s!.recording_retention_days || 0, sender_name: s!.sender_name || '' } } })
+        recording_retention_days: s!.recording_retention_days || 0, sender_name: s!.sender_name || '', booking_hours: s!.booking_hours } } })
       setS(r.settings); toast('Settings saved')
     } catch (e: any) { toast(e.message) }
     setBusy(false)
@@ -53,6 +54,13 @@ export default function HiringSettings() {
               <Button variant="ghost" aria-label="Remove column" icon={<Trash2 />} onClick={() => set('hrone_columns', cols.filter((_, j) => j !== i))} /></div>))}
           <div className="flex flex-wrap gap-2 pt-1"><Button size="sm" icon={<Plus />} onClick={() => set('hrone_columns', [...cols, { header: '', field: '' }])}>Add column</Button>
             <Button size="sm" variant="ghost" icon={<Download />} href="/api/exports/hrone.xlsx">Export selected candidates</Button></div>
+        </CardBody></Card>
+
+      <Card><CardHeader title="AI interview booking hours" description="When candidates can book a standalone AI interview (the ones you send from New AI interview with 'The candidate picks a time'). The AI interviewer is always free, so any hour you allow is bookable; times are in your company time zone. Interviews inside a job's hiring flow have their own hours on the step, and human interviews use the slots you add on the step." />
+        <CardBody className="grid gap-4 sm:grid-cols-3">
+          <Field label="Earliest start" htmlFor="bh-f"><Stepper id="bh-f" aria-label="Earliest hour" min={0} max={23} step={1} unit=":00" value={s.booking_hours?.from ?? 9} onChange={v => set('booking_hours', { ...(s.booking_hours || { to: 20, weekdays_only: true }), from: v })} /></Field>
+          <Field label="Latest end" htmlFor="bh-t"><Stepper id="bh-t" aria-label="Latest hour" min={1} max={24} step={1} unit=":00" value={s.booking_hours?.to ?? 20} onChange={v => set('booking_hours', { ...(s.booking_hours || { from: 9, weekdays_only: true }), to: v })} /></Field>
+          <div className="flex items-end"><Switch id="bh-wd" checked={s.booking_hours?.weekdays_only !== false} onChange={v => set('booking_hours', { ...(s.booking_hours || { from: 9, to: 20 }), weekdays_only: v })} label="Weekdays only" /></div>
         </CardBody></Card>
 
       <Card><CardHeader title="Messages and recordings" />
