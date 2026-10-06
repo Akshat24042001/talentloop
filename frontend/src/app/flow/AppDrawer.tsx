@@ -185,8 +185,17 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
   const isCur = d.round_id === r.round.id
   const [open, setOpen] = useState(isCur || (!!res && r.round.type !== 'application'))
   const [score, setScore] = useState<string | null>(null)
+  const [why, setWhy] = useState<string | null>(null)
+  const isAI = r.round.type === 'ai_interview'
+  const done = res && ['submitted', 'on_hold', 'passed', 'failed', 'expired', 'no_show', 'incomplete'].includes(res.status)
   async function act(path: string, msg: string) {
     try { const x = await api(`/api/round-results/${res!.id}/${path}`, { method: 'POST' }); toast(msg); if (x.link) copyText(x.link, `${msg}. New link copied`); onChanged() } catch (e: any) { toast(e.message) }
+  }
+  async function retake() {
+    try {
+      const x = await api<{ attempt: number }>(`/api/round-results/${res!.id}/reset`, { json: { reason: why } })
+      toast(isAI ? `Attempt ${x.attempt} set up: the candidate gets a new link and access code by email` : 'Attempt reset'); setWhy(null); onChanged()
+    } catch (e: any) { toast(e.message) }
   }
   async function saveScore() {
     try { await api(`/api/round-results/${res!.id}/score`, { json: { score: +(score || 0) } }); toast('Score changed'); setScore(null); onChanged() } catch (e: any) { toast(e.message) }
@@ -210,13 +219,24 @@ function RoundBlock({ i, r, d, canEdit, onChanged }: { i: number; r: Detail['rou
           <RoundData type={r.round.type} res={res} data={data} />
           {Object.keys(res.integrity || {}).length > 0 && <Integrity res={res} hasPhoto={!!d.candidate.has_photo} />}
           {data.score_overridden && <p className="text-xs text-slate-500">Score changed from {data.score_overridden.from ?? 'none'} {ago(data.score_overridden.at)}.</p>}
+          {Array.isArray(data.attempts) && data.attempts.length > 0 && <div className="text-xs text-slate-500 dark:text-slate-400">
+            <H>Earlier attempts</H>
+            <ul className="space-y-0.5">{data.attempts.map((x: any, i: number) => <li key={i}>Attempt {i + 1}: {x.score != null ? `score ${Math.round(x.score)}` : x.status}{x.reason ? ` · retake because: ${x.reason}` : ''} · {ago(x.at)}
+              {x.interview_ref && <> · <a className="font-medium text-brand-600 hover:underline dark:text-brand-400" href={`/app/interviews/${x.interview_ref}`}>its interview report</a></>}</li>)}</ul></div>}
+          {why != null && <div className="space-y-2 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 dark:bg-ink-850 dark:ring-ink-700">
+            <label htmlFor={`why-${res.id}`} className="text-sm font-medium">Why does the candidate get another attempt?</label>
+            <Input id={`why-${res.id}`} autoFocus value={why} maxLength={300} placeholder="For example: the call dropped, or a microphone problem" onChange={e => setWhy(e.target.value)} />
+            <p className="text-xs text-slate-500 dark:text-slate-400">A new interview is set up and emailed with a new link and access code. This attempt, its report and recordings are kept and listed here.</p>
+            <div className="flex gap-2"><Button size="sm" variant="primary" disabled={why.trim().length < 5} onClick={retake}>Set up the retake</Button><Button size="sm" variant="ghost" onClick={() => setWhy(null)}>Cancel</Button></div>
+          </div>}
           {canEdit && (
             <div className="flex flex-wrap gap-2 pt-1">
               {res.candidate_link && ['invited', 'in_progress', 'booked', 'expired', 'pending'].includes(res.status) && <LinkActions url={res.candidate_link} label="Candidate link" copied="Candidate link copied" to={d.candidate}
                 subject={`${r.round.name}: ${d.job.title}`} message={`Hi ${d.candidate.name.split(' ')[0]}, here is your link for the ${r.round.name} step of your application for ${d.job.title}:`} />}
-              {['test', 'video_intro', 'role_task', 'practical_task', 'live_task', 'reference_check', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked', 'submitted', 'on_hold'].includes(res.status) &&
+              {['test', 'video_intro', 'role_task', 'practical_task', 'live_task', 'reference_check', 'ai_interview', 'human_interview', 'manager_approval'].includes(r.round.type) && isCur && ['invited', 'in_progress', 'expired', 'pending', 'booked'].includes(res.status) &&
                 <Button size="sm" icon={<RefreshCw />} onClick={() => act('resend', r.round.type === 'manager_approval' ? 'Approval request sent again' : 'Link sent again')}>Resend</Button>}
               {['test', 'video_intro', 'role_task', 'practical_task', 'live_task'].includes(r.round.type) && res.status !== 'invited' && <Button size="sm" icon={<RotateCcw />} onClick={async () => await ask('Let the candidate do this round again? The current attempt is kept for reference.') && act('reset', 'Attempt reset')}>Reset attempt</Button>}
+              {isAI && done && d.permission === 'manage' && why == null && <Button size="sm" icon={<RotateCcw />} onClick={() => setWhy('')}>Allow a retake</Button>}
               {res.score != null || ['submitted', 'on_hold', 'passed', 'failed'].includes(res.status) ? (score == null ? <Button size="sm" variant="ghost" onClick={() => setScore(String(res.score ?? ''))}>Change score</Button>
                 : <span className="flex items-center gap-1.5"><Input aria-label="New score" type="number" min={0} max={100} className="h-8 w-20" value={score} onChange={e => setScore(e.target.value)} /><Button size="sm" variant="primary" onClick={saveScore}>Save</Button><Button size="sm" variant="ghost" onClick={() => setScore(null)}>Cancel</Button></span>) : null}
               {res.manager_link && <LinkActions url={res.manager_link} icon={<Link2 className="size-3.5" />} label={r.round.type === 'human_interview' ? 'Interviewer feedback link' : 'Decision link'}

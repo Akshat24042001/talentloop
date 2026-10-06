@@ -435,6 +435,11 @@ def remind_referee(rrid: str, ref_id: str, req: Request):
         return {"ok": True, "link": link}
 
 
+RESENDABLE = ("invited", "in_progress", "expired", "pending", "booked")     # a link still leads somewhere
+RETAKEABLE = ("test", "video_intro", "role_task", "practical_task", "live_task", "ai_interview")
+RETAKE_DONE = ("submitted", "on_hold", "passed", "failed", "expired", "no_show", "incomplete")
+
+
 @router.post("/api/round-results/{rrid}/resend")
 def resend(rrid: str, req: Request):
     """Send the candidate their link again (a fresh link; the old one stops working) and extend the deadline."""
@@ -442,6 +447,9 @@ def resend(rrid: str, req: Request):
         ctx = ctx_of(req, s)
         rr, a, job = _rr(s, ctx, rrid)
         rnd = flows.round_of(job, rr.round_id) or {"name": rr.round_type, "deadline_days": 3}
+        if rr.status not in RESENDABLE:
+            raise HTTPException(409, "This step is already done, so there is no link to send again."
+                                + (" To let the candidate do it again, use Allow a retake." if rr.round_type in RETAKEABLE else ""))
         if rr.round_type == "manager_approval":
             links = flows.request_manager_approval(s, a, job, rnd, rr)
             return {"link": links[0]}
@@ -457,19 +465,38 @@ def resend(rrid: str, req: Request):
 
 
 @router.post("/api/round-results/{rrid}/reset")
-def reset_attempt(rrid: str, req: Request):
-    """Let the candidate take a test or recording again (HR's call, for example after a technical problem)."""
+async def reset_attempt(rrid: str, req: Request):
+    """Let the candidate take a step again (HR's call, for example after a technical problem). An AI interview retake
+    is HR-only: a new interview with a new link and access code is set up and emailed; the finished attempt, its
+    report and recordings are kept and listed on the round."""
+    body = await req.json() if (req.headers.get("content-length") or "0") != "0" else {}
+    reason = str(body.get("reason") or "").strip()[:300]
     with db.session() as s:
         ctx = ctx_of(req, s)
-        rr, a, job = _rr(s, ctx, rrid)
+        probe = s.get(db.RoundResult, rrid)
+        rr, a, job = _rr(s, ctx, rrid, "manage" if probe is not None and probe.round_type == "ai_interview" else "edit")
         rnd = flows.round_of(job, rr.round_id)
         if not rnd:
             raise HTTPException(400, "This round no longer exists in the flow")
-        old = {"previous_attempt": {k: v for k, v in (rr.data or {}).items() if k not in ("t", "mt")}, "previous_score": rr.score}
+        if rr.round_type not in RETAKEABLE:
+            raise HTTPException(400, "This kind of step can't be retaken.")
+        if rr.round_type == "ai_interview":
+            if rr.status not in RETAKE_DONE:
+                raise HTTPException(409, "The candidate hasn't finished this interview yet; resend the link instead.")
+            if len(reason) < 5:
+                raise HTTPException(400, "Say why the candidate gets another attempt (it's kept with the interview).")
+        d = rr.data or {}
+        prev = {k: v for k, v in d.items() if k not in ("t", "mt", "previous_attempt", "previous_score", "attempts")}
+        if d.get("interview_id"):
+            prev["interview_ref"] = refs.interview_ref(d["interview_id"])
+        attempts = list(d.get("attempts") or []) + [{"score": rr.score, "status": rr.status, "at": time.time(), "by": _actor(ctx),
+                                                     "reason": reason, **{k: prev[k] for k in ("interview_id", "interview_ref") if k in prev}}]
+        old = {"previous_attempt": prev, "previous_score": rr.score, "attempts": attempts[-10:]}
         rr2 = flows.move_to(s, a, job, rnd["id"], _actor(ctx))
         rr2.data = {**(rr2.data or {}), **old}
-        log_activity(s, ctx, "attempt_reset", rnd["name"], job_id=job.id, candidate_id=a.candidate_id)
-        return {"ok": True, "link": flows.invite_link(s, rr2)}
+        flows._log(s, a, job, _actor(ctx), "attempt_reset", f"{rnd['name']}: another attempt" + (f" ({reason})" if reason else ""))
+        log_activity(s, ctx, "attempt_reset", rnd["name"] + (f": {reason}" if reason else ""), job_id=job.id, candidate_id=a.candidate_id)
+        return {"ok": True, "link": flows.invite_link(s, rr2), "attempt": len(attempts) + 1}
 
 
 @router.post("/api/round-results/{rrid}/score")
