@@ -259,7 +259,7 @@ def ai_unavailable(e: Exception) -> str:
         return ("The AI provider is rate-limiting us (free models allow about 20 requests a minute and 50 a day without "
                 "credit). Try again in a minute, or add OpenRouter credit for a higher limit.")
     if "401" in msg or "invalid api key" in msg or "no auth" in msg:
-        return "The AI key was rejected. Check LLM_API_KEY on the server."
+        return "The AI provider rejected the key. Check the provider's API key on the server, or switch provider in Platform admin > AI models."
     if "402" in msg or "credit" in msg:
         return "The AI account is out of credit. Add credit at openrouter.ai."
     return "The AI didn't respond. Try again in a minute."
@@ -271,20 +271,23 @@ AI_WRITE_SYSTEM = """You help a recruiter write a clear, inclusive, specific job
 Use only the facts given; never invent salary, benefits or company facts. Avoid gendered or exclusionary wording."""
 
 
-@router.post("/api/jobs/{job_id}/ai-write")
-async def ai_write(job_id: str, req: Request):
+AI_WRITE_FACTS = ("title", "department", "team", "seniority", "employment_type", "workplace_type", "locations", "must_have_skills",
+                  "nice_to_have_skills", "tools", "experience_min", "experience_max", "industry_experience", "summary", "responsibilities")
+AI_WRITE_KEYS = ("summary", "responsibilities", "first_90_days", "nice_to_have_skills", "day_in_life")
+
+
+async def _ai_write(org_id: str, fields: dict) -> dict:
+    """Draft the free-text parts of a JD from what the recruiter has filled in so far (saved or not)."""
+    f = jd_schema.clean(fields or {})
+    if not str(f.get("title") or "").strip():
+        raise HTTPException(400, "Add a job title first.")
     with db.session() as s:
-        ctx = ctx_of(req, s)
-        job, _ = get_job(s, ctx, job_id, "edit")
-        f = dict(job.fields or {})
-        org = s.get(db.Org, job.org_id)
-        org_id = org.id
-        facts = {k: f.get(k) for k in ("title", "department", "team", "seniority", "employment_type", "must_have_skills", "nice_to_have_skills",
-                                       "tools", "experience_min", "experience_max", "industry_experience", "summary", "responsibilities") if f.get(k)}
-        facts["company"] = org.name
-        facts["about_company"] = org_settings(org).get("about", "")[:600]
+        org = s.get(db.Org, org_id)
+        facts = {k: f.get(k) for k in AI_WRITE_FACTS if f.get(k) not in (None, "", [])}
+        facts["company"] = org.name if org else ""
+        facts["about_company"] = (org_settings(org).get("about", "") if org else "")[:600]
     if llm.MOCK:
-        t = f.get("title", "this role")
+        t = f["title"]
         out = {"summary": f"As our {t}, you'll own important work end to end and help the team ship faster.",
                "responsibilities": [f"Deliver high-quality work as {t}", "Collaborate closely with the team and stakeholders",
                                     "Improve processes and tooling", "Mentor others and share knowledge", "Measure results and iterate"],
@@ -293,12 +296,44 @@ async def ai_write(job_id: str, req: Request):
     else:
         user = json.dumps(facts, ensure_ascii=False)
         try:
-            out = await llm.complete_json(AI_WRITE_SYSTEM, user, llm.SMART_MODEL, temperature=0.4, max_tokens=900)
+            # fast: low, hidden reasoning. A reasoning model given a small budget can spend it all thinking and return
+            # cut-off JSON; 3000 tokens leaves room for the ~400-token answer either way.
+            out = await llm.complete_json(AI_WRITE_SYSTEM, user, llm.SMART_MODEL, temperature=0.4, max_tokens=3000, timeout=90, fast=True)
         except Exception as e:
+            log.warning("JD writing failed: %s", e)
             raise HTTPException(503, ai_unavailable(e))
         with db.session() as s:
             s.add(db.AIUsage(org_id=org_id, kind="jd_write", model=llm.SMART_MODEL, input_chars=len(user), output_chars=len(json.dumps(out))))
-    return jd_schema.clean({k: out.get(k) for k in ("summary", "responsibilities", "first_90_days", "nice_to_have_skills", "day_in_life")})
+    draft = jd_schema.clean({k: (out or {}).get(k) for k in AI_WRITE_KEYS})
+    draft = {k: v for k, v in draft.items() if v not in (None, "", [])}
+    if not draft:
+        raise HTTPException(502, "The AI answered, but not with a usable job description. Try again, or pick another model in Platform admin > AI models.")
+    return draft
+
+
+@router.post("/api/jobs/ai-write")
+async def ai_write_new(req: Request):
+    """Write with AI for a job that isn't saved yet: nothing is created."""
+    body = await req.json()
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "create jobs")
+        org_id = auth.require_org(ctx)
+    return await _ai_write(org_id, body.get("fields") or {})
+
+
+@router.post("/api/jobs/{job_id}/ai-write")
+async def ai_write(job_id: str, req: Request):
+    """Write with AI for a saved job, from the fields on screen (unsaved edits included) over the saved ones."""
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        job, _ = get_job(s, ctx, job_id, "edit")
+        fields, org_id = {**(job.fields or {}), **(body.get("fields") or {})}, job.org_id
+    return await _ai_write(org_id, fields)
 
 
 # ---------------------------------------------------------------------------

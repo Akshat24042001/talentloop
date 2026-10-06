@@ -69,12 +69,18 @@ export default function JobEditor({ id }: { id?: string }) {
     if (!v?.title) { setErr('Add a job title first.'); return }
     setAiBusy(true); setErr('')
     try {
-      let jid = id
-      if (!jid) { jid = (await api('/api/jobs', { json: { fields: v, status: 'draft' } })).ref; history.replaceState(null, '', `/app/jobs/${jid}/edit`) }
-      const out = await api(`/api/jobs/${jid}/ai-write`, { method: 'POST' })
-      setV(o => ({ ...o!, ...Object.fromEntries(Object.entries(out).filter(([k, x]) => !empty(x) && empty(o![k]))) }))
-      toast('Draft written. Review and edit before publishing.')
-      if (!id) navigate(`/app/jobs/${jid}/edit`, { replace: true, keepScroll: true })
+      // The AI works from what is on screen now (unsaved edits included); nothing is saved until you press Save.
+      const out = await api<Record<string, unknown>>(id ? `/api/jobs/${id}/ai-write` : '/api/jobs/ai-write', { json: { fields: v } })
+      const label = (k: string) => (meta?.sections || []).flatMap(x => x.fields).find(f => f.key === k)?.label || k
+      const filled = Object.keys(out).filter(k => !empty(out[k]) && !empty(v[k]))
+      let replace = false
+      if (filled.length) replace = await ask(`Replace what you wrote in ${filled.map(label).join(', ')} with the AI draft? Choose "Keep mine" to fill only the empty fields.`,
+        { title: 'Replace your text?', confirm: 'Replace with AI draft', cancel: 'Keep mine', danger: false })
+      const take = Object.keys(out).filter(k => !empty(out[k]) && (replace || empty(v[k])))
+      if (take.length) {
+        setV(o => ({ ...o!, ...Object.fromEntries(take.map(k => [k, out[k]])) }))
+        toast(`AI wrote ${take.map(label).join(', ')}. Review it, then Save.`)
+      } else toast('Nothing changed: those fields already have your text.')
     } catch (e: any) { setErr(e.message) }
     setAiBusy(false)
   }

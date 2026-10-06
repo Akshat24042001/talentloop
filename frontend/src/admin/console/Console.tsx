@@ -57,6 +57,11 @@ export default function Console({ path }: { path: string }) {
         <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-ink-800 dark:bg-ink-900/90 sm:px-6">
           <button type="button" aria-label="Open menu" className="rounded-lg p-2 lg:hidden" onClick={() => setMenu(true)}><Menu className="size-5" /></button>
           <GlobalSearch />
+          <div className="ml-auto shrink-0">
+            {me.org ? <Button href="/app" icon={<LogOut className="rotate-180" />} title={`Leave the console and use TalentLoop as ${me.org.name}'s ${me.role_label || 'member'}`}>
+                <span className="hidden sm:inline">Exit to {me.org.name}</span><span className="sm:hidden">Exit</span></Button>
+              : <Button href="/admin/companies" title="You aren't in any company. Create one (with yourself as owner) to use the normal app.">No workspace yet</Button>}
+          </div>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{page}</main>
       </div>
