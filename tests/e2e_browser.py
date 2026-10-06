@@ -84,6 +84,11 @@ export const FilesetResolver = { forVisionTasks: async () => ({}) };
 const kp = () => { const y = window.__YAW ?? Math.sin(Date.now() / 400) * 0.6; return [{x: 0.45, y: 0.4}, {x: 0.55, y: 0.4}, {x: 0.5 + y * 0.1, y: 0.5}]; };
 export const FaceDetector = { createFromOptions: async () => ({
   detectForVideo: () => ({ detections: Array.from({length: window.__FACES ?? 1}, () => ({categories: [{score: 0.9}], keypoints: kp()})) }) }) };
+// Object detector stand-in (people anywhere in the room, phones): window.__PERSONS (default: one per face), window.__PHONES.
+export const ObjectDetector = { createFromOptions: async () => ({
+  detectForVideo: () => ({ detections: [
+    ...Array.from({length: window.__PERSONS ?? Math.min(1, window.__FACES ?? 1)}, () => ({categories: [{categoryName: 'person', score: 0.8}]})),
+    ...Array.from({length: window.__PHONES ?? 0}, () => ({categories: [{categoryName: 'cell phone', score: 0.7}]}))] }) }) };
 """
 
 ANSWERS = ["Hi, I'm Rohan. I have three years of backend experience with Spring Boot at ShipKart, building shipment APIs.",
@@ -154,6 +159,14 @@ def wait_question(pg):
     pg.wait_for_function("(t => t.length > 5 && !t.startsWith('Connecting'))(document.getElementById('qText').textContent)", timeout=20000)
 
 
+def scan_room(pg):
+    """The room scan before the start (12 s with the stand-in detector); a no-op when the interview doesn't ask for it."""
+    pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckEars'))", timeout=20000)
+    if pg.locator("#roomBtn").count() and not pg.locator("#ckRoom.ok").count():
+        pg.click("#roomBtn")
+        pg.wait_for_selector("#ckRoom.ok", timeout=25000)
+
+
 def tracks_stopped(pg) -> bool:
     """No camera, microphone or screen track is still live."""
     return pg.evaluate("window.__mediaLive() === 0")
@@ -201,6 +214,11 @@ def main():
                 pg.wait_for_selector("#ckMic.ok", timeout=20000)   # the fake mic plays a beep tone
                 pg.wait_for_selector("#ckFace.ok", timeout=15000)
                 pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckLive'))", timeout=15000)   # head turn
+                pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckEars'))", timeout=15000)   # ear photos (demo: kept for HR)
+                if pg.locator("#roomBtn").count():
+                    assert pg.is_enabled("#startBtn") is False, "start must wait for the room scan"
+                    pg.click("#roomBtn")
+                    pg.wait_for_selector("#ckRoom.ok", timeout=25000)                                     # 12 s scan
                 if share:
                     assert pg.is_enabled("#startBtn") is False, "start must wait for screen sharing"
                     pg.click("#shareBtn")
@@ -389,6 +407,7 @@ def main():
             assert pg5.is_enabled("#startBtn") is False, "a second screen must block the start"
             pg5.evaluate("window.__EXT = false")
             pg5.wait_for_selector("#ckScreen.ok", timeout=10000)
+            scan_room(pg5)
             pg5.wait_for_function("!document.getElementById('startBtn').disabled", timeout=15000)
             pg5.click("#startBtn")
             wait_question(pg5)
@@ -418,6 +437,38 @@ def main():
             hr.wait_for_selector(".dq", timeout=15000)
             assert hr.locator(".moment").count() >= 2
             print("second screen + window switch: warned, then stopped; screen captured:", shots)
+
+            # ---------------------------------------------------------- 6. someone else in the room, a phone: blocked, warned, stopped
+            iid6 = create(c, max_warnings=1, candidate_email="room@example.com")
+            pg6, errs6 = page_for(iid6, ANSWERS, turn_ms=3000)
+            pg6.evaluate("window.__PERSONS = 2")                        # a second person standing back: one face, two people
+            pg6.check("#consent"); pg6.click("#toCheck")
+            pg6.wait_for_selector("#ckFace.bad", timeout=20000)
+            assert "someone else" in pg6.inner_text("#ckFace").lower(), pg6.inner_text("#ckFace")
+            pg6.wait_for_selector("#ckMic.ok", timeout=20000)
+            pg6.click("#roomBtn"); pg6.wait_for_selector("#ckRoom.bad", timeout=25000)       # the room scan finds them too
+            assert pg6.is_enabled("#startBtn") is False, "someone else in the room must block the start"
+            pg6.evaluate("window.__PERSONS = 1")
+            pg6.wait_for_selector("#ckFace.ok", timeout=10000)
+            scan_room(pg6)
+            pg6.wait_for_function("!document.getElementById('startBtn').disabled", timeout=15000)
+            pg6.click("#startBtn"); wait_question(pg6); time.sleep(2)
+            pg6.evaluate("window.__PERSONS = 2")                        # someone walks in during the interview
+            pg6.wait_for_selector("#warnBar:not(.hidden)", timeout=15000)
+            assert "Final warning" in pg6.inner_text("#warnTitle"), pg6.inner_text("#warnTitle")
+            pg6.evaluate("window.__PERSONS = 1"); time.sleep(6)
+            pg6.evaluate("window.__PHONES = 1")                         # then a phone comes out: the interview is stopped
+            pg6.wait_for_selector("#dqOverlay:not(.hidden)", timeout=25000)
+            r6 = wait(lambda: (lambda r: r if r.get("disqualified") else None)(c.get(f"/api/interviews/{iid6}").json()), 30, what="room disqualification")
+            kinds = [w["type"] for w in r6["warnings"]]
+            assert kinds == ["multiple_people", "phone_visible"], kinds
+            ev6 = {e["type"] for e in r6["events"]}
+            assert {"extra_person", "phone_visible", "room_scan_failed", "room_scan_passed", "ear_check_unverified"} <= ev6, ev6
+            shots6 = {i["reason"] for i in r6["images"]}
+            assert {"extra_person", "phone_visible", "vision_room"} <= shots6, shots6
+            if errs6:
+                failures.append(f"room page JS errors: {errs6}")
+            print("someone else in the room / a phone: start blocked, warned, then stopped; photos:", sorted(shots6))
             browser.close()
     finally:
         srv.terminate()

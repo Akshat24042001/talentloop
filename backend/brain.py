@@ -461,9 +461,13 @@ VIOLATION_WHAT = {
     "quick_switches": "kept switching away from the interview screen",
     "left_camera": "stepped out of the camera view",
     "multiple_people": "had someone else in view of the camera",
+    "phone_visible": "had a phone in view of the camera",
+    "earphones": "were wearing earphones or earbuds",
 }
 STAY = {"left_camera": "Please stay in view of the camera until we finish.",
-        "multiple_people": "Please make sure you're alone for the rest of the interview."}
+        "multiple_people": "Please make sure you're alone for the rest of the interview.",
+        "phone_visible": "Please put your phone away, out of reach, for the rest of the interview.",
+        "earphones": "Please take out any earphones or earbuds and use your device's speaker for the rest of the interview."}
 _ORD = {2: "second", 3: "third", 4: "fourth", 5: "fifth"}
 
 
@@ -491,6 +495,8 @@ def reminder_message(plan: dict, kind: str, question: str = "") -> str:
     name = _first_name(plan)
     what = {"left_camera": "I can't see you on camera right now. Please stay in view",
             "multiple_people": "It looks like someone else is in view. Please make sure you're on your own",
+            "phone_visible": "I can see a phone. Please put it away, out of reach",
+            "earphones": "It looks like you're wearing earphones. Please take them out and use your device's speaker",
             "quick_switches": "Please keep this interview screen in front of you"}.get(kind, "Please stay focused on the interview")
     again = f" Let's continue. {question}" if question else ""
     return f"{name}, quick reminder: {what}.{again}"

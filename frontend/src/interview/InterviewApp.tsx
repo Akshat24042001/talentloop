@@ -1,7 +1,6 @@
 import {
   AudioLines, Bot, Captions, CaptionsOff, Check, Eye, Lock, MessageSquareText, Mic, MicOff, Monitor, MonitorUp, PhoneOff,
-  RefreshCw, ScanFace, ScreenShare, ScreenShareOff, ShieldCheck, Sun, TriangleAlert, UserRound, Video, Volume2, WifiOff, X,
-} from 'lucide-react'
+  RefreshCw, ScanFace, ScreenShare, ScreenShareOff, ShieldCheck, Sun, TriangleAlert, UserRound, Video, Volume2, WifiOff, X, Headphones, Scan } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, Logo, Modal, Spinner, Tip, Toaster, TooltipProvider, cn, toast } from '../components/ui'
 import { InterviewEngine, isMobile, type CheckKey, type State } from './engine'
@@ -110,13 +109,14 @@ function Consent({ s }: { s: State }) {
   )
 }
 
-function CheckRow({ id, c, icon }: { id: string; c: State['checks'][CheckKey]; icon: ReactNode }) {
+function CheckRow({ id, c, icon, action }: { id: string; c: State['checks'][CheckKey]; icon: ReactNode; action?: ReactNode }) {
   if (c.hidden) return null
   return (
     <li id={id} className={cn('flex items-center gap-3 rounded-xl px-3.5 py-3 ring-1 transition-colors', c.state || 'pending',
       c.state === 'ok' ? 'bg-emerald-500/[.07] ring-emerald-500/20' : c.state === 'bad' ? 'bg-red-500/10 ring-red-500/25' : 'bg-white/[.03] ring-white/[.07]')}>
       <span className="text-slate-500 dark:text-slate-400 [&_svg]:size-[18px]">{icon}</span>
       <span className={cn('min-w-0 flex-1 text-sm', c.state === 'bad' ? 'text-red-200' : 'text-slate-200')}>{c.text}</span>
+      {action}
       {c.state === 'ok' ? <span className="grid size-6 place-items-center rounded-full bg-emerald-500 text-white"><Check className="size-3.5" strokeWidth={3} /></span>
         : c.state === 'bad' ? <span className="grid size-6 place-items-center rounded-full bg-red-500 text-white"><X className="size-3.5" strokeWidth={3} /></span>
         : <Spinner className="size-5 text-slate-500" />}
@@ -158,6 +158,10 @@ function Lobby({ s }: { s: State }) {
             <CheckRow id="ckMic" c={s.checks.mic} icon={<Mic />} />
             <CheckRow id="ckFace" c={s.checks.face} icon={<UserRound />} />
             <CheckRow id="ckLive" c={s.checks.live} icon={<ScanFace />} />
+            <CheckRow id="ckEars" c={s.checks.ears} icon={<Headphones />} action={s.checks.ears.state === 'bad' && <Button size="sm" variant="ghost" className="shrink-0 text-slate-200 hover:bg-white/10" onClick={() => engine.retryEars()}>Check again</Button>} />
+            <CheckRow id="ckRoom" c={s.checks.room} icon={<Scan />} action={s.checks.room.state !== 'ok' && (s.roomScan.running
+              ? <span className="shrink-0 text-xs font-semibold tabular-nums text-amber-300">{s.roomScan.left}s</span>
+              : <Button id="roomBtn" size="sm" variant="ghost" className="shrink-0 text-slate-200 hover:bg-white/10" onClick={() => engine.roomScan()}>{s.checks.room.state === 'bad' ? 'Scan again' : 'Scan the room'}</Button>)} />
             <CheckRow id="ckScreen" c={s.checks.screen} icon={<Monitor />} />
             <CheckRow id="ckShare" c={s.checks.share} icon={<ScreenShare />} />
           </ul>

@@ -3,6 +3,7 @@
 Run:  uvicorn backend.main:app --host 0.0.0.0 --port 8000   (one worker: locks live in process memory)
 """
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -593,6 +594,11 @@ def public_info(iid: str):
             "face_detection": s.get("face_detection", True), "snapshots": s.get("snapshots", True),
             "liveness_check": s.get("liveness_check", True) is not False and s.get("face_detection", True) is not False,
             "identity_check": s.get("identity_check", True) is not False, "has_reference_photo": bool(_reference_photo_key(rec)),
+            # room scan and ear check before the start; AI vision snapshot checks during the call (0 = off)
+            "room_scan": s.get("room_scan", True) is not False and s.get("face_detection", True) is not False,
+            "ear_check": s.get("ear_check", True) is not False and s.get("face_detection", True) is not False,
+            "vision_check_sec": int(s.get("vision_check_sec", 120) or 0) if s.get("face_detection", True) is not False else 0,
+            "vision_available": bool(llm.VISION_MODEL) or llm.MOCK,
             "reconnect_window_sec": reconnect_window(rec), "resuming": resuming,
             "reconnect_seconds_left": max(0, int(deadline - time.time())) if deadline else None,
             "server_time": time.time()}
@@ -708,9 +714,14 @@ def progress(iid: str):
             "max_warnings": rec["settings"].get("max_warnings", 2)}
 
 
-VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor", "fullscreen_exit", "quick_switches", "left_camera", "multiple_people")
+VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor", "fullscreen_exit", "quick_switches", "left_camera", "multiple_people",
+                   "phone_visible", "earphones")
+CAMERA_KINDS = ("left_camera", "multiple_people", "phone_visible", "earphones")   # enforced whenever camera proctoring is on
 VIOLATION_DEBOUNCE_SEC = 4
-SOFT_KINDS = ("left_camera", "multiple_people", "quick_switches")    # reminders, never a reason to stop
+SOFT_KINDS = ("left_camera", "quick_switches")    # reminders, never a reason to stop
+# Someone else in the room, a phone in view or earphones are real warnings that count towards ending the interview
+# (setting strict_room, default on). Off: they are spoken reminders and records for HR, like left_camera.
+ROOM_KINDS = ("multiple_people", "phone_visible", "earphones")
 
 
 @app.post("/api/interviews/{iid}/violation")
@@ -729,13 +740,14 @@ async def violation(iid: str, req: Request):
         rec = get_rec(iid)
         s = rec["settings"]
         st = rec.get("state") or {}
-        enforced = s.get("block_multi_monitor", True) if kind == "multi_monitor" else s.get("enforce_focus", True)
+        enforced = (s.get("block_multi_monitor", True) if kind == "multi_monitor"
+                    else s.get("face_detection", True) is not False if kind in CAMERA_KINDS else s.get("enforce_focus", True))
         if rec.get("disqualified"):
             return {"action": "terminate", "say": "", "warning": len(rec.get("warnings") or []), "already": True}
         if rec["status"] != "in_progress" or not st or st.get("ended") or not enforced:
             return {"action": "ignored", "say": "", "warning": len(rec.get("warnings") or [])}
         now = time.time()
-        if kind in SOFT_KINDS:
+        if kind in SOFT_KINDS or (kind in ROOM_KINDS and s.get("strict_room", True) is False):
             # Camera-based signals can misfire (bad light, a poster): a spoken reminder and a record for HR, but they
             # never count towards stopping the interview.
             rem = rec.setdefault("reminders", [])
@@ -859,6 +871,99 @@ async def snapshot(iid: str, req: Request, reason: str = "periodic", source: str
     if store.S3_ENABLED:
         asyncio.get_running_loop().run_in_executor(None, _quiet_upload, iid, fname)
     return {"ok": True}
+
+
+VISION_CHECK_SYSTEM = """You check webcam photos from a remote job interview for cheating. Look carefully at the whole image,
+including the background, edges, reflections and partly hidden people. Output ONLY JSON:
+{"people": int (how many different real people are visible, counting partial ones; the candidate counts as 1; photos,
+posters and screens showing people do not count), "earphones": "yes" | "no" | "unclear" (any earphone, earbud, AirPod,
+headset or headphone on or in the candidate's ears, including wireless buds; "unclear" if ears are not visible),
+"phone": bool (a mobile phone or tablet is visible), "second_screen": bool (another monitor, laptop or TV with content is
+visible), "note": str (one short sentence about anything suspicious, or "")}"""
+VISION_REASONS = ("room", "ears", "periodic")
+_vision_last: dict[str, float] = {}
+
+
+def _save_snapshot(rec: dict, iid: str, data: bytes, reason: str) -> str | None:
+    if len(rec["images"]) >= MAX_IMAGES:
+        return None
+    fname = f"snap_{len(rec['images']) + 1:03d}_{reason}.jpg"
+    d = store.MEDIA_DIR / iid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / fname).write_bytes(data)
+    rec["images"].append({"file": fname, "at": time.time(), "reason": reason, "bytes": len(data), "source": "camera"})
+    return fname
+
+
+@app.post("/api/interviews/{iid}/vision-check")
+async def vision_check(iid: str, req: Request):
+    """The candidate's page sends 1-3 webcam photos (room scan, both ears, or a periodic in-call photo). They are kept
+    as snapshots for HR, and the AI vision model looks for other people, earphones, phones and second screens.
+    Findings are recorded on the server, whatever the page does with the answer."""
+    body = await req.json()
+    reason = str(body.get("reason") or "")
+    if reason not in VISION_REASONS:
+        raise HTTPException(400, "unknown reason")
+    imgs = []
+    for x in (body.get("images") or [])[:3]:
+        try:
+            b = base64.b64decode(str(x).split(",")[-1], validate=True)
+        except Exception:
+            raise HTTPException(400, "images must be base64 JPEG")
+        if not b.startswith(b"\xff\xd8") or len(b) > 400 * 1024:
+            raise HTTPException(400, "JPEG under 400 KB expected")
+        imgs.append(b)
+    if not imgs:
+        raise HTTPException(400, "no image")
+    now = time.time()
+    key = f"{iid}:{reason}"
+    if now - _vision_last.get(key, 0) < (20 if reason == "periodic" else 3):
+        return {"checked": False, "reason": "too_soon"}
+    _vision_last[key] = now
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if rec["status"] in CLOSED and time.time() - rec.get("last_seen", 0) > 120:
+            raise HTTPException(409, "Interview closed")
+        used = sum(1 for e in rec.get("events", []) if e.get("type") == "vision_check")
+        files = [f for f in (_save_snapshot(rec, iid, b, f"vision_{reason}") for b in imgs) if f]
+        store.save(rec)
+    if store.S3_ENABLED:
+        for f in files:
+            asyncio.get_running_loop().run_in_executor(None, _quiet_upload, iid, f)
+    if llm.MOCK or not llm.VISION_MODEL or used >= 60:
+        async with store.lock(iid):
+            rec = get_rec(iid)
+            server_event(rec, "vision_check", f"{reason}: not checked ({'demo mode' if llm.MOCK else 'no vision model' if not llm.VISION_MODEL else 'limit reached'})")
+            store.save(rec)
+        return {"checked": False, "reason": "mock" if llm.MOCK else "no_vision_model" if not llm.VISION_MODEL else "limit"}
+    what = {"room": "These photos were taken while the candidate turned the camera around the room before the interview.",
+            "ears": "These photos show the candidate's head turned to each side, so both ears should be visible.",
+            "periodic": "This photo was taken during the interview."}[reason]
+    try:
+        out = await llm.complete_json_vision(VISION_CHECK_SYSTEM, what, imgs, max_tokens=600, timeout=45)
+    except Exception as e:
+        log.warning("vision check failed for %s: %s", iid, e)
+        async with store.lock(iid):
+            rec = get_rec(iid)
+            server_event(rec, "vision_check", f"{reason}: AI check failed ({str(e)[:80]})")
+            store.save(rec)
+        return {"checked": False, "reason": "error"}
+    try:
+        people = int(out.get("people") or 0)
+    except (TypeError, ValueError):
+        people = 0
+    ear = str(out.get("earphones") or "unclear").lower()
+    res = {"checked": True, "people": people, "earphones": ear if ear in ("yes", "no", "unclear") else "unclear",
+           "phone": bool(out.get("phone")), "second_screen": bool(out.get("second_screen")), "note": str(out.get("note") or "")[:200]}
+    found = [x for x, hit in (("other people", people > 1), ("earphones", res["earphones"] == "yes"), ("phone", res["phone"]),
+                              ("second screen", res["second_screen"])) if hit]
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        server_event(rec, "vision_check", f"{reason}: " + (", ".join(found) if found else "nothing found") + (f". {res['note']}" if res["note"] else ""))
+        if found:
+            server_event(rec, "vision_flag", f"{reason}: {', '.join(found)}" + (f" ({res['note']})" if res["note"] else ""))
+        store.save(rec)
+    return res
 
 
 def _quiet_upload(iid: str, fname: str):

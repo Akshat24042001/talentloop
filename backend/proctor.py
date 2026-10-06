@@ -37,13 +37,22 @@ LABELS = {
     "turn_error": "Interviewer recovered from an internal error (the candidate heard the question again)",
     "quick_switch": "Looked away from the interview briefly (tab or app)", "looking_away": "Head turned away from the screen for a while",
     "client_silent": "Interview page stopped reporting while the call went on (hidden, blocked or tampered)",
+    "extra_person": "Another person detected by the camera", "phone_visible": "A phone was visible on camera",
+    "second_screen_visible": "Another screen (monitor, laptop or TV) visible on camera",
+    "room_scan_passed": "Room scan: nobody else found", "room_scan_failed": "Room scan: someone else was found",
+    "ear_check_passed": "Ear check: no earphones seen", "ear_check_failed": "Ear check: earphones or earbuds seen",
+    "ear_check_unverified": "Ear check photos taken but not checked by AI (no vision model): review them",
+    "vision_check": "AI photo check", "vision_flag": "AI photo check found a problem",
+    "camera_checks_unavailable": "Camera checks could not start on this browser",
 }
 HIGH = {"integrity_warning", "disqualified", "multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",
         "screen_share_not_monitor", "camera_off", "devtools_suspected", "speaker_voice_while_muted", "virtual_camera",
-        "identity_mismatch", "person_changed", "client_silent"}
+        "identity_mismatch", "person_changed", "client_silent", "extra_person", "phone_visible", "room_scan_failed",
+        "ear_check_failed", "vision_flag", "camera_checks_unavailable"}
 MEDIUM = {"tab_hidden", "window_blur", "fullscreen_exit", "copy", "cut", "shortcut", "multi_monitor", "print_screen",
           "face_missing_start", "ip_changed", "call_dropped", "reconnect_denied", "mute_on", "window_small",
-          "context_menu", "mic_off", "liveness_failed", "answer_pattern", "second_voice", "quick_switch", "looking_away"}
+          "context_menu", "mic_off", "liveness_failed", "answer_pattern", "second_voice", "quick_switch", "looking_away",
+          "second_screen_visible", "ear_check_unverified"}
 PAIRS = {"tab_hidden": "tab_visible", "window_blur": "window_focus", "mute_on": "mute_off",
          "face_missing_start": "face_missing_end", "screen_share_stopped": "screen_share_started",
          "network_offline": "network_online"}
@@ -128,7 +137,7 @@ def summary(rec: dict) -> dict:
     if dq:
         add(10, f"Disqualified: {dq.get('reason', 'rules broken after warnings')}")
     elif warns:
-        add(3 * len(warns), f"Warned by the interviewer {_x(len(warns))} for leaving the interview or a second screen")
+        add(3 * len(warns), f"Warned by the interviewer {_x(len(warns))}: " + ", ".join(sorted({w.get('type', '?').replace('_', ' ') for w in warns})))
 
     away = durations["tab_hidden"]
     if counts.get("tab_hidden", 0) >= 3 or away > 30:
@@ -180,6 +189,23 @@ def summary(rec: dict) -> dict:
         add(3 if counts["second_voice"] >= 2 else 2, f"Possible second voice in the room ({_x(counts['second_voice'])})")
     if counts.get("answer_pattern"):
         add(2, "Several long silences followed by long, fluent answers (possible reading)")
+    # The room: another person, a phone, earphones. Another person alone makes the interview high risk.
+    if counts.get("extra_person"):
+        add(7, f"Another person was detected in the room ({_x(counts['extra_person'])})")
+    if counts.get("phone_visible"):
+        add(4, f"A phone was visible on camera ({_x(counts['phone_visible'])})")
+    if counts.get("second_screen_visible"):
+        add(2, "Another screen was visible on camera")
+    if counts.get("ear_check_failed"):
+        add(4, "Earphones or earbuds were seen at the ear check")
+    if counts.get("ear_check_unverified"):
+        add(1, "Ear photos were not checked by AI: look at them before deciding")
+    if counts.get("room_scan_failed"):
+        add(2, f"Someone else was found during the room scan ({_x(counts['room_scan_failed'])}) before the start")
+    if counts.get("vision_flag"):
+        add(min(9, 3 * counts["vision_flag"]), f"The AI photo check found a problem {_x(counts['vision_flag'])} (people, earphones, phone or screen)")
+    if counts.get("camera_checks_unavailable"):
+        add(3, "Camera checks could not start on the candidate's browser")
     risk = "high" if score >= 7 else "medium" if score >= 3 else "low"
     return {"risk": risk, "risk_points": score, "reasons": reasons, "counts": counts,
             "warnings": warns, "disqualified": dq,

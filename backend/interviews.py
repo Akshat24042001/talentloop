@@ -33,7 +33,12 @@ def settings_from(s: dict | None) -> dict:
            "channel": "phone" if s.get("channel") == "phone" else "web",
            "practice_question": s.get("practice_question", True) is not False,
            "liveness_check": s.get("liveness_check", True) is not False,
-           "identity_check": s.get("identity_check", True) is not False}
+           "identity_check": s.get("identity_check", True) is not False,
+           # someone else in the room, phones, earphones (see main.vision_check and the interview page)
+           "room_scan": s.get("room_scan", True) is not False,
+           "ear_check": s.get("ear_check", True) is not False,
+           "strict_room": s.get("strict_room", True) is not False,
+           "vision_check_sec": 0 if _intish(s.get("vision_check_sec"), 120) <= 0 else max(45, min(900, _intish(s.get("vision_check_sec"), 120)))}
     af = s.get("available_from")
     out["available_from"] = float(af) if isinstance(af, (int, float)) and af > 0 else None
     return out

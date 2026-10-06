@@ -12,7 +12,7 @@ const BLIP_WINDOW_MS = 90000, BLIPS_ALLOWED = 2, FULLSCREEN_GRACE_MS = 10000, OF
 
 export type CheckState = '' | 'ok' | 'bad'
 export interface Check { state: CheckState; text: string; hidden: boolean }
-export type CheckKey = 'cam' | 'mic' | 'face' | 'live' | 'screen' | 'share'
+export type CheckKey = 'cam' | 'mic' | 'face' | 'live' | 'room' | 'ears' | 'screen' | 'share'
 export interface Display { q_id: string; main: string; text: string; kind: 'question' | 'follow_up' | 'rephrase' | 'closing' }
 export interface Line { id: number; role: 'ai' | 'you'; text: string; final: boolean; warn?: boolean }
 export interface PublicInfo {
@@ -21,6 +21,7 @@ export interface PublicInfo {
   available_from?: number | null; not_open_yet: boolean; require_screen_share: boolean; face_detection: boolean
   snapshots: boolean; reconnect_window_sec: number; resuming: boolean; reconnect_seconds_left: number | null
   liveness_check?: boolean; identity_check?: boolean; has_reference_photo?: boolean
+  room_scan?: boolean; ear_check?: boolean; vision_check_sec?: number; vision_available?: boolean
 }
 export interface State {
   step: 'loading' | 'blocked' | 'consent' | 'check' | 'call' | 'done'
@@ -28,6 +29,7 @@ export interface State {
   P: PublicInfo | null
   checks: Record<CheckKey, Check>
   startReady: boolean; checkMsg: string; err2: string; err3: string; shareErr: string
+  roomScan: { running: boolean; left: number }
   starting: boolean
   status: 'connecting' | 'speaking' | 'listening'
   question: Display | null
@@ -62,9 +64,10 @@ export class InterviewEngine {
   state: State = {
     step: 'loading', blocked: '', P: null,
     checks: { cam: { state: '', text: 'Camera', hidden: false }, mic: { state: '', text: 'Microphone', hidden: false },
-      face: { state: '', text: 'Your face is clearly visible', hidden: false }, live: { state: '', text: 'Turn your head slowly to one side, then the other', hidden: true }, screen: { state: '', text: 'Single screen', hidden: true },
+      face: { state: '', text: 'Your face is clearly visible', hidden: false }, live: { state: '', text: 'Turn your head slowly to one side, then the other', hidden: true },
+      room: { state: '', text: 'Show the room: turn your camera slowly all around you', hidden: true }, ears: { state: '', text: 'No earphones or earbuds (checked from the head-turn photos)', hidden: true }, screen: { state: '', text: 'Single screen', hidden: true },
       share: { state: '', text: 'Entire screen shared', hidden: true } },
-    startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false,
+    startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false, roomScan: { running: false, left: 0 },
     status: 'connecting', question: null, lines: [], muted: false, sharing: false, hasVolume: false,
     warnings: 0, maxWarnings: 2, warnBar: null, overlay: { share: false, fs: false, mon: false, dq: false }, offline: false,
     done: { title: 'Thank you', msg: 'Your interview is complete. The HR team will get back to you.', tone: 'ok' },
@@ -89,7 +92,14 @@ export class InterviewEngine {
   private faceDet: any = null
   private faceOk = false
   private micOk = false
-  private faceState = { missing: 0, missingOn: false, multi: 0, away: 0 }
+  private faceState = { missing: 0, missingOn: false, multi: 0, away: 0, people: 0, phone: 0, screen: 0, tick: 0 }
+  private objDet: any = null
+  private camChecksFailed = false
+  private roomDone = false
+  private earsDone = false
+  private earShots: (string | null)[] = [null, null]
+  private earBusy = false
+  private lastObj = { persons: 0, phones: 0, screens: 0 }
   private blips: number[] = []
   private fsTimer = 0
   private camRec: Rec | null = null
@@ -162,7 +172,10 @@ export class InterviewEngine {
     document.title = `Interview · ${P.role || ''}`
     const ch = this.state.checks
     this.set({ checks: { ...ch, screen: { ...ch.screen, hidden: !P.block_multi_monitor }, share: { ...ch.share, hidden: !P.require_screen_share },
-      face: { ...ch.face, hidden: !P.face_detection }, live: { ...ch.live, hidden: !P.liveness_check || P.resuming } } })
+      face: { ...ch.face, hidden: !P.face_detection }, live: { ...ch.live, hidden: !P.liveness_check || P.resuming },
+      room: { ...ch.room, hidden: !P.room_scan || P.resuming }, ears: { ...ch.ears, hidden: !P.ear_check || P.resuming } } })
+    if (!P.room_scan || P.resuming) this.roomDone = true
+    if (!P.ear_check || P.resuming) this.earsDone = true
     if (!P.liveness_check || P.resuming) this.liveDone = true
     if (P.disqualified) return this.closed('Interview closed', 'This interview was stopped because the interview rules were broken after warnings. Please contact HR if you think this is a mistake.')
     if (P.status === 'completed' || P.status === 'scored') return this.closed('Thank you', 'Your interview is complete. The HR team will get back to you.', 'ok')
@@ -255,15 +268,19 @@ export class InterviewEngine {
   private updateStart() {
     if (!this.state.P || this.ended) return
     const P = this.P
-    const faceNeeded = P.face_detection && !!this.faceDet
+    const faceNeeded = P.face_detection && (!!this.faceDet || this.camChecksFailed)
     const monOk = !P.block_multi_monitor || extendedDisplay() !== true
     const shareOk = !P.require_screen_share || !!this.screenStream?.active
     const liveOk = this.liveDone || !faceNeeded
-    const ready = !!this.stream && this.micOk && (!faceNeeded || this.faceOk) && liveOk && monOk && shareOk
+    const roomOk = this.roomDone, earsOk = this.earsDone || !faceNeeded
+    const ready = !!this.stream && this.micOk && !this.camChecksFailed && (!faceNeeded || this.faceOk) && liveOk && roomOk && earsOk && monOk && shareOk
     this.set({ startReady: ready, checkMsg: ready ? 'All set. Join when you are ready.'
       : !this.micOk ? 'Say a few words so we can check your microphone.'
-      : faceNeeded && !this.faceOk ? 'Position your face in the camera, in good light.'
+      : this.camChecksFailed ? 'Camera checks could not start. Open this link in the latest Chrome or Edge.'
+      : faceNeeded && !this.faceOk ? (this.state.checks.face.text.startsWith('Only') ? 'Only you may be in view of the camera.' : 'Position your face in the camera, in good light.')
       : !liveOk ? 'Turn your head slowly to one side, then the other.'
+      : !earsOk ? (this.state.checks.ears.state === 'bad' ? 'Take out earphones or earbuds, then check again.' : 'Checking for earphones...')
+      : !roomOk ? 'Show the room: press "Scan the room" and turn your camera slowly around you.'
       : !monOk ? 'Disconnect the second screen to continue.'
       : !shareOk ? 'Share your entire screen to continue.' : '' })
   }
@@ -297,11 +314,43 @@ export class InterviewEngine {
       this.faceDet = await vision.FaceDetector.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: '/vendor/models/blaze_face_short_range.tflite', delegate: 'CPU' },
         runningMode: 'VIDEO', minDetectionConfidence: 0.5 })
+      // The face model only sees faces near the camera; this one finds whole people anywhere in the room, plus phones
+      // and screens (COCO classes). Measured: it finds a second person standing back that the face model misses.
+      this.objDet = await vision.ObjectDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: '/vendor/models/efficientdet_lite0.tflite', delegate: 'CPU' },
+        runningMode: 'VIDEO', scoreThreshold: 0.35, maxResults: 12 })
     } catch (e: any) {
-      console.warn('face detection unavailable', e); this.ev('face_check_unavailable', e?.message)
-      this.setCheck('face', 'ok', 'Face check unavailable on this browser (skipped)'); this.setCheck('live', '', undefined, true); this.liveDone = true; this.faceDet = null; this.updateStart(); return
+      // Never pass silently: without camera checks the interview can't be proctored, so it can't start.
+      console.warn('camera checks unavailable', e); this.ev('camera_checks_unavailable', e?.message); this.camChecksFailed = true
+      this.setCheck('face', 'bad', 'Camera checks could not start. Open this link in the latest Chrome or Edge on a laptop or desktop.')
+      this.faceDet = null; this.objDet = null; this.updateStart(); return
     }
     this.timers.face = window.setInterval(() => this.faceTick(), 1000)
+  }
+  /** People, phones and other screens in a frame. A second person counts from 0.4 (measured: 0.41 for a person
+   * standing well back), and only when seen on several checks in a row. */
+  private objects(v: HTMLVideoElement) {
+    const r = { persons: 0, phones: 0, screens: 0 }
+    if (!this.objDet) return r
+    try {
+      for (const d of this.objDet.detectForVideo(v, performance.now()).detections) {
+        const c = d.categories?.[0]; if (!c) continue
+        if (c.categoryName === 'person' && c.score >= 0.4) r.persons++
+        else if (c.categoryName === 'cell phone' && c.score >= 0.45) r.phones++
+        else if ((c.categoryName === 'tv' || c.categoryName === 'laptop') && c.score >= 0.5) r.screens++
+      }
+    } catch { /* a dropped frame */ }
+    return r
+  }
+  private frame(width = 512): string | null {
+    const v = this.videos.self?.videoWidth ? this.videos.self : this.videos.preview
+    if (!v || !v.videoWidth) return null
+    const c = document.createElement('canvas'); c.width = width; c.height = Math.round(width * v.videoHeight / v.videoWidth)
+    c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height)
+    return c.toDataURL('image/jpeg', 0.78).split(',')[1] || null
+  }
+  private async visionCheck(reason: 'room' | 'ears' | 'periodic', images: string[]): Promise<any> {
+    try { return await post(`/api/interviews/${this.iid}/vision-check`, { reason, images }) } catch { return { checked: false } }
   }
   private faceTick() {
     const v = this.inCall ? this.videos.self : this.videos.preview
@@ -313,17 +362,21 @@ export class InterviewEngine {
       const sc: number[] = dets.map((d: any) => d.categories?.[0]?.score ?? 1)
       n = sc.filter(x => x >= 0.6).length; strong = sc.filter(x => x >= 0.75).length
     } catch { return }
+    const fs = this.faceState
+    if (this.objDet && ++fs.tick % 2 === 0) this.lastObj = this.objects(v)
+    const persons = this.lastObj.persons
     if (!this.inCall) {
-      const ok = n === 1
-      if (ok !== this.faceOk || (n > 1) !== this.state.checks.face.text.startsWith('Only')) {
+      const ok = n === 1 && persons <= 1
+      const crowd = n > 1 || persons > 1
+      if (ok !== this.faceOk || crowd !== this.state.checks.face.text.startsWith('Only')) {
         this.faceOk = ok
-        this.setCheck('face', ok ? 'ok' : '', n > 1 ? 'Only you should be visible on camera' : 'Your face is clearly visible'); this.updateStart()
+        this.setCheck('face', ok ? 'ok' : crowd ? 'bad' : '', crowd ? 'Only you should be in view: someone else is visible' : 'Your face is clearly visible'); this.updateStart()
         if (ok) this.checkIdentityAtStart()
       }
       if (ok && !this.liveDone) this.liveTick(dets[0]?.keypoints)
+      if (ok && this.liveDone && !this.earsDone && this.state.checks.ears.state !== 'bad') this.earCheck()   // head-turn check off or skipped
       return
     }
-    const fs = this.faceState
     if (n === 0) {
       fs.missing++
       if (fs.missing === 3 && !fs.missingOn) { fs.missingOn = true; this.ev('face_missing_start'); this.snap('no_face') }
@@ -331,8 +384,18 @@ export class InterviewEngine {
     } else { if (fs.missingOn) { fs.missingOn = false; this.ev('face_missing_end') } fs.missing = 0 }
     if (strong >= 2) {
       if (++fs.multi >= 2 && this.once('multi', 30000)) { this.ev('multiple_faces', `${n} faces`); this.snap('multiple_faces') }
-      if (fs.multi === 4 && this.once('multiv', 60000)) this.violation('multiple_people', `${n} faces for 4s`)
     } else fs.multi = 0
+    // Someone else in the room: a second person (whole body, any distance) or a second clear face, on 3 checks in a
+    // row (about 6 seconds). A real warning that counts towards ending the interview (server setting strict_room).
+    if (fs.tick % 2 === 0) {
+      const people = Math.max(persons, strong)
+      fs.people = people >= 2 ? fs.people + 1 : 0
+      if (fs.people === 3 && this.once('people', 30000)) { this.ev('extra_person', `${people} people for 6s`); this.snap('extra_person'); this.violation('multiple_people', `${people} people in view`) }
+      fs.phone = this.lastObj.phones ? fs.phone + 1 : 0
+      if (fs.phone === 2 && this.once('phone', 45000)) { this.ev('phone_visible', 'phone in view for 4s'); this.snap('phone_visible'); this.violation('phone_visible', 'phone in view') }
+      fs.screen = this.lastObj.screens ? fs.screen + 1 : 0
+      if (fs.screen === 3 && this.once('screen2', 120000)) { this.ev('second_screen_visible', 'another screen in view'); this.snap('second_screen') }
+    }
     // Head turned well away (reading a phone or another screen) for several seconds: a flag for review, not a warning.
     const y = n === 1 ? yaw(dets[0]?.keypoints) : null
     fs.away = y != null && Math.abs(y) > 0.55 ? fs.away + 1 : 0
@@ -343,14 +406,78 @@ export class InterviewEngine {
   private liveTick(kp: { x: number; y: number }[] | undefined) {
     if (!this.liveSince) this.liveSince = Date.now()
     const before = this.head.progress()
-    if (this.head.feed(yaw(kp))) {
-      this.liveDone = true; this.ev('liveness_passed'); this.setCheck('live', 'ok', 'Head-turn check done'); this.updateStart(); return
+    const y = yaw(kp)
+    // Head turned well to each side: the ear on that side faces the camera. These two photos go to the ear check.
+    if (y != null && y <= -0.4 && !this.earShots[0]) this.earShots[0] = this.frame(640)
+    if (y != null && y >= 0.4 && !this.earShots[1]) this.earShots[1] = this.frame(640)
+    if (this.head.feed(y)) {
+      this.liveDone = true; this.ev('liveness_passed'); this.setCheck('live', 'ok', 'Head-turn check done'); this.earCheck(); this.updateStart(); return
     }
     if (this.head.progress() > before) this.setCheck('live', '', 'Good. Now turn to the other side')
     if (Date.now() - this.liveSince > 30000) {   // never block a candidate on it: note it for HR and move on
       this.liveDone = true; this.ev('liveness_failed', 'not completed in 30 seconds'); this.snap('liveness')
-      this.setCheck('live', 'ok', 'Head-turn check skipped'); this.updateStart()
+      this.setCheck('live', 'ok', 'Head-turn check skipped'); this.earCheck(); this.updateStart()
     }
+  }
+  /** Before the start: the candidate turns the camera slowly around the room for 12 seconds. Every frame is checked
+   * here for other people; three photos go to the AI photo check and are kept for HR. */
+  async roomScan() {
+    if (this.state.roomScan.running || !this.objDet) return
+    const v = this.videos.preview
+    if (!v || !v.videoWidth) return
+    let most = 0, phone = 0
+    const shots: string[] = []
+    this.setCheck('room', '', 'Turn your camera (or laptop) slowly to the left, behind you, and to the right')
+    for (let left = 12; left > 0; left--) {
+      this.set({ roomScan: { running: true, left } })
+      const o = this.objects(v)
+      most = Math.max(most, o.persons); phone = Math.max(phone, o.phones)
+      if (left === 11 || left === 7 || left === 3) { const f = this.frame(640); if (f) shots.push(f) }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+    this.set({ roomScan: { running: false, left: 0 } })
+    if (most >= 2) {
+      this.ev('room_scan_failed', `${most} people seen`); this.snap('room_scan_failed')
+      this.setCheck('room', 'bad', 'Someone else was seen. You must be alone in the room. Scan again when you are.'); this.roomDone = false; return this.updateStart()
+    }
+    this.setCheck('room', '', 'Checking the room photos...')
+    const r = await this.visionCheck('room', shots)
+    if (r?.checked && r.people > 1) {
+      this.ev('room_scan_failed', `AI photo check: ${r.people} people${r.note ? `. ${r.note}` : ''}`)
+      this.setCheck('room', 'bad', 'Someone else was seen in the room photos. You must be alone. Scan again when you are.'); this.roomDone = false; return this.updateStart()
+    }
+    this.ev('room_scan_passed', r?.checked ? 'AI photo check: nobody else' : `nobody else seen on this device${phone ? '; a phone was in view' : ''}`)
+    this.roomDone = true; this.setCheck('room', 'ok', 'Room checked: nobody else with you'); this.updateStart()
+  }
+  /** Before the start: photos of both ears (from the head turn) checked by the AI for earphones and earbuds. */
+  async earCheck() {
+    if (!this.P.ear_check || this.P.resuming || this.earsDone || this.earBusy) return
+    this.earBusy = true
+    try { await this.earCheckRun() } finally { this.earBusy = false }
+  }
+  private async earCheckRun() {
+    const shots = this.earShots.filter((x): x is string => !!x)
+    if (!shots.length) { const f = this.frame(640); if (f) shots.push(f) }
+    if (!shots.length) return
+    this.setCheck('ears', '', 'Checking for earphones and earbuds...')
+    const r = await this.visionCheck('ears', shots)
+    if (r?.checked && r.earphones === 'yes') {
+      this.ev('ear_check_failed', r.note || 'earphones or earbuds seen')
+      this.setCheck('ears', 'bad', 'Earphones or earbuds seen. Take them out (use your device speaker), then check again.')
+      return this.updateStart()
+    }
+    if (!r?.checked || r.earphones === 'unclear') this.ev('ear_check_unverified', r?.checked ? 'ears not clearly visible in the photos' : `not checked by AI (${r?.reason || 'unavailable'})`)
+    else this.ev('ear_check_passed')
+    this.earsDone = true
+    this.setCheck('ears', 'ok', r?.checked && r.earphones === 'no' ? 'No earphones or earbuds seen' : 'Ear photos saved for the hiring team to review')
+    this.updateStart()
+  }
+  /** After a failed ear check: turn the head again for new ear photos. */
+  retryEars() {
+    this.earShots = [null, null]; this.earsDone = false
+    if (this.P.liveness_check) { this.liveDone = false; this.liveSince = 0; this.head = new HeadTurn(); this.setCheck('live', '', 'Turn your head slowly to one side, then the other') }
+    else this.earCheck()
+    this.setCheck('ears', '', 'Turn your head to each side again for new photos'); this.updateStart()
   }
   private async initMatch() {
     try {
@@ -582,6 +709,11 @@ export class InterviewEngine {
       this.pollProgress(); this.timers.prog = window.setInterval(() => this.pollProgress(), 4000)
       if (this.P.identity_check) this.timers.match = window.setInterval(() => this.matchTick(), 45000)
       if (this.P.identity_check) setTimeout(() => this.matchTick(), 8000)
+      if (this.P.vision_check_sec && this.P.vision_available) {
+        // AI photo checks at unpredictable times (the interval +-25%), first one within the first minute.
+        const next = (first = false) => { this.timers.vision = window.setTimeout(() => { this.visionTick(); next() }, first ? 25000 + Math.random() * 30000 : this.P.vision_check_sec! * 1000 * (0.75 + Math.random() * 0.5)) }
+        next(true)
+      }
       try {
         const an = this.audioCtx!.createAnalyser(); an.fftSize = 2048
         this.audioCtx!.createMediaStreamSource(this.stream!).connect(an)
@@ -628,7 +760,7 @@ export class InterviewEngine {
   private async finish() {
     if (this.ended) return
     this.ended = true; this.inCall = false
-    ;['hb', 'prog', 'snap', 'match', 'voice'].forEach(k => clearInterval(this.timers[k]))
+    ;['hb', 'prog', 'snap', 'match', 'voice', 'vision'].forEach(k => clearInterval(this.timers[k]))
     if (this.away) { clearTimeout(this.away.timer); clearInterval(this.away.shotTimer); this.away = null }
     if (this.faceState.missingOn) { this.faceState.missingOn = false; this.ev('face_missing_end') }
     this.ev('call_end')
@@ -713,14 +845,25 @@ export class InterviewEngine {
       if (this.blips.length > BLIPS_ALLOWED) { this.blips = []; this.snap('quick_switches'); this.violation('quick_switches', `${BLIPS_ALLOWED + 1} quick switches in ${BLIP_WINDOW_MS / 1000}s`) }
     }
   }
+  private async visionTick() {
+    if (!this.inCall || document.hidden) return
+    const f = this.frame(640); if (!f) return
+    const r = await this.visionCheck('periodic', [f])
+    if (!r?.checked || !this.inCall) return
+    if (r.people > 1) { this.ev('extra_person', `AI photo check: ${r.people} people`); this.violation('multiple_people', `AI photo check: ${r.people} people`) }
+    else if (r.earphones === 'yes') this.violation('earphones', r.note || 'AI photo check: earphones')
+    else if (r.phone) { this.ev('phone_visible', 'AI photo check'); this.violation('phone_visible', 'AI photo check: phone') }
+  }
   private async violation(kind: string, detail: string) {
-    if (!this.P.enforce_focus && kind !== 'multi_monitor') return
+    const camera = ['left_camera', 'multiple_people', 'phone_visible', 'earphones'].includes(kind)
+    if (camera ? !this.P.face_detection : !this.P.enforce_focus && kind !== 'multi_monitor') return
+    await this.flushEvents()   // the evidence reaches the server before a warning that may end the interview
     let r: any
     try { r = await post(`/api/interviews/${this.iid}/violation`, { type: kind, detail }) }
     catch (e: any) { this.ev('violation_report_failed', e.message); return }
     if (!r || r.action === 'ignored') return
     if (r.action === 'remind') {   // camera or focus reminder: spoken, recorded for HR, never counts as a warning
-      this.set({ warnBar: { title: 'Reminder', final: false, text: ({ left_camera: 'Please stay in view of your camera.', multiple_people: 'Please make sure you are alone.', quick_switches: 'Please keep the interview screen in front of you.' } as Record<string, string>)[kind] || 'Please stay focused on the interview.' } })
+      this.set({ warnBar: { title: 'Reminder', final: false, text: ({ left_camera: 'Please stay in view of your camera.', multiple_people: 'Please make sure you are alone.', phone_visible: 'Please put your phone away.', earphones: 'Please take out earphones or earbuds.', quick_switches: 'Please keep the interview screen in front of you.' } as Record<string, string>)[kind] || 'Please stay focused on the interview.' } })
       clearTimeout(this.warnTimer); this.warnTimer = window.setTimeout(() => this.set({ warnBar: null }), 7000)
       this.lastWarnSay = norm(r.say); this.addLine('ai', r.say, true, true); this.speak(r.say, false)
       return
@@ -730,10 +873,11 @@ export class InterviewEngine {
     if (r.action === 'terminate') return this.handleTermination(r.say)
     const what = ({ multi_monitor: 'A second screen was connected.', tab_hidden: 'You left the interview tab.', window_blur: 'You switched to another window.',
       quick_switches: 'You kept switching away from the interview.', fullscreen_exit: "You left full screen and didn't come back.",
-      left_camera: 'You stepped out of the camera view.', multiple_people: 'Someone else was in view of the camera.' } as Record<string, string>)[kind] || 'The interview rules were broken.'
+      left_camera: 'You stepped out of the camera view.', multiple_people: 'Someone else was in view of the camera.',
+      phone_visible: 'A phone was in view of the camera.', earphones: 'Earphones or earbuds were seen.' } as Record<string, string>)[kind] || 'The interview rules were broken.'
     const final = r.warning >= max
     this.set({ warnBar: { title: final ? 'Final warning' : `Warning ${r.warning} of ${max}`, final,
-      text: `${what} ${final ? 'If it happens again, the interview ends.' : kind === 'left_camera' || kind === 'multiple_people' ? 'Please stay in view, on your own. This has been noted for the hiring team.' : 'Please stay on this screen. This has been noted for the hiring team.'}` } })
+      text: `${what} ${final ? 'If it happens again, the interview ends.' : ['left_camera', 'multiple_people', 'phone_visible', 'earphones'].includes(kind) ? 'Stay in view, alone, with no phone and no earphones. This has been noted for the hiring team.' : 'Please stay on this screen. This has been noted for the hiring team.'}` } })
     clearTimeout(this.warnTimer); this.warnTimer = window.setTimeout(() => this.set({ warnBar: null }), 9000)
     this.lastWarnSay = norm(r.say)
     this.addLine('ai', r.say, true, true)

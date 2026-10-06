@@ -66,7 +66,7 @@ export default function NewInterview() {
   const [planWarn, setPlanWarn] = useState<string[]>([])
   const [json, setJson] = useState('')
   const [gen, setGen] = useState(false), [err1, setErr1] = useState('')
-  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, snap: true, rejoin: '90', openAt: '', validH: '72' })
+  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, room: true, ears: true, strictRoom: true, vision: '120', snap: true, rejoin: '90', openAt: '', validH: '72' })
   const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
   const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
   const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
@@ -120,7 +120,7 @@ export default function NewInterview() {
     setErr2(''); setCreating(true)
     try {
       const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 90,
-        available_from: st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap,
+        available_from: st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap, room_scan: st.room, ear_check: st.ears, strict_room: st.strictRoom, vision_check_sec: Number(st.vision),
         enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
       const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })
       setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [] })
@@ -229,7 +229,14 @@ export default function NewInterview() {
                 </div>
                 <Switch id="monOn" checked={st.mon} onChange={v => setSt(s => ({ ...s, mon: v }))} label="One screen only" description="A second monitor blocks the start; connecting one mid-interview counts as leaving." />
                 <Switch id="reqShare" checked={st.share} onChange={v => setSt(s => ({ ...s, share: v }))} label="Require entire-screen sharing" description="HR sees the screen, with a screenshot whenever the candidate switches away. Laptops and desktops only." />
-                <Switch id="faceOn" checked={st.face} onChange={v => setSt(s => ({ ...s, face: v }))} label="Face check" description="No face, or more than one person on camera." />
+                <Switch id="faceOn" checked={st.face} onChange={v => setSt(s => ({ ...s, face: v }))} label="Camera checks" description="Face in view; other people anywhere in the room; phones and other screens. Checked every 2 seconds on the candidate's device." />
+                {st.face && <>
+                  <Switch id="roomOn" checked={st.room} onChange={v => setSt(s => ({ ...s, room: v }))} label="Room scan before the start" description="The candidate turns the camera around the room for 12 seconds. Someone else seen blocks the start." />
+                  <Switch id="earsOn" checked={st.ears} onChange={v => setSt(s => ({ ...s, ears: v }))} label="Earphone check before the start" description="Photos of both ears from the head turn, checked by the AI vision model (Platform admin > AI models). Earbuds seen block the start." />
+                  <Switch id="strictRoomOn" checked={st.strictRoom} onChange={v => setSt(s => ({ ...s, strictRoom: v }))} label="Strict: someone else, a phone or earphones count as warnings" description="Off: the interviewer only reminds the candidate; it is still flagged in the report." />
+                  <Field label="AI photo check during the interview" htmlFor="visionEvery"><Select id="visionEvery" value={st.vision} onChange={e => setSt(s => ({ ...s, vision: e.target.value }))}>
+                    <option value="0">Off</option><option value="60">About every minute</option><option value="120">About every 2 minutes</option><option value="300">About every 5 minutes</option></Select></Field>
+                </>}
                 <Switch id="snapOn" checked={st.snap} onChange={v => setSt(s => ({ ...s, snap: v }))} label="Snapshots" description="Camera every minute, and the screen when shared." />
               </Group>
               <Group title="Link" icon={<Link2 />}>
