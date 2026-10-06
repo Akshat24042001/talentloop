@@ -2,7 +2,7 @@
 // Company-wide settings live in Settings (owners and admins only).
 import { Check, Compass, KeyRound, Monitor, Moon, Save, ShieldCheck, Sun } from 'lucide-react'
 import { useState } from 'react'
-import { Badge, Button, Card, CardBody, CardHeader, Field, Input, cn, toast } from '../components/ui'
+import { Badge, Button, Card, CardBody, CardHeader, Field, Input, PasswordInput, cn, toast } from '../components/ui'
 import { Avatar, PageHeader } from '../components/kit'
 import { api } from '../lib/api'
 import { ROLE_CAN, ROLE_HELP } from '../lib/roles'
@@ -64,8 +64,8 @@ export default function Account() {
             <div className="flex justify-end"><Button variant="primary" disabled={!name.trim() || name === me.user.name} onClick={saveName} icon={<Save />}>Save</Button></div>
           </CardBody></Card>
           <Card><CardHeader title="Password" /><CardBody className="space-y-3">
-            <Field label="Current password" htmlFor="a-cur"><Input id="a-cur" type="password" autoComplete="current-password" value={cur} onChange={e => setCur(e.target.value)} /></Field>
-            <Field label="New password" htmlFor="a-new" hint="At least 8 characters. Other devices are signed out."><Input id="a-new" type="password" autoComplete="new-password" value={nw} onChange={e => setNw(e.target.value)} /></Field>
+            <Field label="Current password" htmlFor="a-cur"><PasswordInput id="a-cur" autoComplete="current-password" value={cur} onChange={e => setCur(e.target.value)} /></Field>
+            <Field label="New password" htmlFor="a-new" hint="At least 8 characters. Other devices are signed out."><PasswordInput id="a-new" autoComplete="new-password" value={nw} onChange={e => setNw(e.target.value)} /></Field>
             <div className="flex justify-end"><Button variant="primary" disabled={!cur || nw.length < 8} onClick={savePw} icon={<KeyRound />}>Change password</Button></div>
           </CardBody></Card>
         </div>

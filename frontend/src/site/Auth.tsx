@@ -1,6 +1,6 @@
 import { ArrowRight, Building2, KeyRound, Mail, UserRound } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Alert, Button, Field, Input, Logo } from '../components/ui'
+import { Alert, Button, Field, Input, PasswordInput, Logo } from '../components/ui'
 import { Loading } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
@@ -52,7 +52,7 @@ export function Login() {
       <form onSubmit={submit} className="space-y-4">
         {err && <Alert tone="danger">{err}</Alert>}
         <Field label="Work email" htmlFor="email"><Input id="email" type="email" autoComplete="email" required autoFocus value={email} onChange={e => setEmail(e.target.value)} /></Field>
-        <Field label="Password" htmlFor="password"><Input id="password" type="password" autoComplete="current-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
+        <Field label="Password" htmlFor="password"><PasswordInput id="password" autoComplete="current-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<KeyRound />}>Sign in</Button>
         <p className="text-center text-sm"><a href={`/forgot${email ? `?email=${encodeURIComponent(email)}` : ''}`} className="font-medium text-brand-600 hover:underline dark:text-brand-300">Forgot your password?</a></p>
       </form>
@@ -87,7 +87,7 @@ export function Forgot() {
           {err && <Alert tone="danger">{err}</Alert>}
           <DevMailNote />
           <Field label="6-digit code" htmlFor="f-code"><Input id="f-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
-          <Field label="New password" htmlFor="f-pw" hint="At least 8 characters."><Input id="f-pw" type="password" autoComplete="new-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
+          <Field label="New password" htmlFor="f-pw" hint="At least 8 characters."><PasswordInput id="f-pw" autoComplete="new-password" required value={pw} onChange={e => setPw(e.target.value)} /></Field>
           <Button variant="primary" className="w-full" type="submit" loading={busy} disabled={code.length !== 6 || pw.length < 8} icon={<KeyRound />}>Set new password</Button>
           <button type="button" className="w-full text-center text-sm text-slate-500 hover:underline dark:text-slate-400" onClick={() => { setStep('ask'); setCode('') }}>Send a new code</button>
         </form>}
@@ -115,7 +115,7 @@ export function Signup() {
         <Field label="Your name" htmlFor="name"><Input id="name" required autoComplete="name" value={f.name} onChange={set('name')} /></Field>
         <Field label="Work email" htmlFor="email"><Input id="email" type="email" required autoComplete="email" value={f.email} onChange={set('email')} /></Field>
         <Field label="Company name" htmlFor="company" hint="Used for your careers page address. You can change it later."><Input id="company" required autoComplete="organization" value={f.company} onChange={set('company')} /></Field>
-        <Field label="Password" htmlFor="password" hint="At least 8 characters."><Input id="password" type="password" required minLength={8} autoComplete="new-password" value={f.password} onChange={set('password')} /></Field>
+        <Field label="Password" htmlFor="password" hint="At least 8 characters."><PasswordInput id="password" required minLength={8} autoComplete="new-password" value={f.password} onChange={set('password')} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<ArrowRight />}>Create workspace</Button>
         <p className="text-center text-xs text-slate-500 dark:text-slate-400">Joining an existing company? Ask its admin for an invite link.</p>
       </form>
@@ -144,7 +144,7 @@ export function Invite({ token }: { token: string }) {
         <Field label="Email" htmlFor="email"><div className="relative"><Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input id="email" className="pl-9" value={info.email} disabled /></div></Field>
         {!info.has_account && <Field label="Your name" htmlFor="name"><div className="relative"><UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input id="name" className="pl-9" required value={name} onChange={e => setName(e.target.value)} /></div></Field>}
         <Field label={info.has_account ? 'Your existing password' : 'Choose a password'} htmlFor="password" hint={info.has_account ? 'You already have a TalentLoop account; this company is added to it.' : 'At least 8 characters.'}>
-          <Input id="password" type="password" required minLength={8} value={pw} onChange={e => setPw(e.target.value)} autoComplete={info.has_account ? 'current-password' : 'new-password'} /></Field>
+          <PasswordInput id="password" required minLength={8} value={pw} onChange={e => setPw(e.target.value)} autoComplete={info.has_account ? 'current-password' : 'new-password'} /></Field>
         <Button variant="primary" className="w-full" type="submit" loading={busy} icon={<Building2 />}>Join {info.org}</Button>
       </form>
     </AuthLayout>

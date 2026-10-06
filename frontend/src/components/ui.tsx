@@ -2,7 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as Popover from '@radix-ui/react-popover'
 import * as RTooltip from '@radix-ui/react-tooltip'
 import clsx from 'clsx'
-import { Check, ChevronDown, LoaderCircle, X } from 'lucide-react'
+import { Check, ChevronDown, Eye, EyeOff, LoaderCircle, X } from 'lucide-react'
 import { Children, Fragment, forwardRef, isValidElement, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Tone } from '../lib/format'
 
@@ -63,6 +63,18 @@ export function Badge({ tone = 'neutral', icon, children, className }: { tone?: 
 const FIELD = 'block w-full rounded-xl border-0 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60 dark:bg-ink-850 dark:text-slate-100 dark:ring-ink-700 dark:placeholder:text-slate-500'
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...p }, ref) {
   return <input ref={ref} className={cn(FIELD, className)} {...p} />
+})
+/** A password box with an eye button to show or hide what was typed. */
+export const PasswordInput = forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>>(function PasswordInput({ className, ...p }, ref) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="relative">
+      <input ref={ref} type={show ? 'text' : 'password'} className={cn(FIELD, 'pr-11', className)} {...p} />
+      <button type="button" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show} title={show ? 'Hide password' : 'Show password'}
+        className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-slate-400 dark:hover:bg-ink-800 dark:hover:text-white">
+        {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
+    </div>
+  )
 })
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...p }, ref) {
   return <textarea ref={ref} className={cn(FIELD, 'min-h-28 resize-y leading-relaxed', className)} {...p} />
