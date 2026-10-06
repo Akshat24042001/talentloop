@@ -89,6 +89,14 @@ export const ObjectDetector = { createFromOptions: async () => ({
   detectForVideo: () => ({ detections: [
     ...Array.from({length: window.__PERSONS ?? Math.min(1, window.__FACES ?? 1)}, () => ({categories: [{categoryName: 'person', score: 0.8}]})),
     ...Array.from({length: window.__PHONES ?? 0}, () => ({categories: [{categoryName: 'cell phone', score: 0.7}]}))] }) }) };
+// Face mesh stand-in: blendshapes. By default the jaw moves like someone talking and the eyes look at the screen;
+// window.__STILL_LIPS freezes the mouth (someone else speaking), window.__EYES_DOWN looks into the lap.
+export const FaceLandmarker = { createFromOptions: async () => ({
+  detectForVideo: () => { const t = Date.now();
+    const jaw = window.__STILL_LIPS ? 0.1 : 0.15 + 0.15 * Math.sin(t / 90) + 0.05 * Math.sin(t / 37);
+    const down = window.__EYES_DOWN ? 0.8 : 0.15;
+    return { faceBlendshapes: [{ categories: [['jawOpen', jaw], ['eyeLookDownLeft', down], ['eyeLookDownRight', down], ['eyeBlinkLeft', 0.1], ['eyeBlinkRight', 0.1],
+      ['eyeLookInLeft', 0.05], ['eyeLookOutLeft', 0.05], ['eyeLookInRight', 0.05], ['eyeLookOutRight', 0.05]].map(([categoryName, score]) => ({categoryName, score})) }] } } }) };
 """
 
 ANSWERS = ["Hi, I'm Rohan. I have three years of backend experience with Spring Boot at ShipKart, building shipment APIs.",
@@ -206,6 +214,14 @@ def main():
                 # screen.isExtended (second monitor) is controlled by window.__EXT, like a real display change.
                 init = (f"window.__ANSWERS = {json.dumps(answers)}; window.__TURN_MS = {flags.get('turn_ms', 1200)}; window.__DROP_AFTER = {flags.get('drop_after', 0)}; window.__FACES = 1;"
                         "Object.defineProperty(Screen.prototype, 'isExtended', {get: () => !!window.__EXT, configurable: true});")
+                # window.__VOICE: the microphone hears a voice (a 150 Hz voiced sound); window.__EXTRA_DEVICES: audio devices
+                # added to the device list (earbuds), announced with a devicechange event like the real thing.
+                init += ("const _gf = AnalyserNode.prototype.getFloatTimeDomainData;"
+                         "AnalyserNode.prototype.getFloatTimeDomainData = function (b) { if (!window.__VOICE) return _gf.call(this, b);"
+                         " const r = this.context.sampleRate; for (let i = 0; i < b.length; i++) b[i] = 0.3 * Math.sin(2 * Math.PI * 150 * i / r) + 0.1 * Math.sin(2 * Math.PI * 300 * i / r); };"
+                         "const _ed = MediaDevices.prototype.enumerateDevices;"
+                         "MediaDevices.prototype.enumerateDevices = async function () { const d = window.__EXTRA_DEVICES || []; return [...d, ...(await _ed.call(this)).filter(x => !d.some(y => y.deviceId === x.deviceId && y.kind === x.kind))]; };"
+                         "window.__plug = (d) => { window.__EXTRA_DEVICES = d; navigator.mediaDevices.dispatchEvent(new Event('devicechange')); };")
                 if flags.get("vcam"):      # a virtual camera driver, as OBS installs it
                     init += ("const _l = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'label');"
                              "Object.defineProperty(MediaStreamTrack.prototype, 'label', {get() { return this.kind === 'video' ? 'OBS Virtual Camera' : _l.get.call(this) }});")
@@ -479,6 +495,38 @@ def main():
             if errs6:
                 failures.append(f"room page JS errors: {errs6}")
             print("someone else in the room / a phone: start blocked, warned, then stopped; photos:", sorted(shots6))
+
+            # ---------------------------------------------------------- 7. earbuds, a voice that isn't the candidate's, eyes in the lap
+            iid7 = create(c, max_warnings=2, candidate_email="buds@example.com")
+            pg7, errs7 = page_for(iid7, ANSWERS, turn_ms=3000)
+            pg7.evaluate("window.__EXTRA_DEVICES = [{kind: 'audiooutput', label: 'Default - AirPods Pro (Bluetooth)', deviceId: 'default'}]")
+            pg7.check("#consent"); pg7.click("#toCheck")
+            pg7.wait_for_selector("#ckEars.bad", timeout=20000)
+            assert "AirPods" in pg7.inner_text("#ckEars"), pg7.inner_text("#ckEars")
+            pg7.wait_for_selector("#ckMic.ok", timeout=20000)
+            time.sleep(2)
+            assert pg7.is_enabled("#startBtn") is False, "connected earbuds must block the start"
+            pg7.evaluate("window.__plug([])")                            # they take the earbuds out
+            scan_room(pg7)
+            pg7.wait_for_function("!document.getElementById('startBtn').disabled", timeout=25000)
+            pg7.click("#startBtn"); wait_question(pg7); time.sleep(2)
+            pg7.evaluate("window.__STILL_LIPS = 1; window.__VOICE = 1")  # a voice answers while the lips stay still
+            ev = lambda: {e["type"] for e in c.get(f"/api/interviews/{iid7}").json()["events"]}
+            wait(lambda: "voice_not_lips" in ev(), 30, what="voice without lip movement")
+            pg7.evaluate("window.__STILL_LIPS = 0; window.__VOICE = 0; window.__EYES_DOWN = 1")
+            wait(lambda: "eyes_off_screen" in ev(), 30, what="eyes held in the lap")
+            pg7.evaluate("window.__EYES_DOWN = 0; window.__plug([{kind: 'audiooutput', label: 'Galaxy Buds2 Pro', deviceId: 'g'}])")   # earbuds mid-call
+            pg7.wait_for_selector("#warnBar:not(.hidden)", timeout=20000)
+            r7 = wait(lambda: (lambda r: r if any(w["type"] == "earphones" for w in r.get("warnings") or []) else None)(c.get(f"/api/interviews/{iid7}").json()), 30, what="earbuds warning")
+            e7 = {e["type"] for e in r7["events"]}
+            assert {"earphones_device", "earphones_connected", "voice_not_lips", "eyes_off_screen", "automation_detected"} <= e7, e7
+            reasons = " | ".join(r7["proctoring"]["reasons"])
+            assert "lips were still" in reasons and "connected during the interview" in reasons, reasons
+            shots7 = {i["reason"] for i in r7["images"]}
+            assert {"voice_not_lips", "eyes_off_screen"} <= shots7, shots7
+            if errs7:
+                failures.append(f"behaviour page JS errors: {errs7}")
+            print("earbuds blocked at the start, then warned mid-call; a voice with still lips and eyes in the lap flagged:", r7["proctoring"]["risk"])
             browser.close()
     finally:
         srv.terminate()

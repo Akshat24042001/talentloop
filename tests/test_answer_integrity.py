@@ -37,6 +37,18 @@ check("live signals don't reach the integrity summary", not any("sounded read" i
 check("live signals alone make the risk high", p["risk"] == "high")
 
 
+ev = lambda t: {"type": t, "ts": 1000, "detail": ""}
+r2 = {**rec, "state": {**rec["state"], "signals": []}, "events": [ev("voice_not_lips"), ev("reading_pattern"), ev("eyes_off_screen"),
+                                                                   ev("earphones_connected"), ev("spot_check_failed")]}
+p2 = proctor.summary(r2)
+txt = " | ".join(p2["reasons"])
+for frag in ("lips were still", "as if reading", "below or beside the screen", "connected during the interview", "turn their head"):
+    check(f"'{frag}' isn't in the integrity reasons", frag not in txt, txt)
+check("a voice with still lips plus reading isn't high risk", p2["risk"] != "high")
+p3 = proctor.summary({**rec, "state": {**rec["state"], "signals": []}, "events": [ev("spot_check"), ev("spot_check_passed")]})
+check("passing a spot check adds risk", p3["risk_points"] != 0, str(p3["reasons"]))
+
+
 async def fake(rec_, transcript, model):
     return {"questions": [{"q_id": "q1", "score": 3, "evidence": [{"quote": said[:40], "t": "00:40"}], "rationale": "ok"}],
             "recommendation": "maybe", "summary": "s", "_model": "fake",

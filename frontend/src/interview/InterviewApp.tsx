@@ -177,6 +177,7 @@ function Consent({ s }: { s: State }) {
       : <><b>Stay on this screen.</b> Switching tabs, windows or apps <b>ends the interview immediately</b>.</> },
     { icon: <Monitor />, strict: true, show: P.block_multi_monitor, text: <>Use <b>one screen only</b>. Disconnect any extra monitor first. A second screen counts as leaving the interview.</> },
     { icon: <ScreenShare />, show: P.require_screen_share, text: <>You'll <b>share your entire screen</b> for the whole interview.</> },
+    { icon: <Headphones />, strict: true, show: P.face_detection, text: <><b>No earphones, earbuds or helpers.</b> Your browser checks which audio devices are connected, and the camera checks that your eyes stay on this screen and that the voice answering is yours. Once or twice you'll be asked to turn your head. All of this runs on your device.</> },
     { icon: <RefreshCw />, text: <>If your connection drops, rejoin within <b>{P.reconnect_window_sec} seconds</b>.</> },
   ]
   return (
@@ -487,6 +488,11 @@ function CallStage({ s }: { s: State }) {
         </div>
       </footer>
 
+      {s.spot && (
+        <div id="spotCheck" role="alert" className="fixed left-1/2 top-20 z-40 w-[min(92vw,520px)] -translate-x-1/2 rounded-2xl bg-brand-950/95 p-4 text-center shadow-2xl ring-1 ring-brand-400/40 backdrop-blur">
+          <div className="text-base font-semibold text-white">Quick check: turn your head to one side, then back</div>
+          <div className="mt-1 text-sm text-brand-100/90">Keep talking if you like. This confirms it's really you on camera. {s.spot.left}s</div>
+        </div>)}
       {s.warnBar && (
         <div id="warnBar" role="alert" className={cn('fixed left-1/2 top-[calc(12px+env(safe-area-inset-top))] z-40 flex w-[min(600px,calc(100vw-24px))] -translate-x-1/2 animate-rise gap-3 rounded-2xl p-4 shadow-2xl ring-1',
           s.warnBar.final ? 'bg-red-950/95 ring-red-500/50' : 'bg-[#2a1515]/95 ring-red-500/30')}>

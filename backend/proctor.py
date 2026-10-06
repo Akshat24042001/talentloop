@@ -45,16 +45,26 @@ LABELS = {
     "vision_check": "AI photo check", "vision_flag": "AI photo check found a problem", "access_code_wrong": "Wrong access code entered",
     "access_code_reset": "HR issued a new access code", "time_booked": "Candidate booked the interview time",
     "human_requested": "Candidate asked for an interview with a person instead",
+    "eyes_off_screen": "Eyes held below or beside the screen (phone or notes?)",
+    "reading_pattern": "Eyes moved line by line, as if reading, while answering",
+    "voice_not_lips": "A voice was heard while the candidate's lips stayed still (someone else speaking?)",
+    "earphones_device": "Earphones or a headset were connected at the system check",
+    "earphones_connected": "Earphones or a headset were connected during the interview",
+    "spot_check": "Asked to turn their head (spot check)", "spot_check_passed": "Passed a spot check",
+    "spot_check_failed": "Did not do the spot check (head turn) when asked",
+    "automation_detected": "The browser was controlled by automation software",
+    "behaviour_checks_unavailable": "Eye and lip checks could not run on this browser",
     "camera_checks_unavailable": "Camera checks could not start on this browser",
 }
 HIGH = {"integrity_warning", "disqualified", "multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",
         "screen_share_not_monitor", "camera_off", "devtools_suspected", "speaker_voice_while_muted", "virtual_camera",
         "identity_mismatch", "person_changed", "client_silent", "extra_person", "phone_visible", "room_scan_failed",
-        "ear_check_failed", "vision_flag", "camera_checks_unavailable"}
+        "ear_check_failed", "vision_flag", "camera_checks_unavailable", "reading_pattern", "voice_not_lips",
+        "earphones_connected", "spot_check_failed", "automation_detected"}
 MEDIUM = {"tab_hidden", "window_blur", "fullscreen_exit", "copy", "cut", "shortcut", "multi_monitor", "print_screen",
           "face_missing_start", "ip_changed", "call_dropped", "reconnect_denied", "mute_on", "window_small",
           "context_menu", "mic_off", "liveness_failed", "answer_pattern", "second_voice", "quick_switch", "looking_away",
-          "second_screen_visible", "ear_check_unverified"}
+          "second_screen_visible", "ear_check_unverified", "eyes_off_screen", "earphones_device", "behaviour_checks_unavailable"}
 PAIRS = {"tab_hidden": "tab_visible", "window_blur": "window_focus", "mute_on": "mute_off",
          "face_missing_start": "face_missing_end", "screen_share_stopped": "screen_share_started",
          "network_offline": "network_online"}
@@ -208,6 +218,20 @@ def summary(rec: dict) -> dict:
         add(min(9, 3 * counts["vision_flag"]), f"The AI photo check found a problem {_x(counts['vision_flag'])} (people, earphones, phone or screen)")
     if counts.get("camera_checks_unavailable"):
         add(3, "Camera checks could not start on the candidate's browser")
+    if counts.get("voice_not_lips"):
+        add(min(8, 4 * counts["voice_not_lips"]), f"A voice was heard while the candidate's lips were still ({_x(counts['voice_not_lips'])}): someone else may be answering")
+    if counts.get("reading_pattern"):
+        add(min(6, 3 * counts["reading_pattern"]), f"Eyes moved line by line, as if reading, while answering ({_x(counts['reading_pattern'])})")
+    if counts.get("eyes_off_screen"):
+        add(min(3, counts["eyes_off_screen"]), f"Eyes held below or beside the screen ({_x(counts['eyes_off_screen'])})")
+    if counts.get("earphones_connected"):
+        add(4, f"Earphones or a headset were connected during the interview ({_x(counts['earphones_connected'])})")
+    elif counts.get("earphones_device"):
+        add(1, "Earphones were connected at the system check (disconnected before the start)")
+    if counts.get("spot_check_failed"):
+        add(min(6, 3 * counts["spot_check_failed"]), f"Did not turn their head when asked ({_x(counts['spot_check_failed'])}): check the video")
+    if counts.get("automation_detected"):
+        add(5, "The browser was controlled by automation software")
     sig = ((rec.get("state") or {}).get("signals") or [])
     if sig:                                   # the live interviewer's judgement: a hint for review, never decisive alone
         scripted = sum(1 for x in sig if x.get("kind") == "scripted")

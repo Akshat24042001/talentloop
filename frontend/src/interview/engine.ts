@@ -3,6 +3,7 @@
 // `state` (useSyncExternalStore) and to `onLevels` for the 60 fps audio meters.
 import { post } from '../lib/api'
 import { AnswerTiming, FaceMatch, HeadTurn, VoiceWatch, virtualCameraLabel, yaw } from './signals'
+import { GazeAway, LipSync, ReadingWatch, SpeechLevel, earphonesInUse, gaze, newEarphones, shapesOf, type DeviceInfo } from './behaviour'
 
 const CHUNK_MS = 5000
 // How long the candidate must be away before it counts. Short enough that a glance at another tab or app counts;
@@ -35,6 +36,7 @@ export interface State {
   checks: Record<CheckKey, Check>
   startReady: boolean; checkMsg: string; err2: string; err3: string; shareErr: string
   roomScan: { running: boolean; left: number }
+  spot: { left: number } | null
   starting: boolean
   status: 'connecting' | 'speaking' | 'listening'
   question: Display | null
@@ -73,7 +75,7 @@ export class InterviewEngine {
       face: { state: '', text: 'Your face is clearly visible', hidden: false }, live: { state: '', text: 'Turn your head slowly to one side, then the other', hidden: true },
       room: { state: '', text: 'Show the room: turn your camera slowly all around you', hidden: true }, ears: { state: '', text: 'No earphones or earbuds (checked from the head-turn photos)', hidden: true }, screen: { state: '', text: 'Single screen', hidden: true },
       share: { state: '', text: 'Entire screen shared', hidden: true } },
-    startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false, roomScan: { running: false, left: 0 },
+    startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false, roomScan: { running: false, left: 0 }, spot: null,
     status: 'connecting', question: null, lines: [], muted: false, sharing: false, hasVolume: false,
     warnings: 0, maxWarnings: 2, warnBar: null, overlay: { share: false, fs: false, mon: false, dq: false }, offline: false,
     done: { title: 'Thank you', msg: 'Your interview is complete. The HR team will get back to you.', tone: 'ok' },
@@ -100,6 +102,16 @@ export class InterviewEngine {
   private micOk = false
   private faceState = { missing: 0, missingOn: false, multi: 0, away: 0, people: 0, phone: 0, screen: 0, tick: 0 }
   private objDet: any = null
+  // face mesh (eyes and lips) during the call: reading, eyes off screen, a voice that isn't the candidate's
+  private mesh: any = null
+  private gazeAway = new GazeAway(5, 4)
+  private reading = new ReadingWatch()
+  private lips = new LipSync()
+  private speech: SpeechLevel | null = null
+  private devices: DeviceInfo[] = []
+  private earDevices: string[] = []
+  private lastYaw: number | null = null
+  private spotSeen = false
   private camChecksFailed = false
   private roomDone = false
   private earsDone = false
@@ -171,6 +183,7 @@ export class InterviewEngine {
   // ------------------------------------------------------------ load
   async load() {
     if (!this.iid) return this.set({ step: 'blocked', blocked: 'This interview link is not valid.' })
+    if ((navigator as any).webdriver) this.ev('automation_detected', 'the browser is controlled by automation software')
     const r = await fetch(`/api/interviews/${this.iid}/public`).catch(() => null)
     if (!r || !r.ok) return this.set({ step: 'blocked', blocked: 'This interview link is not valid.' })
     const P: PublicInfo = await r.json()
@@ -239,6 +252,8 @@ export class InterviewEngine {
     this.bindVideos()
     this.stream.getVideoTracks()[0]!.onended = () => { if (this.inCall) this.ev('camera_off') }
     this.stream.getAudioTracks()[0]!.onended = () => { if (this.inCall) this.ev('mic_off') }
+    this.checkAudioDevices()
+    navigator.mediaDevices.addEventListener?.('devicechange', () => this.checkAudioDevices())
     this.audioCtx = new AudioContext()
     this.analyser = this.audioCtx.createAnalyser(); this.analyser.fftSize = 512
     this.audioCtx.createMediaStreamSource(this.stream).connect(this.analyser)
@@ -304,7 +319,7 @@ export class InterviewEngine {
     const monOk = !P.block_multi_monitor || extendedDisplay() !== true
     const shareOk = !P.require_screen_share || !!this.screenStream?.active
     const liveOk = this.liveDone || !faceNeeded
-    const roomOk = this.roomDone, earsOk = this.earsDone || !faceNeeded
+    const roomOk = this.roomDone, earsOk = (this.earsDone || !faceNeeded) && !this.earDevices.length
     const ready = !!this.stream && this.micOk && !this.camChecksFailed && (!faceNeeded || this.faceOk) && liveOk && roomOk && earsOk && monOk && shareOk
     this.set({ startReady: ready, checkMsg: ready ? 'All set. Join when you are ready.'
       : !this.micOk ? 'Say a few words so we can check your microphone.'
@@ -351,6 +366,11 @@ export class InterviewEngine {
       this.objDet = await vision.ObjectDetector.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: '/vendor/models/efficientdet_lite0.tflite', delegate: 'CPU' },
         runningMode: 'VIDEO', scoreThreshold: 0.35, maxResults: 12 })
+      try {
+        this.mesh = await vision.FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: '/vendor/models/face_landmarker.task', delegate: 'CPU' },
+          runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true })
+      } catch (e: any) { this.mesh = null; this.ev('behaviour_checks_unavailable', e?.message) }
     } catch (e: any) {
       // Never pass silently: without camera checks the interview can't be proctored, so it can't start.
       console.warn('camera checks unavailable', e); this.ev('camera_checks_unavailable', e?.message); this.camChecksFailed = true
@@ -430,8 +450,72 @@ export class InterviewEngine {
     }
     // Head turned well away (reading a phone or another screen) for several seconds: a flag for review, not a warning.
     const y = n === 1 ? yaw(dets[0]?.keypoints) : null
+    this.lastYaw = y
     fs.away = y != null && Math.abs(y) > 0.55 ? fs.away + 1 : 0
     if (fs.away === 6 && this.once('look', 45000)) { this.ev('looking_away', `head turned ${y! > 0 ? 'right' : 'left'} for 6s`); this.snap('looking_away') }
+  }
+
+  // ------------------------------------------------------------ earphones by device, eyes and lips, spot checks
+  /** Earphones by their device name: the microphone in use and the default speaker. Before the start this blocks
+   * like the ear photo check; earphones connected during the call count as an earphones warning. */
+  private async checkAudioDevices() {
+    if (!this.state.P || !this.P.ear_check) return
+    let list: DeviceInfo[] = []
+    try { list = (await navigator.mediaDevices.enumerateDevices()).map(d => ({ kind: d.kind, label: d.label, deviceId: d.deviceId })) } catch { return }
+    const mic = this.stream?.getAudioTracks()[0]?.label || ''
+    if (this.inCall) {
+      const added = newEarphones(this.devices, list)
+      if (added.length && this.once('eardev', 60000)) { this.ev('earphones_connected', added.join(', ')); this.violation('earphones', `connected ${added[0]}`) }
+    } else {
+      const found = earphonesInUse(list, mic)
+      if (found.join() !== this.earDevices.join()) {
+        this.earDevices = found
+        if (found.length) { this.ev('earphones_device', found.join(', ')); this.setCheck('ears', 'bad', `Disconnect ${found[0]}: the interview uses your computer's own speaker and microphone.`) }
+        else if (this.state.checks.ears.text.startsWith('Disconnect')) this.setCheck('ears', this.earsDone ? 'ok' : '', this.earsDone ? 'No earphones or earbuds' : 'No earphones or earbuds (checked from the head-turn photos)')
+        this.updateStart()
+      }
+    }
+    this.devices = list
+  }
+  /** About 5 times a second during the call: where the eyes look and whether the lips move with the voice. */
+  private meshTick() {
+    const v = this.videos.self
+    if (!this.mesh || !this.inCall || !v?.videoWidth || document.hidden) return
+    let r: any
+    try { r = this.mesh.detectForVideo(v, performance.now()) } catch { return }
+    const sh = r?.faceBlendshapes?.[0]?.categories
+    const talking = !!this.speech?.speaking() && this.state.status !== 'speaking' && !this.state.muted
+    if (!sh) { this.lips.reset(); this.reading.tick(performance.now(), null, false); return }
+    const s = shapesOf(sh), g = gaze(s), blink = ((s.eyeBlinkLeft ?? 0) + (s.eyeBlinkRight ?? 0)) / 2
+    const away = this.gazeAway.tick(g, blink)
+    if (away && this.once('eyes', 40000)) { this.ev('eyes_off_screen', away === 'down' ? 'eyes down (below the screen) for 4s' : 'eyes to the side for 4s'); this.snap('eyes_off_screen') }
+    const lines = this.reading.tick(performance.now(), blink > 0.5 ? null : g.h, talking)
+    if (lines && this.once('reading', 60000)) { this.ev('reading_pattern', `${lines} line-by-line eye sweeps in 25s while answering`); this.snap('reading_pattern') }
+    if (this.lips.tick(talking, s.jawOpen ?? null) && this.once('lips', 60000)) { this.ev('voice_not_lips', 'a voice spoke for ~3s while the candidate\'s lips stayed still'); this.snap('voice_not_lips') }
+  }
+  /** Twice per interview, at unplanned moments: "turn your head to the side and back". A real person does it in a
+   * second; a replayed video, a face-swap or someone hiding something below the camera struggles. */
+  private scheduleSpotChecks() {
+    if (!this.P.face_detection) return
+    const at = [150 + Math.random() * 150, 480 + Math.random() * 240]
+    at.forEach((sec, i) => { this.timers[`spot${i}`] = window.setTimeout(() => this.spotCheck(), sec * 1000) })
+  }
+  private spotCheck() {
+    if (!this.inCall || this.ended || this.state.spot || document.hidden) return
+    this.spotSeen = false
+    this.ev('spot_check', 'asked to turn head')
+    let left = 12
+    this.set({ spot: { left } })
+    const t = window.setInterval(() => {
+      if (this.lastYaw != null && Math.abs(this.lastYaw) > 0.35) this.spotSeen = true
+      left--
+      if (this.spotSeen || left <= 0 || !this.inCall) {
+        clearInterval(t); this.set({ spot: null })
+        if (!this.inCall) return
+        if (this.spotSeen) this.ev('spot_check_passed')
+        else { this.ev('spot_check_failed', 'did not turn their head within 12s'); this.snap('spot_check_failed') }
+      } else this.set({ spot: { left } })
+    }, 1000)
   }
 
   // ------------------------------------------------------------ liveness (head turn) and face match
@@ -486,6 +570,8 @@ export class InterviewEngine {
     if (!this.P.ear_check || this.P.resuming || this.earsDone || this.earBusy) return
     this.earBusy = true
     try { await this.earCheckRun() } finally { this.earBusy = false }
+    // the photos may look fine while earbuds are connected by Bluetooth: the device name still wins
+    if (this.earDevices.length) this.setCheck('ears', 'bad', `Disconnect ${this.earDevices[0]}: the interview uses your computer's own speaker and microphone.`)
   }
   private async earCheckRun() {
     const shots = this.earShots.filter((x): x is string => !!x)
@@ -623,7 +709,8 @@ export class InterviewEngine {
   private stopCamera() {
     this.stream?.getTracks().forEach(t => { t.onended = null; t.stop() })
     this.stream = null; this.bindVideos()
-    clearInterval(this.timers.mon); clearInterval(this.timers.face)
+    clearInterval(this.timers.mon); clearInterval(this.timers.face); clearInterval(this.timers.mesh)
+    clearTimeout(this.timers.spot0); clearTimeout(this.timers.spot1)
     try { if (this.audioCtx && this.audioCtx.state !== 'closed') this.audioCtx.close() } catch { /* already closed */ }
   }
 
@@ -733,6 +820,13 @@ export class InterviewEngine {
     const vapi = this.vapi = new this.Vapi(cfg.publicKey)
     vapi.on('call-start', () => {
       this.inCall = true; this.setStatus('speaking'); this.ev('call_start')
+      try {
+        const an = this.audioCtx!.createAnalyser(); an.fftSize = 2048
+        this.audioCtx!.createMediaStreamSource(this.stream!).connect(an)
+        this.speech = new SpeechLevel(an, this.audioCtx!.sampleRate)
+      } catch { this.speech = null }
+      if (this.mesh) this.timers.mesh = window.setInterval(() => this.meshTick(), 200)
+      this.scheduleSpotChecks()
       this.startCameraRecording()
       if (this.screenStream?.active && !this.screenRec) this.screenRec = this.startRec(new MediaStream(this.screenStream.getVideoTracks()), 'screen', 700000)
       setTimeout(() => { this.snap('reference'); this.snapScreen('reference') }, 3000)
