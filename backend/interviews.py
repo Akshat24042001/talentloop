@@ -152,3 +152,23 @@ def email_code(rec: dict) -> bool:
                        body=body, template="interview_access_code", candidate_id=rec.get("candidate_id"), application_id=rec.get("application_id"),
                        whatsapp_text=f"Hi {first}, your access code for the {p.get('role') or ''} interview at {p.get('company') or ''} is {code_of(rec)}.")
     return True
+
+
+def apply_accommodation(rec: dict, acc: dict | None) -> bool:
+    """An approved accommodation reaches the AI interview: more time (the same extra-time percent as tests) and the
+    request itself, so the interviewer adapts (slower pace, repeating questions, patience). Only before it starts."""
+    acc = acc or {}
+    if acc.get("status") != "approved" or rec.get("status") != "created" or rec.get("accommodation_applied"):
+        return False
+    try:
+        factor = 1 + max(0.0, min(100.0, float(acc.get("extra_time_pct") or 0))) / 100
+    except (TypeError, ValueError):
+        factor = 1.0
+    plan = rec["plan"]
+    plan["duration_min"] = min(90, int(round(int(plan.get("duration_min") or 15) * factor)))
+    for q in plan.get("questions", []):
+        q["time_budget_sec"] = int(int(q.get("time_budget_sec") or 120) * factor)
+    plan["accommodation"] = str(acc.get("request") or "")[:400]
+    rec["accommodation_applied"] = {"factor": factor, "at": time.time()}
+    rec.setdefault("settings", {})["reconnect_window_sec"] = int(min(900, (rec["settings"].get("reconnect_window_sec") or RECONNECT_WINDOW_SEC) * factor))
+    return True

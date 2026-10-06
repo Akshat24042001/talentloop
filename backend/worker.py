@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 
-from . import brain, db, flows, tzfmt, interviews, ivindex, llm, matching, messages
+from . import brain, db, flows, tzfmt, interviews, ivindex, llm, matching, messages, store
 
 log = logging.getLogger("worker")
 _running = asyncio.Lock()
@@ -48,6 +48,8 @@ async def setup_ai_interview(rr_id: str) -> None:
         app = s.get(db.Application, rr.application_id)
         if rr.status != "setting_up":
             return
+        if interviews.apply_accommodation(rec, app.accommodation):
+            store.save(rec)
         link = flows.invite_link(s, rr)
         rr.status = "invited"
         rr.data = {**(rr.data or {}), "interview_id": rec["id"], "plan_source": plan.get("source")}

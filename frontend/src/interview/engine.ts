@@ -22,7 +22,7 @@ export interface PublicInfo {
   snapshots: boolean; reconnect_window_sec: number; resuming: boolean; reconnect_seconds_left: number | null
   liveness_check?: boolean; identity_check?: boolean; has_reference_photo?: boolean
   room_scan?: boolean; ear_check?: boolean; vision_check_sec?: number; vision_available?: boolean
-  locked?: boolean; opening?: 'pick' | 'now' | 'fixed'; booking?: { starts_at: number; ends_at: number } | null; needs_booking?: boolean
+  human_requested?: boolean; locked?: boolean; opening?: 'pick' | 'now' | 'fixed'; booking?: { starts_at: number; ends_at: number } | null; needs_booking?: boolean
 }
 export interface Slots { opening: string; booking: { starts_at: number; ends_at: number } | null; can_change: boolean; why: string
   changes_left: number; timezone: string; deadline: number; minutes: number; slots: number[] }
@@ -205,6 +205,10 @@ export class InterviewEngine {
     this.set({ codeBusy: true, codeErr: '' })
     try { await post(`/api/interviews/${this.iid}/unlock`, { code }); this.set({ codeBusy: false }); await this.load() }
     catch (e: any) { this.set({ codeBusy: false, codeErr: e?.message || 'That code isn\'t right.' }) }
+  }
+  async requestHuman(note: string) {
+    try { await post(`/api/interviews/${this.iid}/request-human`, { note }); if (this.state.P) this.set({ P: { ...this.state.P, human_requested: true } }); return '' }
+    catch (e: any) { return e?.message || 'Could not send your request.' }
   }
   async resendCode() {
     try { await post(`/api/interviews/${this.iid}/resend-code`, {}); return '' } catch (e: any) { return e?.message || 'Could not send the code.' }

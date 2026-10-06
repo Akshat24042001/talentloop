@@ -1,7 +1,7 @@
 import { CalendarClock, ChartColumn, GraduationCap, HandHelping, Inbox, Library, ScrollText, Briefcase, Building2, ChevronsUpDown, LayoutDashboard, LogOut, Menu, Settings, Shield, Sparkles, UserRound, Users, Video, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Badge, Logo, cn, toast } from '../components/ui'
-import { Avatar } from '../components/kit'
+import { Avatar, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { healthProblems, useHealth } from '../lib/health'
 import { useLocation } from '../lib/router'
@@ -15,9 +15,9 @@ const NAV = [
   { href: '/app/matches', label: 'Match center', icon: Sparkles },
   { href: '/app/interviews', label: 'AI interviews', icon: Video },
   { href: '/app/my-interviews', label: 'My interviews', icon: CalendarClock },
+  { href: '/app/requests', label: 'Candidate requests', icon: HandHelping },
 ]
 const NAV_HIRING = [
-  { href: '/app/requests', label: 'Requests', icon: HandHelping },
   { href: '/app/questions', label: 'Question bank', icon: Library },
   { href: '/app/drives', label: 'Campus drives', icon: GraduationCap },
   { href: '/app/outbox', label: 'Outbox', icon: Inbox },
@@ -29,12 +29,13 @@ const NAV2 = [
   { href: '/app/settings', label: 'Settings', icon: Settings },
 ]
 
-function NavLink({ href, label, icon: Icon, exact, path, onClick }: { href: string; label: string; icon: any; exact?: boolean; path: string; onClick?: () => void }) {
+function NavLink({ href, label, icon: Icon, exact, path, onClick, badge }: { href: string; label: string; icon: any; exact?: boolean; path: string; onClick?: () => void; badge?: number }) {
   const on = exact ? path === href : path === href || path.startsWith(href + '/')
   return (
     <a href={href} data-tour={href.replace("/app/", "nav-").replace("/app", "nav-dashboard")} onClick={onClick} aria-current={on ? "page" : undefined} className={cn('flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors [&_svg]:size-[18px]',
       on ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-ink-800 dark:hover:text-white')}>
-      <Icon />{label}
+      <Icon /><span className="flex-1">{label}</span>
+      {!!badge && <span aria-label={`${badge} waiting`} className="min-w-5 rounded-full bg-amber-500 px-1.5 text-center text-[11px] font-bold leading-5 text-white">{badge > 99 ? '99+' : badge}</span>}
     </a>
   )
 }
@@ -69,13 +70,15 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
   const { me } = useSession()
   const h = useHealth()
   const problems = h ? healthProblems(h) : []
+  const { data: rc } = useApi<{ open: number }>(me?.org ? '/api/requests/count' : null, [path])
+  const reqCount = rc?.open || 0
   return (
     <div className="flex h-full flex-col">
       <a href="/app" className="shrink-0 px-2" onClick={onNav}><Logo /></a>
       {/* Only the middle scrolls: the logo stays at the top and the signed-in user stays at the bottom. */}
       <div className="-mx-2 mt-5 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
       <OrgSwitcher />
-      <nav className="mt-5 space-y-0.5">{NAV.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>
+      <nav className="mt-5 space-y-0.5">{NAV.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} badge={n.href === '/app/requests' ? reqCount : undefined} />)}</nav>
       {me?.can.manage_jobs && <>
         <div className="mx-3 mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Hiring</div>
         <nav className="space-y-0.5">{NAV_HIRING.filter(n => n.href !== '/app/audit' || me.can.manage_team).map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>

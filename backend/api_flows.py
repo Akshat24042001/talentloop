@@ -1147,25 +1147,70 @@ def my_interviews(req: Request):
 # ---------------------------------------------------------------------------
 # accommodations and human-interview requests
 # ---------------------------------------------------------------------------
+WITHDRAWN_SHOWN_SEC = 14 * 86400
+
+
+def _requests(s, ctx) -> list[dict]:
+    """Everything a candidate asked for, on the jobs this person can see: human interviews, accommodations, "none of
+    the times work" and recent withdrawals. `open` items wait for someone; `can_act` says whether this person may
+    decide (HR, or anyone who manages the job); everyone else sees them read-only, with who decides."""
+    vis = auth.visible_job_ids(s, ctx)
+    q = s.query(db.Application, db.Candidate, db.Job).join(db.Candidate, db.Candidate.id == db.Application.candidate_id) \
+        .join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.org_id == ctx.org_id)
+    if vis is not None:
+        q = q.filter(db.Application.job_id.in_(vis or [""]))
+    cutoff = time.time() - WITHDRAWN_SHOWN_SEC
+    rows = q.filter((db.Application.human_requested_at.isnot(None)) | (db.Application.accommodation.isnot(None)) |
+                    ((db.Application.stage == "withdrawn") & (db.Application.updated_at > cutoff))) \
+        .order_by(db.Application.updated_at.desc()).limit(300).all()
+    perms: dict[str, bool] = {}
+    out = []
+    for a, c, j in rows:
+        if j.id not in perms:
+            perms[j.id] = auth.job_permission(s, ctx, j) == "manage"
+        base = {"application_id": a.id, "application_ref": refs.app_ref(a.id), "candidate": c.name, "candidate_ref": refs.cand_ref(c),
+                "job": j.title, "job_ref": refs.job_ref(j), "can_act": perms[j.id], "stage": a.stage}
+        acc = a.accommodation or {}
+        if a.human_requested_at:
+            h = acc.get("human_handled")
+            out.append({**base, "kind": "human", "at": a.human_requested_at, "note": a.human_request_note,
+                        "status": "open" if not h and a.stage != "withdrawn" else ("closed" if not h else ("switched" if h.get("action") == "human" else "kept_ai")),
+                        "handled_at": (h or {}).get("at")})
+        if acc.get("request"):
+            st = acc.get("status", "requested")
+            out.append({**base, "kind": "accommodation", "at": acc.get("requested_at"), "note": acc.get("request"),
+                        "status": "closed" if st == "requested" and a.stage == "withdrawn" else st, "extra_time_pct": acc.get("extra_time_pct"),
+                        "handled_at": acc.get("decided_at"), "hr_note": acc.get("hr_note")})
+        if a.stage == "withdrawn" and (a.updated_at or 0) > cutoff:
+            out.append({**base, "kind": "withdrawn", "at": a.updated_at, "note": "", "status": "info"})
+    for rr, a, c, j in s.query(db.RoundResult, db.Application, db.Candidate, db.Job) \
+            .join(db.Application, db.Application.id == db.RoundResult.application_id).join(db.Candidate, db.Candidate.id == db.Application.candidate_id) \
+            .join(db.Job, db.Job.id == db.RoundResult.job_id).filter(db.RoundResult.org_id == ctx.org_id, db.RoundResult.status == "invited",
+                                                                     db.RoundResult.round_type == "human_interview").limit(2000):
+        tr = (rr.data or {}).get("time_request")
+        if not tr or (vis is not None and j.id not in vis) or a.round_id != rr.round_id:
+            continue
+        if j.id not in perms:
+            perms[j.id] = auth.job_permission(s, ctx, j) == "manage"
+        booked = (rr.data or {}).get("booking") and not rr.data["booking"].get("cancelled_at")
+        out.append({"application_id": a.id, "application_ref": refs.app_ref(a.id), "candidate": c.name, "candidate_ref": refs.cand_ref(c),
+                    "job": j.title, "job_ref": refs.job_ref(j), "can_act": perms[j.id], "stage": a.stage, "kind": "time",
+                    "at": tr.get("at"), "note": tr.get("note"), "status": "closed" if booked or tr.get("resolved_at") else "open"})
+    out.sort(key=lambda r: -(r.get("at") or 0))
+    return out
+
+
 @router.get("/api/requests")
 def candidate_requests(req: Request):
     with db.session() as s:
-        ctx = ctx_of(req, s)
-        auth.require(ctx, auth.MANAGE_JOBS, "see candidate requests")
-        rows = s.query(db.Application, db.Candidate, db.Job).join(db.Candidate, db.Candidate.id == db.Application.candidate_id) \
-            .join(db.Job, db.Job.id == db.Application.job_id).filter(db.Application.org_id == ctx.org_id) \
-            .filter((db.Application.human_requested_at.isnot(None)) | (db.Application.accommodation.isnot(None))).order_by(db.Application.updated_at.desc()).limit(200).all()
-        out = []
-        for a, c, j in rows:
-            acc = a.accommodation or {}
-            if a.human_requested_at and not acc.get("human_handled"):
-                out.append({"kind": "human", "application_id": a.id, "application_ref": refs.app_ref(a.id), "candidate": c.name, "candidate_ref": refs.cand_ref(c), "job": j.title,
-                            "job_ref": refs.job_ref(j), "at": a.human_requested_at, "note": a.human_request_note, "status": "open"})
-            if acc.get("request"):
-                out.append({"kind": "accommodation", "application_id": a.id, "application_ref": refs.app_ref(a.id), "candidate": c.name, "candidate_ref": refs.cand_ref(c), "job": j.title,
-                            "job_ref": refs.job_ref(j), "at": acc.get("requested_at"), "note": acc.get("request"), "status": acc.get("status", "requested"),
-                            "extra_time_pct": acc.get("extra_time_pct")})
-        return out
+        return _requests(s, ctx_of(req, s))
+
+
+@router.get("/api/requests/count")
+def candidate_requests_count(req: Request):
+    """For the sidebar badge: requests waiting for someone who may decide them (or, for others, on their jobs)."""
+    with db.session() as s:
+        return {"open": sum(1 for r in _requests(s, ctx_of(req, s)) if r["status"] in ("open", "requested"))}
 
 
 @router.post("/api/applications/{aid}/accommodation")
@@ -1183,7 +1228,12 @@ async def decide_accommodation(aid: str, req: Request):
         if st == "approved":
             acc["extra_time_pct"] = max(0, min(100, int(body.get("extra_time_pct") or 25)))
         a.accommodation = acc
-        text = (f"Your request has been approved{' with ' + str(acc['extra_time_pct']) + '% extra time on tests' if st == 'approved' and acc.get('extra_time_pct') else ''}."
+        if st == "approved" and a.interview_id:          # an AI interview already set up gets the extra time too
+            from . import interviews as _iv
+            rec = store.load(a.interview_id)
+            if rec and _iv.apply_accommodation(rec, acc):
+                store.save(rec)
+        text = (f"Your request has been approved{' with ' + str(acc['extra_time_pct']) + '% extra time on tests and interviews' if st == 'approved' and acc.get('extra_time_pct') else ''}."
                 if st == "approved" else "We're unable to offer this adjustment, but please reply if there's another way we can help.")
         if acc.get("hr_note"):
             text += " " + acc["hr_note"]

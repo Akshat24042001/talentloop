@@ -44,6 +44,7 @@ LABELS = {
     "ear_check_unverified": "Ear check photos taken but not checked by AI (no vision model): review them",
     "vision_check": "AI photo check", "vision_flag": "AI photo check found a problem", "access_code_wrong": "Wrong access code entered",
     "access_code_reset": "HR issued a new access code", "time_booked": "Candidate booked the interview time",
+    "human_requested": "Candidate asked for an interview with a person instead",
     "camera_checks_unavailable": "Camera checks could not start on this browser",
 }
 HIGH = {"integrity_warning", "disqualified", "multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",
@@ -207,8 +208,15 @@ def summary(rec: dict) -> dict:
         add(min(9, 3 * counts["vision_flag"]), f"The AI photo check found a problem {_x(counts['vision_flag'])} (people, earphones, phone or screen)")
     if counts.get("camera_checks_unavailable"):
         add(3, "Camera checks could not start on the candidate's browser")
+    sig = ((rec.get("state") or {}).get("signals") or [])
+    if sig:                                   # the live interviewer's judgement: a hint for review, never decisive alone
+        scripted = sum(1 for x in sig if x.get("kind") == "scripted")
+        contra = sum(1 for x in sig if x.get("kind") == "contradiction")
+        add(min(3, len(sig)), "The live interviewer noticed " + ", ".join(filter(None, [
+            f"{scripted} answer(s) that sounded read or AI-written" if scripted else "",
+            f"{contra} contradiction(s) with earlier answers or the resume" if contra else ""])))
     risk = "high" if score >= 7 else "medium" if score >= 3 else "low"
-    return {"risk": risk, "risk_points": score, "reasons": reasons, "counts": counts,
+    return {"risk": risk, "risk_points": score, "reasons": reasons, "counts": counts, "answer_signals": sig,
             "warnings": warns, "disqualified": dq,
             "durations": {k: int(v) for k, v in durations.items()},
             "hidden_seconds": int(away), "per_question": per_q,

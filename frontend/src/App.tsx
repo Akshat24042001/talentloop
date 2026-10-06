@@ -55,7 +55,7 @@ const APP: Route[] = [
   ['/app/interviews/:id', p => <InterviewReport key={p.id} id={p.id!} />, 'Interview report'],
   ['/app/questions', () => <QuestionBank />, 'Question bank', 'manage_jobs'],
   ['/app/drives', () => <Drives />, 'Campus drives', 'manage_jobs'],
-  ['/app/requests', () => <Requests />, 'Candidate requests', 'manage_jobs'],
+  ['/app/requests', () => <Requests />, 'Candidate requests'],
   ['/app/outbox', () => <Outbox />, 'Outbox', 'manage_jobs'],
   ['/app/my-interviews', () => <MyInterviews />, 'My interviews'],
   ['/app/reports', () => <Reports />, 'Reports', 'manage_jobs'],

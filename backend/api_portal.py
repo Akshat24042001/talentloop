@@ -702,11 +702,9 @@ def _request_human(s, app: db.Application, job: db.Job, note: str):
     app.human_requested_at, app.human_request_note = time.time(), note[:1000]
     app.updated_at = time.time()
     flows._log(s, app, job, None, "human_requested", f"Asked for a human interview{': ' + note[:200] if note else ''}")
-    from . import messages
-    for a in flows.approvers_for(s, job, {"config": {}}):
-        messages.queue(s, app.org_id, to_email=a["email"], subject=f"A candidate asked for a human interview | {job.title}",
-                       body=f"A candidate for {job.title} asked to be interviewed by a person instead of the AI interviewer.\n\n"
-                            f"Note: {note or '(none)'}\n\nOpen TalentLoop > Requests to switch them to a human round or reply.", template="human_request_hr")
+    flows.notify_team(s, app, job, "Asked for a human interview",
+                      f"The candidate asked to be interviewed by a person instead of the AI interviewer.\nTheir note: {note or '(none)'}\n\n"
+                      "Switch them to a human interview round, or keep the AI round and reply.", "human_request_hr")
 
 
 @router.post("/api/r/{token}/call-me")
@@ -801,6 +799,8 @@ async def request_accommodation(token: str, req: Request):
         app.accommodation = {**{k: v for k, v in cur.items() if k == "human_handled"}, "request": text[:1500], "requested_at": time.time(), "status": "requested"}
         app.updated_at = time.time()
         flows._log(s, app, job, None, "accommodation_requested", text[:200])
+        flows.notify_team(s, app, job, "Accommodation request", f"The candidate asked for an adjustment:\n\n\"{text[:1500]}\"\n\n"
+                          "Approve it (with extra time on tests and interviews) or decline it; the candidate is told either way.", "accommodation_hr")
     return {"ok": True}
 
 

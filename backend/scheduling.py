@@ -193,7 +193,7 @@ def request_times(s, rr: db.RoundResult, note: str) -> None:
     app, job, org = s.get(db.Application, rr.application_id), s.get(db.Job, rr.job_id), s.get(db.Org, rr.org_id)
     c = s.get(db.Candidate, app.candidate_id)
     rnd = flows.round_of(job, rr.round_id) or {"name": "Interview", "config": {}}
-    to = {a["email"] for a in flows.approvers_for(s, job, {"config": {}})}
+    to = {a["email"] for a in flows.team_for(s, job)}
     for uid in (rnd.get("config") or {}).get("interviewers") or []:
         u = s.get(db.User, uid)
         if u and flows.is_member(s, org.id, u.id):

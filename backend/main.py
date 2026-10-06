@@ -122,7 +122,7 @@ class _CandidateGate:
     lets a signed-in team member preview their own; for anyone else it is "not found"."""
     ACTIONS = {"public", "unlock", "consent", "device", "assistant", "started", "heartbeat", "progress", "violation",
                "reference-photo", "events", "snapshot", "vision-check", "media", "complete", "feedback", "book", "slots",
-               "resend-code"}
+               "resend-code", "request-human"}
     OPEN = {"public", "unlock", "resend-code"}
 
     def __init__(self, app):
@@ -709,7 +709,7 @@ def public_info(iid: str, req: Request):
             "ear_check": s.get("ear_check", True) is not False and s.get("face_detection", True) is not False,
             "vision_check_sec": int(s.get("vision_check_sec", 120) or 0) if s.get("face_detection", True) is not False else 0,
             "vision_available": bool(llm.VISION_MODEL) or llm.MOCK,
-            "opening": s.get("opening") or "now", "booking": rec.get("booking") if rec.get("booking") and not rec["booking"].get("cancelled_at") else None,
+            "opening": s.get("opening") or "now", "human_requested": bool(rec.get("human_requested")), "booking": rec.get("booking") if rec.get("booking") and not rec["booking"].get("cancelled_at") else None,
             "needs_booking": s.get("opening") == "pick" and not (rec.get("booking") and not rec["booking"].get("cancelled_at")) and rec["status"] == "created",
             "reconnect_window_sec": reconnect_window(rec), "resuming": resuming,
             "reconnect_seconds_left": max(0, int(deadline - time.time())) if deadline else None,
@@ -771,6 +771,42 @@ async def interview_book(iid: str, req: Request):
         server_event(rec, "time_booked", time.strftime("%d %b %H:%M UTC", time.gmtime(rec["booking"]["starts_at"])))
         store.save(rec)
     return selfbook.view(rec)
+
+
+@app.post("/api/interviews/{iid}/request-human")
+async def interview_request_human(iid: str, req: Request):
+    """The candidate asks, from the interview page, to be interviewed by a person instead. On a hiring-flow interview
+    this is the same request as on their status page; otherwise HR (and whoever created the interview) is emailed.
+    Either way it shows on the interview's report and in Candidate requests when it belongs to an application."""
+    body = await req.json() if (req.headers.get("content-length") or "0") != "0" else {}
+    note = str(body.get("note") or "").strip()[:1000]
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        if rec.get("human_requested"):
+            return {"ok": True, "already": True}
+        rec["human_requested"] = {"at": time.time(), "note": note}
+        server_event(rec, "human_requested", note[:200])
+        store.save(rec)
+    with db.session() as s:
+        app_ = s.get(db.Application, rec["application_id"]) if rec.get("application_id") else None
+        job = s.get(db.Job, rec["job_id"]) if rec.get("job_id") else None
+        if app_ and job:
+            from .api_portal import _request_human
+            _request_human(s, app_, job, note)
+        elif rec.get("org_id"):
+            p = rec.get("plan") or {}
+            to = {u.email for m, u in s.query(db.Membership, db.User).join(db.User, db.User.id == db.Membership.user_id)
+                  .filter(db.Membership.org_id == rec["org_id"], db.Membership.active.isnot(False)) if m.role in auth.MANAGE_JOBS}
+            cu = s.get(db.User, rec["created_by"]) if rec.get("created_by") else None
+            if cu:
+                to.add(cu.email)
+            link = f"{interviews.cand_url(rec['id']).split('/interview.html')[0]}/app/interviews/{refs.interview_ref(rec['id'])}"
+            for email in sorted(to):
+                messages.queue(s, rec["org_id"], to_email=email, subject=f"Asked for a human interview | {p.get('candidate_name') or 'Candidate'} for {p.get('role') or 'AI interview'}",
+                               body=f"{p.get('candidate_name') or 'The candidate'} asked to be interviewed by a person instead of the AI interviewer "
+                                    f"({p.get('role') or ''}).\nTheir note: {note or '(none)'}\n\nThe AI interview link still works if they change their mind. "
+                                    f"Reply to them, or close the interview and book a person.\n\n{link}", template="human_request_hr")
+    return {"ok": True}
 
 
 @app.post("/api/interviews/{iid}/resend-code")

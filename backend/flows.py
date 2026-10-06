@@ -455,11 +455,19 @@ def select(s, app: db.Application, actor: str | None, notify: bool = True) -> No
 def withdraw(s, app: db.Application, note: str = "") -> None:
     job = s.get(db.Job, app.job_id)
     cur = get_result(s, app, app.round_id) if app.round_id else None
+    b = ((cur.data or {}).get("booking") or {}) if cur else {}
+    interviewer = ""
+    if b.get("slot_id") and not b.get("cancelled_at"):          # the interviewer's booked slot frees up: tell them too
+        sl = s.get(db.Slot, b["slot_id"])
+        u = s.get(db.User, sl.interviewer_id) if sl and sl.interviewer_id else None
+        interviewer = u.email if u and is_member(s, app.org_id, u.id) else ""
     release(s, cur)
     if cur and cur.status in OPEN_STATUSES:
         cur.status = "skipped"
     app.stage, app.updated_at = "withdrawn", time.time()
     _log(s, app, job, None, "withdrawn", note or "The candidate withdrew")
+    notify_team(s, app, job, "Candidate withdrew", f"The candidate withdrew their application. {note}".strip()
+                + (" Their booked interview slot is free again." if interviewer else ""), "withdrawn_hr", extra_to=(interviewer,))
 
 
 def request_manager_approval(s, app, job, rnd, rr, notify=True) -> list[str]:
@@ -503,6 +511,41 @@ def approvers_for(s, job: db.Job, rnd: dict) -> list[dict]:
         if u:
             out.append({"name": u.name, "email": u.email})
     return out
+
+
+def team_for(s, job: db.Job) -> list[dict]:
+    """Everyone who must hear about a candidate's request on this job: the company's HR (owners, admins, recruiters),
+    the job's creator and the people assigned to it. Active members only, each address once."""
+    from . import auth
+    seen, out = set(), []
+
+    def add(u):
+        if u and u.email and u.email not in seen and not getattr(u, "disabled", False):
+            seen.add(u.email)
+            out.append({"name": u.name or "", "email": u.email})
+    for m, u in s.query(db.Membership, db.User).join(db.User, db.User.id == db.Membership.user_id).filter(
+            db.Membership.org_id == job.org_id, db.Membership.active.isnot(False)):
+        if m.role in auth.MANAGE_JOBS:
+            add(u)
+    if job.created_by and is_member(s, job.org_id, job.created_by):
+        add(s.get(db.User, job.created_by))
+    for _c, u in s.query(db.JobCollaborator, db.User).join(db.User, db.User.id == db.JobCollaborator.user_id).filter(db.JobCollaborator.job_id == job.id):
+        if is_member(s, job.org_id, u.id):
+            add(u)
+    return out
+
+
+def notify_team(s, app: db.Application, job: db.Job, subject: str, text: str, template: str, extra_to: tuple[str, ...] = ()) -> int:
+    """Email the hiring team about something a candidate did (request, withdrawal...). Returns how many were told."""
+    c = s.get(db.Candidate, app.candidate_id)
+    link = f"{base_url()}/app/requests"
+    body = (f"{text}\n\nCandidate: {c.name if c else ''}\nJob: {job.title}\n\nOpen it in TalentLoop: {link}\n"
+            f"(also on the candidate's card in the job's pipeline)")
+    to = [a["email"] for a in team_for(s, job)] + [e for e in extra_to if e]
+    for email in dict.fromkeys(to):
+        messages.queue(s, app.org_id, to_email=email, subject=f"{subject} | {c.name if c else 'Candidate'} for {job.title}", body=body,
+                       template=template, candidate_id=app.candidate_id, application_id=app.id)
+    return len(dict.fromkeys(to))
 
 
 def is_member(s, org_id: str, user_id: str | None) -> bool:

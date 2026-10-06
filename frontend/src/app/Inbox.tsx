@@ -8,7 +8,15 @@ import { ago, when } from '../lib/format'
 import { ask } from '../components/dialogs'
 import { MSG_LABEL, MSG_TONE } from './flow/AppDrawer'
 
-interface Req { kind: 'human' | 'accommodation'; application_id: string; application_ref?: string; candidate: string; candidate_ref: string; job: string; job_ref: string; at: number; note: string; status: string; extra_time_pct?: number }
+interface Req { kind: 'human' | 'accommodation' | 'time' | 'withdrawn'; application_id: string; application_ref?: string; candidate: string; candidate_ref: string; job: string; job_ref: string
+  at: number; note: string; status: string; extra_time_pct?: number; can_act: boolean; stage: string; handled_at?: number; hr_note?: string }
+const KIND: Record<Req['kind'], { label: string; tone: 'warning' | 'danger' | 'brand' | 'neutral' }> = {
+  human: { label: 'Wants a human interview', tone: 'warning' }, accommodation: { label: 'Accommodation', tone: 'brand' },
+  time: { label: 'No suitable interview time', tone: 'warning' }, withdrawn: { label: 'Withdrew', tone: 'danger' } }
+const DONE: Record<string, { label: string; tone: 'success' | 'neutral' | 'danger' }> = {
+  approved: { label: 'Approved', tone: 'success' }, declined: { label: 'Declined', tone: 'danger' }, switched: { label: 'Moved to a human interview', tone: 'success' },
+  kept_ai: { label: 'Kept the AI round', tone: 'neutral' }, closed: { label: 'Closed', tone: 'neutral' }, info: { label: 'Withdrawn', tone: 'danger' } }
+const isOpen = (r: Req) => r.status === 'open' || r.status === 'requested'
 
 export function Requests() {
   const { data, error, reload } = useApi<Req[]>('/api/requests')
@@ -21,24 +29,28 @@ export function Requests() {
   async function human(r: Req, action: string) {
     try { await api(`/api/applications/${r.application_id}/human-request`, { json: { action } }); toast(action === 'human' ? 'Moved to the human interview round' : 'Reply sent'); reload() } catch (e: any) { toast(e.message) }
   }
-  const open = (data || []).filter(r => r.status === 'open' || r.status === 'requested'), done = (data || []).filter(r => !(r.status === 'open' || r.status === 'requested'))
+  const appLink = (r: Req) => `/app/jobs/${r.job_ref}?tab=pipeline&app=${r.application_ref || r.application_id}`
+  const open = (data || []).filter(isOpen), done = (data || []).filter(r => !isOpen(r))
   return (
     <>
-      <PageHeader title="Candidate requests" description="Accommodations (for example extra time) and requests for an interview with a person instead of the AI interviewer." />
-      {!data ? <ListSkeleton rows={4} /> : !data.length ? <Card><Empty icon={<HandHelping />} title="No requests">Candidates can ask from their application status page.</Empty></Card> : <>
+      <PageHeader title="Candidate requests" description="Everything candidates asked for on the jobs you can see: a person instead of the AI interviewer, accommodations, interview times that don't work, and withdrawals. The hiring team is emailed for each one." actions={<Button icon={<RefreshCw />} onClick={reload}>Refresh</Button>} />
+      {!data ? <ListSkeleton rows={4} /> : !data.length ? <Card><Empty icon={<HandHelping />} title="No requests">Candidates can ask from their application status page and their interview pages.</Empty></Card> : <>
         <div className="space-y-3">{open.map(r => (
-          <Card key={`${r.kind}-${r.application_id}`}><CardBody className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2"><Badge tone="warning">{r.kind === 'human' ? 'Human interview' : 'Accommodation'}</Badge>
-              <a className="font-semibold hover:underline" href={`/app/candidates/${r.candidate_ref}`}>{r.candidate}</a><span className="text-sm text-slate-500">for <a className="hover:underline" href={`/app/jobs/${r.job_ref}?tab=pipeline&app=${r.application_ref || r.application_id}`}>{r.job}</a> · {ago(r.at)}</span></div>
-            {r.note && <p className="text-sm">"{r.note}"</p>}
-            {r.kind === 'human' ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="primary" onClick={() => human(r, 'human')}>Switch to a human interview</Button><Button size="sm" onClick={() => human(r, 'keep')}>Keep the AI round and reply</Button></div>
-              : <div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-1.5 text-sm">Extra time on tests<Input type="number" aria-label="Extra time percent" className="h-8 w-16" min={0} max={100} value={pct[r.application_id] ?? 25} onChange={e => setPct({ ...pct, [r.application_id]: +e.target.value })} />%</label>
-                <Button size="sm" variant="primary" onClick={() => acc(r, 'approved')}>Approve</Button><Button size="sm" onClick={() => acc(r, 'declined')}>Decline</Button></div>}
+          <Card key={`${r.kind}-${r.application_id}`} className="ring-1 ring-amber-300/60 dark:ring-amber-500/30"><CardBody className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2"><Badge tone={KIND[r.kind].tone}>{KIND[r.kind].label}</Badge>
+              <a className="font-semibold hover:underline" href={`/app/candidates/${r.candidate_ref}`}>{r.candidate}</a><span className="text-sm text-slate-500 dark:text-slate-400">for <a className="hover:underline" href={appLink(r)}>{r.job}</a> · {ago(r.at)}</span></div>
+            {r.note && <p className="whitespace-pre-line text-sm">"{r.note}"</p>}
+            {!r.can_act ? <p className="text-sm text-slate-500 dark:text-slate-400">HR decides this one; they were emailed. You can see it because you work on this job.</p>
+              : r.kind === 'human' ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="primary" onClick={() => human(r, 'human')}>Switch to a human interview</Button><Button size="sm" onClick={() => human(r, 'keep')}>Keep the AI round and reply</Button></div>
+              : r.kind === 'accommodation' ? <div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-1.5 text-sm">Extra time on tests and interviews<Input type="number" aria-label="Extra time percent" className="h-8 w-16" min={0} max={100} value={pct[r.application_id] ?? 25} onChange={e => setPct({ ...pct, [r.application_id]: +e.target.value })} />%</label>
+                <Button size="sm" variant="primary" onClick={() => acc(r, 'approved')}>Approve</Button><Button size="sm" onClick={() => acc(r, 'declined')}>Decline</Button></div>
+              : <div className="flex flex-wrap items-center gap-2"><Button size="sm" variant="primary" href={appLink(r)}>Book a time for them</Button><span className="text-sm text-slate-500 dark:text-slate-400">or add interview slots in the job's hiring flow; they're emailed when new times open.</span></div>}
           </CardBody></Card>))}</div>
         {!open.length && <Alert tone="success">Nothing waiting. Handled requests are below.</Alert>}
-        {done.length > 0 && <><h2 className="mb-2 mt-6 text-sm font-semibold text-slate-500">Handled</h2>
+        {done.length > 0 && <><h2 className="mb-2 mt-6 text-sm font-semibold text-slate-500">Handled and recent</h2>
           <Card><ul className="divide-y divide-slate-100 dark:divide-ink-800">{done.map(r => <li key={`${r.kind}-${r.application_id}`} className="flex flex-wrap items-center gap-2 px-5 py-3 text-sm">
-            <Badge tone={r.status === 'approved' ? 'success' : 'neutral'}>{r.status}</Badge><span className="font-medium">{r.candidate}</span><span className="text-slate-500">{r.job} · {r.note}</span></li>)}</ul></Card></>}
+            <Badge tone={(DONE[r.status] || DONE.closed).tone}>{r.kind === 'withdrawn' ? 'Withdrew' : (DONE[r.status] || DONE.closed).label}</Badge>
+            <a className="font-medium hover:underline" href={appLink(r)}>{r.candidate}</a><span className="text-slate-500 dark:text-slate-400">{r.job}{r.kind !== 'withdrawn' ? ` · ${KIND[r.kind].label}` : ''}{r.note ? ` · ${r.note.slice(0, 120)}` : ''} · {ago(r.handled_at || r.at)}</span></li>)}</ul></Card></>}
       </>}
     </>
   )

@@ -89,6 +89,21 @@ const fmtDay = (t: number) => new Date(t * 1000).toLocaleDateString(undefined, {
 const fmtTime = (t: number) => new Date(t * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (t: number) => new Date(t * 1000).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
 
+function HumanAsk({ done }: { done: boolean }) {
+  const [open, setOpen] = useState(false), [note, setNote] = useState(''), [busy, setBusy] = useState(false), [err, setErr] = useState('')
+  if (done) return <p id="humanAsked" className="mt-4 rounded-lg bg-white/5 px-3 py-2 text-center text-sm text-slate-300 ring-1 ring-white/10">You asked for an interview with a person. The hiring team will contact you. You can still take this interview if you change your mind.</p>
+  if (!open) return <button id="askHuman" type="button" onClick={() => setOpen(true)} className="mt-4 w-full text-center text-sm text-slate-400 hover:text-slate-200 hover:underline">I'd rather be interviewed by a person</button>
+  return (
+    <div className="mt-4 space-y-2 rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+      <label htmlFor="humanNote" className="text-sm text-slate-200">Tell the hiring team why (optional), for example an accessibility need:</label>
+      <textarea id="humanNote" rows={3} maxLength={1000} value={note} onChange={e => setNote(e.target.value)} className="w-full rounded-lg bg-ink-900 p-2 text-sm text-white ring-1 ring-white/15 focus:outline-none focus:ring-2 focus:ring-brand-400" />
+      {err && <p role="alert" className="text-sm text-red-300">{err}</p>}
+      <div className="flex gap-2"><Button id="sendHuman" size="sm" variant="primary" loading={busy} onClick={async () => { setBusy(true); setErr(await engine.requestHuman(note)); setBusy(false) }}>Send request</Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
+    </div>
+  )
+}
+
 let lastAutoOpen = 0
 function Schedule({ s }: { s: State }) {
   const v = s.sched
@@ -193,6 +208,7 @@ function Consent({ s }: { s: State }) {
               {P.resuming ? 'Rejoin your interview' : 'Continue to device check'}
             </Button>
             {s.rejoin.left != null && <p className="mt-3 text-center text-sm text-amber-300">{s.rejoin.left > 0 ? `${s.rejoin.left}s left to rejoin` : 'Rejoin window has passed.'}</p>}
+            {!P.resuming && <HumanAsk done={!!P.human_requested} />}
           </div>
         </aside>
       </div>

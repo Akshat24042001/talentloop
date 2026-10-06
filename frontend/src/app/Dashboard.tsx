@@ -16,6 +16,7 @@ interface Dash {
 export default function Dashboard() {
   const me = useMe()
   const { data: d, error, reload } = useApi<Dash>('/api/dashboard')
+  const { data: reqs } = useApi<{ open: number }>('/api/requests/count')
   const h = useHealth()
   const first = d && d.jobs.open + d.jobs.draft + d.jobs.paused + d.jobs.closed === 0 && d.candidates === 0
   const problems = h ? healthProblems(h) : []
@@ -74,7 +75,10 @@ export default function Dashboard() {
             <Card>
               <CardHeader title="Needs attention" />
               <CardBody className="pt-3">
-                {!d.attention.length ? <p className="text-sm text-slate-500 dark:text-slate-400">All clear. Nothing waiting on you.</p> : (
+                {!!reqs?.open && <a href="/app/requests" className="mb-3 flex items-center gap-3 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:ring-amber-500/30 dark:hover:bg-amber-500/15">
+                  <span className="grid size-8 place-items-center rounded-full bg-amber-500 text-sm font-bold text-white">{reqs.open}</span>
+                  <span><span className="block text-sm font-semibold">Candidate request{reqs.open > 1 ? 's' : ''} waiting</span><span className="block text-xs text-slate-600 dark:text-slate-300">Human interviews, accommodations, interview times</span></span></a>}
+                {!d.attention.length && !reqs?.open ? <p className="text-sm text-slate-500 dark:text-slate-400">All clear. Nothing waiting on you.</p> : (
                   <ul className="space-y-3">{d.attention.map(a => (
                     <li key={a.job_id}><a href={`/app/jobs/${a.job_ref || a.job_id}`} className="block rounded-xl p-3 ring-1 ring-slate-200/70 hover:bg-slate-50 dark:ring-ink-700 dark:hover:bg-ink-850">
                       <div className="text-sm font-semibold">{a.title}</div><div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{a.reason}</div></a></li>

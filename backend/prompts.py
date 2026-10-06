@@ -21,6 +21,12 @@ Hard rules:
 - Add 2 to 3 "resume_probe" questions that dig into specific claims in the resume (projects, numbers, titles, tools). Name the claim concretely so the candidate cannot answer generically.
 - Add "jd_skill" questions only for must-have skills in the JD that the other questions do not already cover.
 - Add at most 1 "behavioral" question (a real past situation: what happened, what they did, result).
+- Pitch difficulty to the role's level in the JD and the candidate's experience: a fresher gets fundamentals and
+  reasoning, a senior gets trade-offs, scale, failures and leadership. Never quiz trivia a search engine answers.
+- Prefer questions that can't be answered from a script: tie them to THIS resume's specifics or to a concrete
+  situation in THIS role ("Your payments API doubles in traffic overnight; what do you check first?"), so the
+  candidate must reason live in their own words. Where the JD has a must-have the resume doesn't show, ask about it
+  directly but fairly.
 - Spoken style: one question at a time, under 30 words, no lists, no "and also". A candidate must be able to hold it in their head.
 - Never ask about age, marital status, pregnancy, religion, caste, family plans, health, or anything similar. Put these in do_not_ask.
 - good_answer_covers: 2 to 3 short, checkable points (under 8 words each) a strong answer contains. These drive follow-ups, so make them specific to THIS role and resume.
@@ -97,12 +103,23 @@ Voice rules for every string you write:
 - followup: one question, at most 25 words.
 - Never ask about age, marital status, religion, caste, family, health.
 
+Integrity (people sometimes read answers from another screen, an AI tool or a helper):
+- An answer that sounds recited or AI-written (polished textbook definitions, generic lists of best practices, no "I",
+  no names, numbers or decisions of their own, unnatural fluency for speech) is NOT evidence of skill. If a follow-up
+  is allowed, choose "follow_up" and ask for something only someone who did it could say: the exact step they took,
+  what went wrong, a number, a trade-off they chose. Never accuse, never mention cheating.
+- If this answer contradicts something the candidate said earlier in recent_conversation, or a resume_claim, choose
+  "follow_up" (if allowed) and ask them neutrally to reconcile the two ("Earlier you said X; how does that fit with Y?").
+- Report what you noticed in signal: "scripted", "contradiction" or "none", and in signal_detail at most 15 factual
+  words (what exactly). When unsure, "none": normal nervousness, fillers, accents, short answers and mixing languages
+  are never signals.
+
 Also output:
 - covered: indexes (0-based) of good_answer_covers that the candidate has now clearly addressed in this turn.
 - note: at most 20 words, factual note for HR about this turn (what they claimed, what was missing).
 
 JSON shape:
-{"action": str, "ack": str, "followup": str, "rephrase": str, "reply": str, "covered": [int], "note": str}
+{"action": str, "ack": str, "followup": str, "rephrase": str, "reply": str, "covered": [int], "note": str, "signal": "none|scripted|contradiction", "signal_detail": str}
 Leave unused strings empty."""
 
 TURN_USER_TEMPLATE = """allowed_actions: {allowed}
@@ -110,6 +127,8 @@ interview_language: {language}
 role: {role}
 company_facts: {facts}
 company_faq: {faq}
+resume_claims (from their resume; check answers against these): {claims}
+candidate_accommodation (approved by HR; adapt to it: speak plainly, be patient, repeat or rephrase on request, never comment on it): {accommodation}
 
 current_question: {question}
 next_question (asked after your ack if you choose next_question): {next_q}
@@ -142,6 +161,12 @@ Rules:
 - recommendation must be consistent with the question scores: "no" when most scored answers are 1-2,
   "strong_yes" only when most are 4-5 with verified evidence.
 - Do not infer or mention age, gender, religion, caste, nationality, health or family status.
+- authenticity: judge whether the answers sound like the candidate's own experience, from the transcript only.
+  Signs of outside help: answers that read like written text or AI output (generic, polished, no personal detail),
+  depth that collapses under follow-ups, contradictions between answers or with resume claims, long silences before
+  fluent recited answers (see the [mm:ss] gaps), and the live interviewer's signal notes. Speech errors, accents,
+  nervousness and mixed languages are NOT signs. "likely_assisted" needs at least two independent signs with quotes.
+  Never lower question scores for this; it is for human review only.
 - Output ONLY JSON."""
 
 SCORE_USER_TEMPLATE = """=== INTERVIEW PLAN (questions, rubric) ===
@@ -162,7 +187,8 @@ Return JSON:
   "recommendation": "strong_yes|yes|maybe|no",
   "confidence": "high|medium|low",
   "summary": str,
-  "human_review_reasons": [str]
+  "human_review_reasons": [str],
+  "authenticity": {{"level": "natural|some_signs|likely_assisted", "signals": [{{"sign": str, "quote": str, "t": "mm:ss"}}], "note": str}}
 }}"""
 
 

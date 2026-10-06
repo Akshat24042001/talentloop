@@ -711,7 +711,8 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list 
         question=q["ask"], covers=json.dumps(q["good_answer_covers"]),
         already=json.dumps(ctx["already"]), fu_used=st["fu_used"], fu_max=q["max_followups"],
         next_q=(plan["questions"][st["q_idx"] + 1]["ask"] if st["q_idx"] + 1 < len(plan["questions"]) else "(none, this is the last question)"),
-        recent=_recent(st), said=said[:2500],
+        recent=_recent(st), said=said[:2500], accommodation=plan.get("accommodation") or "(none)",
+        claims=json.dumps((plan.get("resume_claims_to_verify") or [])[:4], ensure_ascii=False),
     )
     return await asyncio.wait_for(
         llm.complete_json(prompts.TURN_SYSTEM, user, llm.FAST_MODEL, temperature=0.3, max_tokens=300,
@@ -961,6 +962,9 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
     st["covered"][q["id"]] = sorted(cov)
     if d.get("note"):
         st["notes"].setdefault(q["id"], []).append(_clean(d["note"])[:200])
+    if d.get("signal") in ("scripted", "contradiction") and not q.get("practice") and q.get("type") != "warmup":
+        st.setdefault("signals", []).append({"q_id": q["id"], "kind": d["signal"], "detail": _clean(str(d.get("signal_detail") or ""))[:160],
+                                             "t": round(active)})
     if failed:
         st["judge_failures"] = st.get("judge_failures", 0) + 1
 
@@ -1045,6 +1049,7 @@ async def _score_once(rec: dict, transcript: str, model: str) -> dict:
     if llm.MOCK:
         return _mock_score(rec)
     plan_view = {k: rec["plan"][k] for k in ("role", "competencies", "questions", "resume_claims_to_verify")}
+    plan_view["live_interviewer_signals"] = ((rec.get("state") or {}).get("signals") or [])[:12]
     user = prompts.SCORE_USER_TEMPLATE.format(plan=json.dumps(plan_view, ensure_ascii=False), transcript=transcript)
     out = await llm.complete_json(prompts.SCORE_SYSTEM, user, model, temperature=0.1, max_tokens=6000,
                                   timeout=240)
@@ -1182,6 +1187,19 @@ async def score_interview(rec: dict) -> dict:
         review.append(f"Live AI failed on {st['judge_failures']} turn(s); the interviewer used a safe fallback")
     if st.get("reconnects"):
         review.append(f"Call reconnected {st['reconnects']} time(s)")
+
+    au = rep.get("authenticity") if isinstance(rep.get("authenticity"), dict) else {}
+    lines = [e["text"] for e in st["log"] if e["role"] == "candidate"]
+    sigs = [x for x in (au.get("signals") or []) if isinstance(x, dict) and x.get("sign")]
+    for x in sigs:                                     # a sign is only as good as its quote
+        x["verified"] = _verify_quote(str(x.get("quote") or ""), lines) if x.get("quote") else "unverified"
+    level = au.get("level") if au.get("level") in ("natural", "some_signs", "likely_assisted") else "natural"
+    if level == "likely_assisted" and sum(1 for x in sigs if x["verified"] != "unverified") < 2:
+        level = "some_signs"                           # "likely" needs two signs backed by real quotes
+    rep["authenticity"] = {"level": level, "signals": sigs[:6], "note": str(au.get("note") or "")[:400]}
+    if level != "natural":
+        review.append("Answers may not be the candidate's own (" + ("likely" if level == "likely_assisted" else "some signs")
+                      + "): " + "; ".join(x["sign"][:80] for x in sigs[:3]))
 
     proctor = proctor_mod.summary(rec)
     other = [r for r in proctor["reasons"] if not r.startswith("Disqualified")]
