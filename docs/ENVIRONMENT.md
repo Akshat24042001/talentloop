@@ -32,14 +32,16 @@ Any new development-only feature should check `appenv.IS_PRODUCTION` (backend) o
 ### Email with Resend
 
 ```
-SMTP_HOST=smtp.resend.com
-SMTP_PORT=587
-SMTP_USER=resend
-SMTP_PASSWORD=<your Resend API key, re_...>
+RESEND_API_KEY=<your Resend API key, re_...>
 SMTP_FROM=TalentLoop <onboarding@resend.dev>
 APP_ENV=development
 DEV_EMAIL_TO=<the email your Resend account is registered with>
 ```
+
+Mail goes over Resend's HTTPS API (port 443). Render's free instances block outbound SMTP ports 25, 465 and 587 (since
+September 2025), so SMTP to smtp.resend.com can never connect there. Older setups with `SMTP_HOST=smtp.resend.com` and the
+`re_` key in `SMTP_PASSWORD` are switched to the API automatically. Platform admin > Outbox > **Send a test email** sends
+one email immediately and shows Resend's exact answer.
 
 `onboarding@resend.dev` only delivers to the email address that owns the Resend account. To email anyone else (`APP_ENV=production`),
 verify your own domain in Resend and change `SMTP_FROM` to an address on it. Messages held in development are not sent later

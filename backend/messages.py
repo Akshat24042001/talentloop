@@ -5,6 +5,8 @@ the background. Without a configured channel the message stays in the outbox as 
 so HR can copy it and send it by hand; nothing is lost.
 
 Email: SMTP_HOST, SMTP_PORT (587 = STARTTLS, 465 = SSL), SMTP_USER, SMTP_PASSWORD, SMTP_FROM ("RAC Careers <careers@rac.com>").
+  Resend goes over its HTTPS API instead of SMTP (RESEND_API_KEY, or SMTP_HOST=smtp.resend.com with the re_ key as
+  SMTP_PASSWORD): hosts such as Render's free tier block outbound SMTP ports 25, 465 and 587, so SMTP never connects there.
 WhatsApp: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TEMPLATE (an approved template whose body has one variable,
 {{1}}, that receives the message text), WHATSAPP_TEMPLATE_LANG (default en), WHATSAPP_API_VERSION (default v21.0).
 Meta only allows business-initiated WhatsApp messages through approved templates, hence the single-variable template.
@@ -42,8 +44,17 @@ WA = {"token": (os.getenv("WHATSAPP_TOKEN") or "").strip(), "phone_id": (os.gete
       "version": (os.getenv("WHATSAPP_API_VERSION") or "v21.0").strip()}
 
 
+RESEND_KEY = (os.getenv("RESEND_API_KEY") or "").strip() or (
+    SMTP["PASSWORD"] if "resend" in SMTP["HOST"].lower() and SMTP["PASSWORD"].startswith("re_") else "")
+RESEND_URL = (os.getenv("RESEND_API_URL") or "https://api.resend.com").rstrip("/")
+
+
 def email_enabled() -> bool:
-    return bool(SMTP["HOST"] and SMTP["FROM"])
+    return bool((SMTP["HOST"] or RESEND_KEY) and SMTP["FROM"])
+
+
+def email_transport() -> str:
+    return "resend-api" if RESEND_KEY else ("smtp" if SMTP["HOST"] else "")
 
 
 def whatsapp_enabled() -> bool:
@@ -51,7 +62,8 @@ def whatsapp_enabled() -> bool:
 
 
 def status() -> dict:
-    return {"email": email_enabled(), "whatsapp": whatsapp_enabled(), "production": PRODUCTION, "dev_email_to": "" if PRODUCTION else DEV_EMAIL_TO}
+    return {"email": email_enabled(), "email_transport": email_transport(), "whatsapp": whatsapp_enabled(), "production": PRODUCTION,
+            "dev_email_to": "" if PRODUCTION else DEV_EMAIL_TO}
 
 
 def is_dummy(addr: str) -> bool:
@@ -130,6 +142,8 @@ def _send_email(m: db.Message, sender_name: str = "", to: str = "") -> None:
                      f"{'-' * 60}\n\n" if test else "") + m.body)
     if ics:
         msg.add_attachment(ics.encode(), maintype="text", subtype="calendar", filename="interview.ics", params={"method": "REQUEST"})
+    if RESEND_KEY:
+        return _send_resend(msg, to, ics)
     port = int(SMTP["PORT"] or 587)
     ctx = ssl.create_default_context()
     if port == 465:
@@ -146,6 +160,28 @@ def _send_email(m: db.Message, sender_name: str = "", to: str = "") -> None:
             if SMTP["USER"]:
                 srv.login(SMTP["USER"], SMTP["PASSWORD"])
             srv.send_message(msg, to_addrs=[to])
+
+
+def _send_resend(msg: EmailMessage, to: str, ics: str) -> None:
+    """Resend's HTTPS API (port 443), so mail leaves hosts that block SMTP."""
+    import base64
+    payload = {"from": msg["From"], "to": [to], "subject": msg["Subject"], "text": msg.get_body(("plain",)).get_content(),
+               "headers": {"Message-ID": msg["Message-ID"]}}
+    if ics:
+        payload["attachments"] = [{"filename": "interview.ics", "content": base64.b64encode(ics.encode()).decode(), "content_type": "text/calendar"}]
+    r = httpx.post(f"{RESEND_URL}/emails", json=payload, headers={"Authorization": f"Bearer {RESEND_KEY}"}, timeout=30)
+    if r.status_code >= 300:
+        try:
+            why = r.json().get("message") or r.text
+        except ValueError:
+            why = r.text
+        hint = ""
+        if "testing emails to your own email" in why or "verify a domain" in why:
+            hint = (" Resend's test sender (onboarding@resend.dev) only delivers to the address you signed up to Resend with: "
+                    "set DEV_EMAIL_TO to that address, or verify a domain in Resend and send from it (SMTP_FROM).")
+        elif r.status_code in (401, 403) and "API key" in why:
+            hint = " Check the Resend API key (RESEND_API_KEY or SMTP_PASSWORD)."
+        raise RuntimeError(f"Resend {r.status_code}: {why[:300]}{hint}")
 
 
 def _ics_attachment(m: db.Message) -> str:

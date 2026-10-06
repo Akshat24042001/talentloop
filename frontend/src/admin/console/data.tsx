@@ -123,12 +123,21 @@ export function Outbox({ org }: { org?: string }) {
   const fl = useFilters({ org: org || '', status: '' })
   const { data, reload } = useApi<Paged<MsgRow> & { counts: Record<string, number>; channels: { production?: boolean; dev_email_to?: string; email: boolean } }>(`/api/console/messages?${fl.qs}`)
   const [open, setOpen] = useState<MsgRow | null>(null)
+  const [testing, setTesting] = useState(false)
+  async function testMail() {
+    setTesting(true)
+    try { const r = await api<{ sent_to: string; transport: string }>('/api/console/test-email', { method: 'POST' }); toast(`Sent to ${r.sent_to} (${r.transport}). Check that inbox and its spam folder.`) }
+    catch (e: any) { toast(e.message) } finally { setTesting(false) }
+  }
   async function retry(m: MsgRow) {
     try { await api(`/api/console/messages/${m.id}/retry`, { method: 'POST' }); toast('Queued again'); reload() } catch (e: any) { toast(e.message) }
   }
   return (<>
     {!org && <Head title="Outbox" sub="Every email and WhatsApp message the platform sent or tried to send." />}
-    {data && !data.channels.email && <Alert className="mb-3" tone="warning">Email is not set up on the server (SMTP_*), so nothing is sent.</Alert>}
+    {data && !data.channels.email && <Alert className="mb-3" tone="warning">Email is not set up on the server (SMTP_FROM plus RESEND_API_KEY or SMTP_*), so nothing is sent.</Alert>}
+    {!org && data?.channels.email && <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
+      <Button size="sm" loading={testing} onClick={testMail}>Send a test email</Button>
+      <span>Sends one email now{data.channels.production === false ? ` to ${data.channels.dev_email_to || 'DEV_EMAIL_TO'}` : ' to you'} and shows the mail provider's exact answer.</span></div>}
     {data?.channels.production === false && <Alert className="mb-3" tone="warning">Development: emails go only to {data.channels.dev_email_to || 'nobody (DEV_EMAIL_TO is empty)'}.</Alert>}
     <FilterBar>
       <SearchBox value={fl.q} onChange={fl.setQ} placeholder="Recipient or subject" />

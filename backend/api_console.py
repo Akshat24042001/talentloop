@@ -522,6 +522,29 @@ def console_activity(req: Request, q: str = "", org: str = "", action: str = "",
              "org_id": a.org_id, "user": users.get(a.user_id or "", "system" if not a.user_id else "(deleted)"), "user_id": a.user_id} for a in rows]}
 
 
+@router.post("/api/console/test-email")
+async def console_test_email(req: Request):
+    """Send one email right now and report exactly what the mail provider said (development: to DEV_EMAIL_TO)."""
+    import asyncio
+    from . import messages
+    with db.session() as s:
+        ctx = _admin(req, s)
+        me = s.get(db.User, ctx.user_id)
+        to = me.email if me else ""
+    if not messages.email_enabled():
+        raise HTTPException(400, "Email is not set up: set SMTP_FROM plus RESEND_API_KEY (or SMTP_HOST, SMTP_USER, SMTP_PASSWORD).")
+    m = db.Message(id="test", channel="email", to=to, subject="TalentLoop test email",
+                   body="This is a test email from TalentLoop. If you can read it, email works.")
+    dest = to if messages.PRODUCTION else messages.DEV_EMAIL_TO
+    if not dest:
+        raise HTTPException(400, "Development server and DEV_EMAIL_TO is empty, so no email can be sent.")
+    try:
+        await asyncio.to_thread(messages._send_email, m, "TalentLoop", dest)
+    except Exception as e:
+        raise HTTPException(502, f"Not sent ({messages.email_transport()}): {type(e).__name__}: {str(e)[:500]}")
+    return {"sent_to": dest, "transport": messages.email_transport()}
+
+
 @router.get("/api/console/messages")
 def console_messages(req: Request, q: str = "", org: str = "", status: str = "", page: int = 1):
     from .api_flows import _msg_json
