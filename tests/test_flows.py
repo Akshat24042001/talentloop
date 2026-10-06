@@ -102,7 +102,8 @@ def experienced(c, slug, me_id):
     assert ai["result"]["status"] == "invited" and ai["data"]["interview_id"], ai
     link = ai["result"]["candidate_link"]
     page = ok(TestClient(app).get(f"/api/r/{tok(link)}"))
-    assert page["type"] == "ai_interview" and page["interview"]["url"].startswith("/interview.html?id=")
+    assert page["type"] == "ai_interview" and page["interview"]["url"].startswith("/interview.html?k=")
+    assert ai["data"]["interview_id"] not in page["interview"]["url"], "the candidate link must not carry the interview id"
     assert "AI assistant" in " ".join(page["transparency"]["how"]) and "person" in page["transparency"]["human"]
     # the interview finishes and is scored: its result flows into the round
     iid = ai["data"]["interview_id"]

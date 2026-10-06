@@ -54,6 +54,8 @@ def ics(uid: str, start: float, end: float, summary: str, description: str, loca
     def dt(t):
         return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     esc = lambda x: (x or "").replace("\\", "\\\\").replace(";", "\;").replace(",", "\\,").replace("\n", "\\n")  # noqa: E731
+    import hashlib
+    uid = hashlib.sha256(f"ics|{uid}".encode()).hexdigest()[:24]          # stable per booking, never a database id
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TalentLoop//Interviews//EN", f"METHOD:{'CANCEL' if cancel else 'REQUEST'}", "BEGIN:VEVENT",
              f"UID:{uid}@talentloop", f"SEQUENCE:{int(seq)}", f"DTSTAMP:{dt(time.time())}", f"DTSTART:{dt(start)}", f"DTEND:{dt(end)}",
              f"SUMMARY:{esc(summary)}", f"DESCRIPTION:{esc(description)}", f"LOCATION:{esc(location)}",

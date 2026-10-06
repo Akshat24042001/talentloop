@@ -22,9 +22,14 @@ export interface PublicInfo {
   snapshots: boolean; reconnect_window_sec: number; resuming: boolean; reconnect_seconds_left: number | null
   liveness_check?: boolean; identity_check?: boolean; has_reference_photo?: boolean
   room_scan?: boolean; ear_check?: boolean; vision_check_sec?: number; vision_available?: boolean
+  locked?: boolean; opening?: 'pick' | 'now' | 'fixed'; booking?: { starts_at: number; ends_at: number } | null; needs_booking?: boolean
 }
+export interface Slots { opening: string; booking: { starts_at: number; ends_at: number } | null; can_change: boolean; why: string
+  changes_left: number; timezone: string; deadline: number; minutes: number; slots: number[] }
 export interface State {
-  step: 'loading' | 'blocked' | 'consent' | 'check' | 'call' | 'done'
+  step: 'loading' | 'blocked' | 'code' | 'schedule' | 'consent' | 'check' | 'call' | 'done'
+  company: string; codeErr: string; codeBusy: boolean
+  sched: Slots | null; schedErr: string; schedBusy: boolean
   blocked: string
   P: PublicInfo | null
   checks: Record<CheckKey, Check>
@@ -60,9 +65,10 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const norm = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
 
 export class InterviewEngine {
-  readonly iid = new URLSearchParams(location.search).get('id') || ''
+  // The link's encrypted key (k); old links carried the interview id (id). The server maps either to the interview.
+  readonly iid = new URLSearchParams(location.search).get('k') || new URLSearchParams(location.search).get('id') || ''
   state: State = {
-    step: 'loading', blocked: '', P: null,
+    step: 'loading', blocked: '', P: null, company: '', codeErr: '', codeBusy: false, sched: null, schedErr: '', schedBusy: false,
     checks: { cam: { state: '', text: 'Camera', hidden: false }, mic: { state: '', text: 'Microphone', hidden: false },
       face: { state: '', text: 'Your face is clearly visible', hidden: false }, live: { state: '', text: 'Turn your head slowly to one side, then the other', hidden: true },
       room: { state: '', text: 'Show the room: turn your camera slowly all around you', hidden: true }, ears: { state: '', text: 'No earphones or earbuds (checked from the head-turn photos)', hidden: true }, screen: { state: '', text: 'Single screen', hidden: true },
@@ -168,6 +174,7 @@ export class InterviewEngine {
     const r = await fetch(`/api/interviews/${this.iid}/public`).catch(() => null)
     if (!r || !r.ok) return this.set({ step: 'blocked', blocked: 'This interview link is not valid.' })
     const P: PublicInfo = await r.json()
+    if (P.locked) return this.set({ step: 'code', company: (P as any).company || '' })
     this.state = { ...this.state, P, maxWarnings: P.max_warnings }
     document.title = `Interview · ${P.role || ''}`
     const ch = this.state.checks
@@ -181,6 +188,7 @@ export class InterviewEngine {
     if (P.status === 'completed' || P.status === 'scored') return this.closed('Thank you', 'Your interview is complete. The HR team will get back to you.', 'ok')
     if (P.status === 'incomplete' || P.status === 'cancelled') return this.closed('Interview closed', 'This interview is closed. Please contact HR if you think this is a mistake.')
     if (P.expired) return this.closed('Link expired', 'Please contact HR for a new link.')
+    if (P.needs_booking || (P.opening === 'pick' && P.booking && P.not_open_yet)) return this.openSchedule()
     if (P.not_open_yet) return this.set({ step: 'blocked', blocked: `This interview opens at ${new Date((P.available_from || 0) * 1000).toLocaleString()}. Please come back then.` })
     const missing: string[] = []
     if (!navigator.mediaDevices?.getUserMedia) missing.push('camera/microphone access')
@@ -190,6 +198,26 @@ export class InterviewEngine {
     if (missing.length) return this.set({ step: 'blocked', blocked: `This browser can't run the interview (missing: ${missing.join(', ')}). Open the link in the latest Chrome or Edge${P.require_screen_share ? ' on a laptop or desktop' : ''}.` })
     this.set({ step: 'consent' })
     if (P.resuming && P.reconnect_seconds_left !== null) this.startRejoinCountdown(P.reconnect_seconds_left)
+  }
+
+  // ------------------------------------------------------------ access code and booking a time
+  async unlock(code: string) {
+    this.set({ codeBusy: true, codeErr: '' })
+    try { await post(`/api/interviews/${this.iid}/unlock`, { code }); this.set({ codeBusy: false }); await this.load() }
+    catch (e: any) { this.set({ codeBusy: false, codeErr: e?.message || 'That code isn\'t right.' }) }
+  }
+  async resendCode() {
+    try { await post(`/api/interviews/${this.iid}/resend-code`, {}); return '' } catch (e: any) { return e?.message || 'Could not send the code.' }
+  }
+  async openSchedule() {
+    this.set({ step: 'schedule', schedErr: '' })
+    try { const r = await fetch(`/api/interviews/${this.iid}/slots`); if (!r.ok) throw new Error(); this.set({ sched: await r.json() }) }
+    catch { this.set({ schedErr: 'Could not load the available times. Refresh the page to try again.' }) }
+  }
+  async book(startsAt: number) {
+    this.set({ schedBusy: true, schedErr: '' })
+    try { this.set({ sched: await post<Slots>(`/api/interviews/${this.iid}/book`, { starts_at: startsAt }), schedBusy: false }); await this.load() }
+    catch (e: any) { this.set({ schedBusy: false, schedErr: e?.message || 'Could not book that time.' }); this.openSchedule() }
   }
 
   // ------------------------------------------------------------ step 2: device check

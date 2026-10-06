@@ -9,6 +9,7 @@ import { useHealth } from '../lib/health'
 import { LinkActions } from '../components/LinkActions'
 
 interface Row {
+  candidate_path: string
   id: string; ref: string; created_at: number; status: string; candidate?: string; role?: string; company?: string; email?: string
   recommendation?: string; overall?: number | null; risk?: 'low' | 'medium' | 'high'; decision?: string; ended_early: boolean
   disqualified: boolean; warnings: number
@@ -145,7 +146,7 @@ export default function Interviews() {
                       <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-slate-500 dark:text-slate-400 lg:table-cell" title={when(r.created_at)}>{ago(r.created_at)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <Button size="sm" href={`/app/interviews/${encodeURIComponent(r.ref)}`}>Report</Button>
-                        {!['completed', 'scored', 'incomplete'].includes(r.status) && <LinkActions className="ml-1.5 align-middle" url={`${base}/interview.html?id=${r.id}`} icon={<Link2 className="size-3.5" />} label="Link"
+                        {!['completed', 'scored', 'incomplete'].includes(r.status) && <LinkActions className="ml-1.5 align-middle" url={`${base}${r.candidate_path}`} icon={<Link2 className="size-3.5" />} label="Link"
                           copied="Candidate link copied" to={{ email: r.email, name: r.candidate }} subject={`Your interview${r.role ? ` for ${r.role}` : ''}`}
                           message={`Hi ${(r.candidate || '').split(' ')[0] || 'there'}, here is the link to your AI interview${r.role ? ` for ${r.role}` : ''}:`} />}
                       </td>

@@ -61,7 +61,9 @@ async def setup_ai_interview(rr_id: str) -> None:
             text += f" Please take it by {tzfmt.when(rr.deadline_at, tzfmt.org_tz(s.get(db.Org, rr.org_id)))}."
         if rnd.get("message"):
             text += "\n\n" + rnd["message"]
+        text += "\n\nThe interview page asks for an access code: it comes in a separate email."
         flows.notify_candidate(s, app, "Your next step", text, "invite_ai_interview", link, "Start here")
+    interviews.email_code(rec)
     log.info("[%s] AI interview round ready (%s plan)", rec["id"], plan.get("source"))
 
 

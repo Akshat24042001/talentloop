@@ -42,7 +42,8 @@ LABELS = {
     "room_scan_passed": "Room scan: nobody else found", "room_scan_failed": "Room scan: someone else was found",
     "ear_check_passed": "Ear check: no earphones seen", "ear_check_failed": "Ear check: earphones or earbuds seen",
     "ear_check_unverified": "Ear check photos taken but not checked by AI (no vision model): review them",
-    "vision_check": "AI photo check", "vision_flag": "AI photo check found a problem",
+    "vision_check": "AI photo check", "vision_flag": "AI photo check found a problem", "access_code_wrong": "Wrong access code entered",
+    "access_code_reset": "HR issued a new access code", "time_booked": "Candidate booked the interview time",
     "camera_checks_unavailable": "Camera checks could not start on this browser",
 }
 HIGH = {"integrity_warning", "disqualified", "multiple_faces", "screen_share_stopped", "paste", "device_changed", "screen_share_denied",

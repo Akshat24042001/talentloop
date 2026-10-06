@@ -115,6 +115,87 @@ class _RetryLostConnection:
             await self.app(scope, receive, send)
 
 
+class _CandidateGate:
+    """Every candidate-side interview call goes through here. The link carries an encrypted key ("k"), never the
+    interview id; the key is turned back into the id for the route, and every call except /public and /unlock needs
+    the access-code cookie that /unlock sets. A raw interview id still opens interviews made before access codes, and
+    lets a signed-in team member preview their own; for anyone else it is "not found"."""
+    ACTIONS = {"public", "unlock", "consent", "device", "assistant", "started", "heartbeat", "progress", "violation",
+               "reference-photo", "events", "snapshot", "vision-check", "media", "complete", "feedback", "book", "slots",
+               "resend-code"}
+    OPEN = {"public", "unlock", "resend-code"}
+
+    def __init__(self, app):
+        self.app = app
+
+    _codes: dict[str, tuple[str, float]] = {}       # shared: a new code takes effect at once (forget)
+
+    def code(self, iid: str) -> str | None:
+        hit = self._codes.get(iid)
+        if hit and time.time() - hit[1] < 20:
+            return hit[0]
+        try:
+            rec = store.load(iid)
+        except ValueError:
+            rec = None
+        if not rec:
+            return None
+        code = interviews.code_of(rec)
+        self._codes[iid] = (code, time.time())
+        if len(self._codes) > 5000:
+            self._codes.clear()
+        return code
+
+    @classmethod
+    def forget(cls, iid: str) -> None:
+        cls._codes.pop(iid, None)
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        parts = path.split("/")
+        if not (len(parts) >= 5 and parts[1] == "api" and parts[2] == "interviews" and parts[4] in self.ACTIONS):
+            return await self.app(scope, receive, send)
+        key, action = parts[3], parts[4]
+        iid = interviews.iid_of_key(key)
+        unlocked = False
+        if iid:
+            code = self.code(iid)
+            if code is None:
+                return await self._deny(scope, receive, send, 404, "This interview link is not valid.")
+            cookies = Request(scope).cookies
+            unlocked = not code or cookies.get(interviews.cookie_name(iid)) == interviews.pass_value(iid, code)
+        else:
+            iid = key
+            code = self.code(iid)
+            if code:                          # a raw id: only the company's own team may use it (preview)
+                req = Request(scope)
+                try:
+                    with db.session() as s:
+                        ctx = auth.current(req, s)
+                        ctx.visible_jobs = auth.visible_job_ids(s, ctx)   # type: ignore[attr-defined]
+                    rec = store.load(iid)
+                    unlocked = bool(rec) and can_see_interview(ctx, rec)
+                except Exception:
+                    unlocked = False
+                if not unlocked:
+                    return await self._deny(scope, receive, send, 404, "This interview link is not valid.")
+            else:
+                unlocked = True               # made before access codes existed (or not found: the route says so)
+        if not unlocked and action not in self.OPEN:
+            return await self._deny(scope, receive, send, 401, "Enter the access code from your invitation email first.")
+        scope = dict(scope)
+        parts[3] = iid
+        scope["path"] = "/".join(parts)
+        scope["raw_path"] = scope["path"].encode()
+        scope.setdefault("state", {})
+        scope["state"] = {**scope["state"], "iv_unlocked": unlocked, "iv_key": key}
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _deny(scope, receive, send, code: int, msg: str):
+        await JSONResponse({"detail": msg}, status_code=code)(scope, receive, send)
+
+
 @app.middleware("http")
 async def _timing(req: Request, call_next):
     """Server-Timing on every API response (browser devtools > Network > Timing): total time, database queries and
@@ -348,10 +429,14 @@ async def create_interview(req: Request):
                                    settings=settings, expires_hours=body.get("expires_hours") or 72,
                                    lines=await brain.localize_lines(settings.get("language") or "en"))
     iid = rec["id"]
+    invited = False
+    if body.get("send_invite", True) and settings.get("candidate_email"):
+        from . import selfbook
+        invited = selfbook.invite(rec)
     with db.session() as s:
         row = s.get(db.InterviewIndex, iid)
         ref = ivindex.ref_of(row) if row else iid
-    return {"id": iid, "ref": ref, "candidate_path": f"/interview.html?id={iid}", "report_path": f"/app/interviews/{ref}",
+    return {"id": iid, "ref": ref, "candidate_path": interviews.cand_path(iid), "access_code": interviews.code_of(rec), "invited": invited, "report_path": f"/app/interviews/{ref}",
             "warnings": _history_warnings(settings["candidate_email"], iid, org_id=ctx.org_id, all_orgs=ctx.via_key)}
 
 
@@ -419,7 +504,27 @@ def get_interview(iid: str, req: Request):
         out["stats"] = proctor.stats(rec)
         out["started_at"] = proctor.interview_start(rec)
     out["reconnect_window_sec"] = reconnect_window(rec)
+    acc = rec.get("access") or {}
+    out["candidate_link"] = interviews.cand_url(rec["id"]) if acc else interviews.cand_url(rec["id"]).split("/interview.html")[0] + f"/interview.html?id={rec['id']}"
+    out["access"] = {"code": acc.get("code"), "issued_at": acc.get("issued_at"), "opened": len(acc.get("unlocks") or []),
+                     "last_opened": (acc.get("unlocks") or [{}])[-1].get("at"),
+                     "wrong_tries": len([f for f in acc.get("fails") or [] if time.time() - f.get("at", 0) < interviews.CODE_WINDOW_SEC])} if acc else None
     return out
+
+
+@app.post("/api/interviews/{iid}/access-code")
+async def new_access_code(iid: str, req: Request):
+    """A new access code (the old one and every browser that used it stop working), emailed to the candidate."""
+    ctx, rec = hr_rec(iid, req, manage=True)
+    body = await req.json() if (req.headers.get("content-length") or "0") != "0" else {}
+    async with store.lock(rec["id"]):
+        rec = get_rec(rec["id"])
+        rec["access"] = {**interviews.new_access(), "unlocks": []}
+        server_event(rec, "access_code_reset", f"by {(ctx.user.email if ctx.user else '') or 'HR'}")
+        store.save(rec)
+    _CandidateGate.forget(rec["id"])
+    sent = interviews.email_code(rec) if body.get("email", True) else False
+    return {"code": rec["access"]["code"], "emailed": sent}
 
 
 @app.get("/api/interviews/{iid}/proctoring")
@@ -569,6 +674,8 @@ def _check_open(rec: dict):
                                  "Please contact HR.")
     if rec["status"] in CLOSED or rec["status"] == "cancelled":
         raise HTTPException(409, "This interview has already been completed. Thank you.")
+    if rec.get("settings", {}).get("opening") == "pick" and not (rec.get("booking") and not rec["booking"].get("cancelled_at")):
+        raise HTTPException(425, "Please pick your interview time first.")
     af = rec.get("settings", {}).get("available_from")
     if af and time.time() < af:
         raise HTTPException(425, "This interview is not open yet.")
@@ -577,10 +684,13 @@ def _check_open(rec: dict):
 
 
 @app.get("/api/interviews/{iid}/public")
-def public_info(iid: str):
+def public_info(iid: str, req: Request):
     rec = get_rec(iid)
     p = rec["plan"]
     s = rec["settings"]
+    if not getattr(req.state, "iv_unlocked", True):
+        # Before the access code: nothing about the candidate or the interview, only whose interview page this is.
+        return {"locked": True, "company": p.get("company"), "server_time": time.time()}
     resuming = rec["status"] == "in_progress" and _spoke(rec)
     deadline = last_activity(rec) + reconnect_window(rec) if resuming else None
     # Deliberately no question count and no duration: the candidate is not told either.
@@ -599,9 +709,85 @@ def public_info(iid: str):
             "ear_check": s.get("ear_check", True) is not False and s.get("face_detection", True) is not False,
             "vision_check_sec": int(s.get("vision_check_sec", 120) or 0) if s.get("face_detection", True) is not False else 0,
             "vision_available": bool(llm.VISION_MODEL) or llm.MOCK,
+            "opening": s.get("opening") or "now", "booking": rec.get("booking") if rec.get("booking") and not rec["booking"].get("cancelled_at") else None,
+            "needs_booking": s.get("opening") == "pick" and not (rec.get("booking") and not rec["booking"].get("cancelled_at")) and rec["status"] == "created",
             "reconnect_window_sec": reconnect_window(rec), "resuming": resuming,
             "reconnect_seconds_left": max(0, int(deadline - time.time())) if deadline else None,
             "server_time": time.time()}
+
+
+@app.post("/api/interviews/{iid}/unlock")
+async def unlock(iid: str, req: Request):
+    """Check the 6-digit access code and remember it in this browser (an HttpOnly cookie for this interview only).
+    Five wrong codes in 15 minutes lock the link for the rest of that window; HR sees every attempt."""
+    import hmac as _hmac
+    body = await req.json()
+    entered = "".join(ch for ch in str(body.get("code") or "") if ch.isdigit())[:6]
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        acc = rec.setdefault("access", interviews.new_access())
+        now = time.time()
+        acc["fails"] = [f for f in acc.get("fails", []) if now - f.get("at", 0) < interviews.CODE_WINDOW_SEC]
+        if len(acc["fails"]) >= interviews.CODE_TRIES:
+            wait = int(interviews.CODE_WINDOW_SEC - (now - acc["fails"][0]["at"])) // 60 + 1
+            store.save(rec)
+            raise HTTPException(429, f"Too many wrong codes. Try again in {wait} minute{'s' if wait > 1 else ''}, or ask HR to send you a new code.")
+        if not entered or not _hmac.compare_digest(entered, interviews.code_of(rec)):
+            acc["fails"].append({"at": now, "ip": client_ip(req)})
+            server_event(rec, "access_code_wrong", f"from {client_ip(req)}")
+            store.save(rec)
+            left = interviews.CODE_TRIES - len(acc["fails"])
+            raise HTTPException(403, "That code isn't right." + (f" {left} tr{'ies' if left > 1 else 'y'} left." if left > 0 else " The link is locked for 15 minutes."))
+        acc["fails"] = []
+        acc.setdefault("unlocks", []).append({"at": now, "ip": client_ip(req), "ua": req.headers.get("user-agent", "")[:200]})
+        acc["unlocks"] = acc["unlocks"][-20:]
+        store.save(rec)
+        code = interviews.code_of(rec)
+    key = getattr(req.state, "iv_key", "") or interviews.cand_key(iid)
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(interviews.cookie_name(iid), interviews.pass_value(iid, code), max_age=30 * 86400, httponly=True,
+                    secure=req.url.scheme == "https" or req.headers.get("x-forwarded-proto") == "https", samesite="lax",
+                    path=f"/api/interviews/{key}")
+    return resp
+
+
+@app.get("/api/interviews/{iid}/slots")
+def interview_slots(iid: str):
+    from . import selfbook
+    return selfbook.view(get_rec(iid))
+
+
+@app.post("/api/interviews/{iid}/book")
+async def interview_book(iid: str, req: Request):
+    """The candidate books (or moves) their interview time; a confirmation with a calendar invite follows."""
+    from . import selfbook
+    body = await req.json()
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        try:
+            selfbook.book(rec, float(body.get("starts_at") or 0))
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        server_event(rec, "time_booked", time.strftime("%d %b %H:%M UTC", time.gmtime(rec["booking"]["starts_at"])))
+        store.save(rec)
+    return selfbook.view(rec)
+
+
+@app.post("/api/interviews/{iid}/resend-code")
+async def resend_code(iid: str):
+    """Email the same access code again, only to the candidate's own address on file (three times an hour at most)."""
+    async with store.lock(iid):
+        rec = get_rec(iid)
+        acc = rec.setdefault("access", interviews.new_access())
+        now = time.time()
+        acc["resent"] = [t for t in acc.get("resent", []) if now - t < 3600]
+        if len(acc["resent"]) >= 3:
+            raise HTTPException(429, "The code was already sent 3 times in the last hour. Check your spam folder, or contact HR.")
+        acc["resent"].append(now)
+        store.save(rec)
+    if not interviews.email_code(rec):
+        raise HTTPException(400, "We have no email address for this interview. Please contact HR.")
+    return {"ok": True}
 
 
 @app.post("/api/interviews/{iid}/consent")
@@ -1491,4 +1677,5 @@ else:
         return PlainTextResponse("The web interface has not been built. Run: cd frontend && npm ci && npm run build",
                                  status_code=503)
 
+app.add_middleware(_CandidateGate)
 app.add_middleware(_RetryLostConnection)   # added last, so it wraps everything else

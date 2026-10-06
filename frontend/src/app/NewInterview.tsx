@@ -66,9 +66,9 @@ export default function NewInterview() {
   const [planWarn, setPlanWarn] = useState<string[]>([])
   const [json, setJson] = useState('')
   const [gen, setGen] = useState(false), [err1, setErr1] = useState('')
-  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, room: true, ears: true, strictRoom: true, vision: '120', snap: true, rejoin: '90', openAt: '', validH: '72' })
+  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, room: true, ears: true, strictRoom: true, vision: '120', snap: true, rejoin: '90', openAt: '', validH: '72', opening: 'pick' as 'pick' | 'now' | 'fixed', invite: true })
   const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
-  const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[] } | null>(null)
+  const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[]; code: string; invited: boolean } | null>(null)
   const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
   const { query } = useLocation()
   const link_ = { job_id: query.get('job') || '', candidate_id: query.get('candidate') || '', application_id: query.get('application') || '' }
@@ -120,10 +120,10 @@ export default function NewInterview() {
     setErr2(''); setCreating(true)
     try {
       const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 90,
-        available_from: st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap, room_scan: st.room, ear_check: st.ears, strict_room: st.strictRoom, vision_check_sec: Number(st.vision),
+        opening: st.opening, available_from: st.opening === 'fixed' && st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap, room_scan: st.room, ear_check: st.ears, strict_room: st.strictRoom, vision_check_sec: Number(st.vision),
         enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
-      const r = await api<{ candidate_path: string; report_path: string; warnings: string[] }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })
-      setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [] })
+      const r = await api<{ candidate_path: string; report_path: string; warnings: string[]; access_code: string; invited: boolean }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, send_invite: st.invite && !!f.email.trim(), ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })
+      setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [], code: r.access_code, invited: r.invited })
       go(4)
     } catch (e: any) { setErr2(e.message) }
     setCreating(false)
@@ -242,14 +242,22 @@ export default function NewInterview() {
               <Group title="Link" icon={<Link2 />}>
                 <div className="grid gap-4 py-3">
                   <Field label="Rejoin window after a dropped call" htmlFor="rejoin" hint="Seconds (10 to 900)."><Input id="rejoin" type="number" min={10} max={900} value={st.rejoin} onChange={e => setSt(s => ({ ...s, rejoin: e.target.value }))} /></Field>
-                  <Field label="Link opens at (optional)" htmlFor="openAt"><DateTimePicker id="openAt" aria-label="Link opens" value={st.openAt} onChange={v => setSt(s => ({ ...s, openAt: v }))} /></Field>
-                  <Field label="Link valid for" htmlFor="validH" hint="Hours."><Input id="validH" type="number" min={1} max={720} value={st.validH} onChange={e => setSt(s => ({ ...s, validH: e.target.value }))} /></Field>
+                  <Field label="When does the candidate take it?" htmlFor="opening">
+                    <Select id="opening" value={st.opening} onChange={e => setSt(s => ({ ...s, opening: e.target.value as typeof s.opening }))}>
+                      <option value="pick">The candidate picks a time (recommended)</option>
+                      <option value="now">Any time, starting now</option>
+                      <option value="fixed">At a time I choose</option>
+                    </Select></Field>
+                  {st.opening === 'fixed' && <Field label="Opens at" htmlFor="openAt"><DateTimePicker id="openAt" aria-label="Link opens" value={st.openAt} onChange={v => setSt(s => ({ ...s, openAt: v }))} /></Field>}
+                  <Field label={st.opening === 'pick' ? 'The candidate can book a time within' : 'Link valid for'} htmlFor="validH" hint="Hours (72 = 3 days)."><Input id="validH" type="number" min={1} max={720} value={st.validH} onChange={e => setSt(s => ({ ...s, validH: e.target.value }))} /></Field>
+                  <Switch id="inviteOn" checked={st.invite} onChange={v => setSt(s => ({ ...s, invite: v }))} label="Email the invitation to the candidate"
+                    description={f.email.trim() ? `To ${f.email.trim()}: the link${st.opening === 'pick' ? ' to pick a time' : ''}, then the access code in a separate email.` : 'Add the candidate\'s email in step 1 to send it.'} />
                 </div>
               </Group>
             </CardBody>
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-5 py-4 dark:border-ink-800">
               <Button variant="ghost" icon={<ArrowLeft />} onClick={() => go(2)}>Review plan</Button>
-              <Button id="createBtn" className="ml-auto" variant="primary" size="lg" icon={<Link2 />} loading={creating} onClick={create}>Create candidate link</Button>
+              <Button id="createBtn" className="ml-auto" variant="primary" size="lg" icon={<Link2 />} loading={creating} onClick={create}>{st.invite && f.email.trim() ? 'Create and email the invitation' : 'Create candidate link'}</Button>
               {err2 && <span className="w-full text-sm text-red-600 dark:text-red-300">{err2}</span>}
             </div>
           </Card>
@@ -259,9 +267,15 @@ export default function NewInterview() {
         <div>
           <Card id="linkOut" className="ring-2 ring-emerald-500/30">
             <CardHeader title={<span className="flex items-center gap-2"><span className="grid size-6 place-items-center rounded-full bg-emerald-500 text-white"><Check className="size-3.5" strokeWidth={3} /></span>Link ready</span>}
-              description="Send this link to the candidate. You'll find the interview on the Interviews page." />
+              description={link.invited ? `Emailed to ${f.email.trim()}: the invitation${st.opening === 'pick' ? ' (they pick a time)' : ''}, and the access code separately. You'll find the interview on the Interviews page.`
+                : 'Send this link and the access code to the candidate, separately if you can. You\'ll find the interview on the Interviews page.'} />
             <CardBody className="space-y-4">
               {link.warnings.map(w => <Alert key={w} tone="danger" icon={<TriangleAlert />}>{w}</Alert>)}
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 dark:bg-ink-850 dark:ring-ink-700">
+                <ShieldCheck className="size-5 text-brand-600 dark:text-brand-300" />
+                <div className="text-sm">Access code <b id="accessCodeOut" className="ml-1 font-mono text-lg tracking-widest">{link.code}</b>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">The link opens nothing without it. Also shown on the interview's page, where you can issue a new one.</div></div>
+              </div>
               <div className="flex gap-2"><Input id="candLink" readOnly value={link.url} onFocus={e => e.target.select()} /><LinkActions size="md" url={link.url} label="Copy" copied="Candidate link copied" to={{ email: f.email, name: f.cand }} subject={`Your interview for ${f.role}`}
                 message={`Hi ${f.cand.split(' ')[0] || 'there'}, here is the link to your AI interview for ${f.role} at ${f.company}. Use a laptop with a camera and a quiet room:`} /></div>
               <div className="flex flex-wrap gap-2">

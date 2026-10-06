@@ -1,10 +1,12 @@
 """Creating AI interview records: one path for HR's "New interview" page and for the AI interview round of a hiring
 flow (setup.py), so both get the same settings, index row, application link and readable reference."""
+import hashlib
+import hmac
 import os
 import secrets
 import time
 
-from . import db, jd_schema, store
+from . import db, jd_schema, refs, store
 from .api_accounts import org_settings
 
 RECONNECT_WINDOW_SEC = int(os.getenv("RECONNECT_WINDOW_SEC", "90"))
@@ -41,6 +43,10 @@ def settings_from(s: dict | None) -> dict:
            "vision_check_sec": 0 if _intish(s.get("vision_check_sec"), 120) <= 0 else max(45, min(900, _intish(s.get("vision_check_sec"), 120)))}
     af = s.get("available_from")
     out["available_from"] = float(af) if isinstance(af, (int, float)) and af > 0 else None
+    # when it opens: "pick" = the candidate books a time (selfbook.py), "fixed" = available_from, "now" = straight away
+    out["opening"] = s.get("opening") if s.get("opening") in ("pick", "fixed", "now") else ("fixed" if out["available_from"] else "now")
+    if out["opening"] == "pick":
+        out["available_from"] = None
     return out
 
 
@@ -55,7 +61,7 @@ def create_record(*, org_id: str | None, created_by: str | None, job_id: str | N
            "expires_at": starts + max(0.5, float(expires_hours or 72)) * 3600,
            "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
            "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
-           "scoring": None, "settings": settings, "lines": lines or {}}
+           "scoring": None, "settings": settings, "lines": lines or {}, "access": new_access()}
     if settings.get("practice_question", True):
         from . import brain
         brain.add_practice(plan, rec)
@@ -82,3 +88,67 @@ def jd_text(job: db.Job, org: db.Org) -> str:
     for sec in jd["sections"]:
         parts.append(sec["title"] + "\n" + (sec.get("body") or "") + "\n" + "\n".join("- " + x for x in sec.get("items") or []))
     return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Candidate access: the link carries an encrypted key (never the interview id), and a 6-digit access code, emailed
+# separately, unlocks it in each browser. A leaked link alone opens nothing.
+# ---------------------------------------------------------------------------------------------------------------------
+CODE_TRIES, CODE_WINDOW_SEC = 5, 15 * 60
+
+
+def new_access() -> dict:
+    return {"code": f"{secrets.randbelow(10 ** 6):06d}", "fails": [], "unlocks": [], "issued_at": time.time()}
+
+
+def cand_key(iid: str) -> str:
+    return refs.encode("ivc", iid)
+
+
+def iid_of_key(key: str) -> str | None:
+    return refs.decode("ivc", key)
+
+
+def cand_path(iid: str) -> str:
+    return f"/interview.html?k={cand_key(iid)}"
+
+
+def cand_url(iid: str) -> str:
+    from .flows import base_url
+    return base_url() + cand_path(iid)
+
+
+def pass_value(iid: str, code: str) -> str:
+    """What the browser keeps after the code was entered: tied to this interview and this code (a new code logs out)."""
+    return hmac.new(refs.key(), f"ivpass|{iid}|{code}".encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def cookie_name(iid: str) -> str:
+    return "ivp_" + hashlib.sha256(iid.encode()).hexdigest()[:12]
+
+
+def code_of(rec: dict) -> str:
+    return ((rec.get("access") or {}).get("code")) or ""
+
+
+def _contact(rec: dict) -> tuple[str, str, str]:
+    st = rec.get("settings") or {}
+    return (st.get("candidate_email") or "").strip(), (st.get("candidate_phone") or "").strip(), (rec.get("plan") or {}).get("candidate_name") or ""
+
+
+def email_code(rec: dict) -> bool:
+    """The access code on its own (never in the same email as the link), so a forwarded or leaked link opens nothing."""
+    from . import messages
+    to, phone, name = _contact(rec)
+    if not (to or phone) or not rec.get("org_id"):
+        return False
+    p = rec.get("plan") or {}
+    first = (name or "there").split()[0]
+    body = (f"Hi {first},\n\nYour access code for the {p.get('role') or 'AI'} interview at {p.get('company') or 'our company'} is:\n\n"
+            f"    {code_of(rec)}\n\nThe interview page asks for it before anything opens. Keep it to yourself: with the link alone nobody "
+            f"can open your interview. If you didn't expect this email, you can ignore it.\n\nRegards,\n{p.get('company') or ''} Hiring Team")
+    with db.session() as s:
+        messages.queue(s, rec["org_id"], to_email=to, to_phone=phone, subject=f"Your interview access code | {p.get('company') or ''}".strip(" |"),
+                       body=body, template="interview_access_code", candidate_id=rec.get("candidate_id"), application_id=rec.get("application_id"),
+                       whatsapp_text=f"Hi {first}, your access code for the {p.get('role') or ''} interview at {p.get('company') or ''} is {code_of(rec)}.")
+    return True

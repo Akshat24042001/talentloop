@@ -49,6 +49,7 @@ def public_record(rec: dict) -> dict:
     """The interview record without internal secrets and bulky internals."""
     r = json.loads(json.dumps(rec))
     r.pop("snapshots", None)
+    r.pop("access", None)                 # the candidate's access code: shown to HR only on the interview page
     st = r.get("state") or {}
     st.pop("token", None)
     st.pop("tokens", None)

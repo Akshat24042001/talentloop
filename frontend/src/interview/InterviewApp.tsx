@@ -52,9 +52,100 @@ function Shell({ children, wide }: { children: ReactNode; wide?: boolean }) {
 function PreCall({ s }: { s: State }) {
   if (s.step === 'loading') return <Shell><div className="grid min-h-[60vh] place-items-center"><Spinner className="size-7 text-brand-400" /></div></Shell>
   if (s.step === 'blocked') return <Shell><div id="blocker" className="mt-10 rounded-2xl bg-red-500/10 p-6 text-red-200 ring-1 ring-red-500/20"><TriangleAlert className="mb-2 size-6" />{s.blocked}</div></Shell>
+  if (s.step === 'code') return <AccessCode s={s} />
+  if (s.step === 'schedule') return <Schedule s={s} />
   if (s.step === 'consent') return <Consent s={s} />
   if (s.step === 'check') return <Lobby s={s} />
   return <Done s={s} />
+}
+
+function AccessCode({ s }: { s: State }) {
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState('')
+  const [sending, setSending] = useState(false)
+  async function resend() { setSending(true); const err = await engine.resendCode(); setSending(false); setNote(err || 'Sent. Check your inbox (and spam folder) for the email with your code.') }
+  return (
+    <Shell>
+      <div className="mx-auto mt-10 max-w-md rounded-3xl bg-white/[0.04] p-7 ring-1 ring-white/10">
+        <ShieldCheck className="size-8 text-brand-300" />
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Enter your access code</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-300">{s.company ? <><b>{s.company}</b> sent</> : 'You received'} your 6-digit code in a separate email. It keeps your interview private: the link alone opens nothing.</p>
+        <form className="mt-5" onSubmit={e => { e.preventDefault(); if (code.length === 6) engine.unlock(code) }}>
+          <label htmlFor="accessCode" className="sr-only">Access code</label>
+          <input id="accessCode" autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} placeholder="000000"
+            onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            className="w-full rounded-xl bg-ink-900 px-4 py-3 text-center font-mono text-3xl tracking-[0.5em] text-white ring-1 ring-white/15 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-400" />
+          {s.codeErr && <p role="alert" className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-500/20">{s.codeErr}</p>}
+          <Button id="unlockBtn" type="submit" variant="primary" className="mt-4 w-full" loading={s.codeBusy} disabled={code.length !== 6}>Continue</Button>
+        </form>
+        <div className="mt-5 text-sm text-slate-400">Can't find it? <button type="button" onClick={resend} disabled={sending} className="font-medium text-brand-300 hover:underline disabled:opacity-50">Email me the code again</button></div>
+        {note && <p className="mt-2 text-sm text-slate-300">{note}</p>}
+      </div>
+    </Shell>
+  )
+}
+
+const fmtDay = (t: number) => new Date(t * 1000).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+const fmtTime = (t: number) => new Date(t * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+const fmtWhen = (t: number) => new Date(t * 1000).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
+
+let lastAutoOpen = 0
+function Schedule({ s }: { s: State }) {
+  const v = s.sched
+  const [changing, setChanging] = useState(false)
+  const [day, setDay] = useState('')
+  const [pick, setPick] = useState<number | null>(null)
+  const days = useMemo(() => {
+    const m = new Map<string, number[]>()
+    for (const t of v?.slots || []) { const k = fmtDay(t); m.set(k, [...(m.get(k) || []), t]) }
+    return [...m.entries()]
+  }, [v])
+  const [, tick] = useState(0)
+  useEffect(() => { const i = setInterval(() => tick(x => x + 1), 30000); return () => clearInterval(i) }, [])
+  if (!v) return <Shell><div className="grid min-h-[50vh] place-items-center">{s.schedErr ? <p className="text-red-200">{s.schedErr}</p> : <Spinner className="size-7 text-brand-400" />}</div></Shell>
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const cur = day || days[0]?.[0] || ''
+  const booked = v.booking
+  const opensIn = booked ? Math.max(0, Math.round((booked.starts_at - 600 - Date.now() / 1000) / 60)) : 0
+  if (booked && Date.now() / 1000 >= booked.starts_at - 600 && !s.schedBusy && Date.now() - lastAutoOpen > 25000) {   // time to go in
+    lastAutoOpen = Date.now(); setTimeout(() => engine.load(), 0)
+  }
+  const picker = (
+    <div className="mt-5">
+      {days.length === 0 ? <p className="text-sm text-slate-300">No times are left before the deadline. Please contact HR.</p> : <>
+        <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Day">
+          {days.map(([d]) => <button key={d} role="tab" aria-selected={d === cur} onClick={() => { setDay(d); setPick(null) }}
+            className={cn('shrink-0 rounded-xl px-3 py-2 text-sm font-medium ring-1', d === cur ? 'bg-brand-500 text-white ring-brand-400' : 'bg-white/5 text-slate-200 ring-white/10 hover:bg-white/10')}>{d}</button>)}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {(days.find(([d]) => d === cur)?.[1] || []).map(t => <button key={t} data-slot={t} onClick={() => setPick(t)}
+            className={cn('rounded-xl px-2 py-2.5 text-sm font-medium tabular-nums ring-1', pick === t ? 'bg-brand-500 text-white ring-brand-400' : 'bg-white/5 text-slate-200 ring-white/10 hover:bg-white/10')}>{fmtTime(t)}</button>)}
+        </div>
+        <p className="mt-2 text-xs text-slate-400">Times are shown in your time zone ({tz}). The interview takes about {v.minutes} minutes.</p>
+        <Button id="bookBtn" variant="primary" className="mt-4 w-full sm:w-auto" disabled={pick == null} loading={s.schedBusy}
+          onClick={() => { if (pick != null) { engine.book(pick); setChanging(false); setPick(null) } }}>{pick != null ? `Book ${fmtDay(pick)}, ${fmtTime(pick)}` : 'Pick a time'}</Button>
+      </>}
+    </div>
+  )
+  return (
+    <Shell>
+      <div className="mx-auto mt-8 max-w-2xl rounded-3xl bg-white/[0.04] p-7 ring-1 ring-white/10">
+        {booked ? <>
+          <Check className="size-8 text-emerald-300" />
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight">Your interview is booked</h1>
+          <p id="bookedFor" className="mt-2 text-lg text-slate-100">{fmtWhen(booked.starts_at)}</p>
+          <p className="mt-2 text-sm leading-relaxed text-slate-300">Come back to this link then: it opens 10 minutes before{opensIn > 0 ? ` (in about ${opensIn >= 120 ? `${Math.round(opensIn / 60)} hours` : `${opensIn} minutes`})` : ''}. We've emailed you a confirmation with a calendar invite.</p>
+          {v.can_change ? (changing ? picker : <Button className="mt-5" onClick={() => setChanging(true)}>Change the time ({v.changes_left} change{v.changes_left === 1 ? '' : 's'} left)</Button>)
+            : v.why && <p className="mt-4 text-sm text-slate-400">{v.why}</p>}
+        </> : <>
+          <h1 className="text-2xl font-semibold tracking-tight">Pick a time for your interview</h1>
+          <p className="mt-2 text-sm leading-relaxed text-slate-300">A voice interview with an AI interviewer, in your browser. Choose a time when you can sit alone in a quiet room with a laptop. Book before {fmtWhen(v.deadline)}.</p>
+          {picker}
+        </>}
+        {s.schedErr && <p role="alert" className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-500/20">{s.schedErr}</p>}
+      </div>
+    </Shell>
+  )
 }
 
 function Consent({ s }: { s: State }) {

@@ -94,7 +94,7 @@ def ref_of(row: db.InterviewIndex) -> str:
 
 def row_json(row: db.InterviewIndex) -> dict:
     sm = row.summary or {}
-    return {"id": row.id, "ref": ref_of(row), "number": row.number, "created_at": row.created_at, "status": row.status,
+    return {"id": row.id, "ref": ref_of(row), "candidate_path": f"/interview.html?k={refs.encode('ivc', row.id)}", "number": row.number, "created_at": row.created_at, "status": row.status,
             "candidate": row.candidate, "role": row.role, "company": row.company, "email": row.email, "channel": row.channel,
             "language": row.language, "job_id": row.job_id, "candidate_id": row.candidate_id, **{k: v for k, v in sm.items() if k != "needs_sweep"}}
 

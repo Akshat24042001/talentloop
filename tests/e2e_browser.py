@@ -141,7 +141,13 @@ def create(c: httpx.Client, **settings) -> str:
            "jd": (s / "sample_jd.txt").read_text(), "resume": (s / "sample_resume.txt").read_text(),
            "questions": [q for q in (s / "sample_questions.txt").read_text().splitlines() if q.strip()]}
     plan = c.post("/api/plan", json=inp).raise_for_status().json()["plan"]
-    return c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": settings}).raise_for_status().json()["id"]
+    out = c.post("/api/interviews", json={"plan": plan, "inputs": inp, "settings": settings}).raise_for_status().json()
+    assert "id=" not in out["candidate_path"] and out["id"] not in out["candidate_path"], out["candidate_path"]
+    CREATED[out["id"]] = out
+    return out["id"]
+
+
+CREATED: dict[str, dict] = {}       # interview id -> the create response (candidate link and access code)
 
 
 def wait(fn, timeout=60, every=0.5, what="condition"):
@@ -204,7 +210,9 @@ def main():
                     init += ("const _l = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'label');"
                              "Object.defineProperty(MediaStreamTrack.prototype, 'label', {get() { return this.kind === 'video' ? 'OBS Virtual Camera' : _l.get.call(this) }});")
                 pg.add_init_script(init)
-                pg.goto(f"{BASE}/interview.html?id={iid}")
+                pg.goto(BASE + CREATED[iid]["candidate_path"])      # the encrypted link, then the access code
+                pg.fill("#accessCode", CREATED[iid]["access_code"])
+                pg.click("#unlockBtn")
                 return pg, errs
 
             def pass_checks(pg, share=False):
@@ -371,9 +379,11 @@ def main():
             pg3.wait_for_function("document.getElementById('doneTitle')?.textContent === 'Interview closed'", timeout=40000)
             # and the server refuses a late rejoin even if the page is bypassed (after its 2 s grace)
             time.sleep(3)
-            late = httpx.post(f"{BASE}/api/interviews/{iid3}/assistant")
-            print("late rejoin:", late.status_code, late.json().get("detail", "")[:80])
-            assert late.status_code in (409, 410), late.status_code
+            assert httpx.post(f"{BASE}/api/interviews/{iid3}/assistant").status_code == 404, "a raw id must open nothing"
+            key3 = CREATED[iid3]["candidate_path"].split("k=")[1]       # the candidate's own browser: key + code cookie
+            late = pg3.request.post(f"{BASE}/api/interviews/{key3}/assistant", data={})
+            print("late rejoin:", late.status, late.json().get("detail", "")[:80])
+            assert late.status in (409, 410), late.status
             r3 = wait(lambda: (lambda r: r if r["status"] in ("incomplete", "scored") and r.get("report") else None)(
                 c.get(f"/api/interviews/{iid3}").json()), 60, what="abandoned interview closed and scored")
             assert r3.get("ended_early") and any("did not reach its normal end" in x for x in r3["report"]["human_review_reasons"])
@@ -390,7 +400,7 @@ def main():
             pg4.wait_for_selector("#endModal:not(.hidden)")
             pg4.click("#endConfirm")
             pg4.wait_for_function("document.getElementById('doneTitle')?.textContent === 'Interview ended'", timeout=30000)
-            assert httpx.post(f"{BASE}/api/interviews/{iid4}/assistant").status_code == 409
+            assert pg4.request.post(f"{BASE}/api/interviews/{CREATED[iid4]['candidate_path'].split('k=')[1]}/assistant", data={}).status == 409
             assert tracks_stopped(pg4)
             ev4 = wait(lambda: [e for e in c.get(f"/api/interviews/{iid4}").json()["events"] if e["type"] == "virtual_camera"], 20, what="virtual camera event")
             assert "OBS" in ev4[0]["detail"], ev4
@@ -430,7 +440,7 @@ def main():
             assert r5["disqualified"] and len(r5["warnings"]) == 2 and r5["report"]["human_review_reasons"][0].startswith("DISQUALIFIED")
             shots = [(i["reason"], i.get("source")) for i in r5["images"]]
             assert ("window_blur", "screen") in shots and ("multi_monitor", "screen") in shots, shots
-            assert httpx.post(f"{BASE}/api/interviews/{iid5}/assistant").status_code == 409, "a disqualified candidate rejoined"
+            assert pg5.request.post(f"{BASE}/api/interviews/{CREATED[iid5]['candidate_path'].split('k=')[1]}/assistant", data={}).status == 409, "a disqualified candidate rejoined"
             if errs5:
                 failures.append(f"disqualification page JS errors: {errs5}")
             hr.goto(f"{BASE}/app/interviews/{iid5}")

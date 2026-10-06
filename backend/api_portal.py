@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from . import assessments, auth, db, flows, jd_schema, tzfmt, matching, references, refs, resumes, scheduling, store, verify, worker
+from . import assessments, auth, db, flows, interviews, jd_schema, tzfmt, matching, references, refs, resumes, scheduling, store, verify, worker
 from .offload import offload
 from .api_accounts import org_settings
 
@@ -144,7 +144,7 @@ def round_page(token: str, req: Request):
                                  "require_manager": bool(cfg.get("require_manager")), "referees": references.public_view(rr), "relations": references.RELATIONS}
         elif kind == "ai_interview":
             iid = d.get("interview_id")
-            out["interview"] = {"url": f"/interview.html?id={iid}" if iid and rr.status in ("invited", "in_progress") else None,
+            out["interview"] = {"url": interviews.cand_path(iid) if iid and rr.status in ("invited", "in_progress") else None,
                                 "duration_min": cfg.get("duration_min", 15), "language": cfg.get("language", "en"),
                                 "phone_available": _phone_ok() and bool(c and c.phone), "preparing": rr.status == "setting_up"}
             ac = scheduling.ai_cfg(rnd)

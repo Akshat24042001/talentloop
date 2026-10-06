@@ -93,6 +93,13 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
     } catch (e: any) { toast(e.message) } finally { setBusy('') }
   }
 
+  async function newCode() {
+    if (!await ask('Issue a new access code? The old code stops working, browsers that used it must enter the new one, and the candidate gets the new code by email.')) return
+    setBusy('code')
+    try { const r = await api<{ code: string; emailed: boolean }>(`/api/interviews/${iid}/access-code`, { json: { email: true } }); toast(`New code ${r.code}${r.emailed ? ', emailed to the candidate' : ''}`); reload() }
+    catch (e: any) { toast(e.message) } finally { setBusy('') }
+  }
+
   // ---- chart rows
   const scoreRows: BarRow[] = p.questions.filter((q: any) => q.scored).map((q: any) => {
     const r = qres[q.id] || {}, n = Q[q.id].n
@@ -167,7 +174,10 @@ function ReportBody({ rec, reload }: { rec: Rec; reload: () => void }) {
           <Button size="sm" variant="ghost" icon={<Printer />} onClick={() => print()}>Print</Button>
           <Button size="sm" variant="ghost" icon={<Sparkles />} disabled={!rec.state} loading={busy === 'score'} onClick={() => act('score')}>{rep ? 'Re-score with AI' : 'Score now'}</Button>
           {['in_progress', 'created'].includes(rec.status) && <Button size="sm" variant="ghost" icon={<XCircle />} onClick={() => act('close')}>Close interview</Button>}
-          <LinkActions url={`${location.origin}/interview.html?id=${iid}`} icon={<Link2 className="size-3.5" />} label="Candidate link" copied="Candidate link copied"
+          {['in_progress', 'created'].includes(rec.status) && rec.access && <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 text-sm text-slate-600 dark:text-slate-300" title={`Opened in ${rec.access.opened} browser(s)${rec.access.wrong_tries ? `; ${rec.access.wrong_tries} wrong code(s) in the last 15 minutes` : ''}`}>
+            Access code <b id="hrAccessCode" className="font-mono tracking-widest text-slate-900 dark:text-white">{rec.access.code}</b>
+            <Button size="sm" variant="ghost" loading={busy === 'code'} onClick={newCode}>New code</Button></span>}
+          <LinkActions url={rec.candidate_link || `${location.origin}/interview.html?id=${iid}`} icon={<Link2 className="size-3.5" />} label="Candidate link" copied="Candidate link copied"
             to={{ email: rec.settings?.candidate_email, name: rec.plan?.candidate_name }} subject={`Your interview${rec.plan?.role ? ` for ${rec.plan.role}` : ''}`}
             message={`Hi ${(rec.plan?.candidate_name || '').split(' ')[0] || 'there'}, here is the link to your AI interview${rec.plan?.role ? ` for ${rec.plan.role}` : ''}. Use a laptop with a camera and a quiet room:`} />
           <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-500/10" icon={<Trash2 />} onClick={() => act('delete')}>Delete all data</Button>
