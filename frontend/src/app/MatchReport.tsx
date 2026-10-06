@@ -1,7 +1,9 @@
 // The full fit report for one candidate and one job: scores, how the fit score is built, requirement by
 // requirement comparison, skills, and the AI report. Downloadable as a PDF.
 import { CircleCheck, CircleDashed, CircleMinus, CircleX, Download, Printer, Sparkles, Video } from 'lucide-react'
-import { Badge, Button, Card, CardBody, CardHeader, cn } from '../components/ui'
+import { Badge, Button, Card, CardBody, CardHeader, cn, toast } from '../components/ui'
+import { api } from '../lib/api'
+import { useState } from 'react'
 import { BackLink, ErrorBox, PageHeader, PageSkeleton, ScoreRing, useApi } from '../components/kit'
 import { when } from '../lib/format'
 import { useMe } from '../lib/session'
@@ -42,6 +44,26 @@ const SHORT: Record<string, string> = { skills: 'Skills', experience: 'Experienc
 export default function MatchReport({ jobId, candId }: { jobId: string; candId: string }) {
   const me = useMe()
   const { data: d, error, reload } = useApi<Report>(`/api/jobs/${jobId}/match/${candId}`)
+  const [writing, setWriting] = useState(false)
+  const [printing, setPrinting] = useState(false)
+  // Print the same PDF that Download gives, so both buttons produce one identical, complete report.
+  function printPdf() {
+    setPrinting(true)
+    document.getElementById('report-print')?.remove()
+    const f = document.createElement('iframe')
+    f.id = 'report-print'; f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    f.src = `/api/jobs/${jobId}/match/${candId}?format=pdf&inline=1`
+    f.onload = () => {
+      setPrinting(false)
+      try { f.contentWindow!.focus(); f.contentWindow!.print() } catch { window.open(f.src, '_blank') }
+    }
+    document.body.appendChild(f)
+  }
+  async function writeAi() {
+    setWriting(true)
+    try { const r = await api<{ score: number | null }>(`/api/jobs/${jobId}/match/${candId}/ai-report`, { method: 'POST' }); toast(r.score != null ? `AI report written. AI score ${r.score}.` : 'AI report written.'); reload() }
+    catch (e: any) { toast(e.message) } finally { setWriting(false) }
+  }
   if (error) return <ErrorBox error={error} retry={reload} />
   if (!d) return <PageSkeleton />
   const v = d.ai?.verdict ? VERDICT[d.ai.verdict] : null
@@ -54,7 +76,7 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
         title={<span>{d.candidate.name} <span className="font-normal text-slate-500 dark:text-slate-400">for</span> {d.job.title}</span>}
         description={[d.candidate.headline, d.candidate.current_company, d.candidate.location, d.candidate.years != null ? `${d.candidate.years} years` : ''].filter(Boolean).join(' · ')}
         actions={<>
-          <Button icon={<Printer />} onClick={() => print()}>Print</Button>
+          <Button icon={<Printer />} loading={printing} onClick={printPdf}>Print</Button>
           <Button variant="primary" icon={<Download />} href={pdf} download>Download PDF</Button>
         </>} />
 
@@ -64,7 +86,8 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.score} size={64} label="Fit score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">Fit score</div><div className="text-sm font-semibold">Skills, experience, location, notice</div></div></Card>
-        <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.ai_score} size={64} label="AI score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">AI score</div><div className="text-sm font-semibold">{d.ai_score != null ? 'Reads the whole resume' : 'Not run yet'}</div></div></Card>
+        <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.ai_score} size={64} label="AI score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">AI score</div><div className="text-sm font-semibold">{d.ai_score != null ? 'Reads the whole resume' : 'Not run yet'}</div>
+          {me.can.manage_jobs && <Button className="mt-1.5 print:hidden" size="sm" icon={<Sparkles />} loading={writing} onClick={writeAi}>{d.ai_score != null ? 'Rewrite' : 'Write AI report'}</Button>}</div></Card>
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Shortlist rank</div><div className="mt-1 text-2xl font-semibold tabular">{d.rank ? `#${d.rank}` : '-'}<span className="text-sm font-normal text-slate-500 dark:text-slate-400">{d.rank ? ` of ${d.ranked}` : ' not ranked'}</span></div></Card>
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Verdict</div><div className="mt-1.5">{v ? <Badge tone={v.tone}>{v.label}</Badge> : <span className="text-sm text-slate-500 dark:text-slate-400">After the AI report</span>}</div>
           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Must-haves: <b className="text-slate-800 dark:text-slate-100">{mustHit}/{must.length}</b>{d.application ? <> · <a className="font-medium text-brand-600 hover:underline dark:text-brand-400" href={`/app/jobs/${d.job.ref}?tab=pipeline&app=${d.application.ref}`}>in pipeline</a></> : ''}</div></Card>

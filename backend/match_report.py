@@ -129,7 +129,8 @@ def verdict_line(score: float, ko: list, skills: list, comparison: list, cand) -
 
 
 def pdf(d: dict, company: str) -> bytes:
-    from reportlab.graphics.shapes import Drawing, Rect, String
+    import math
+    from reportlab.graphics.shapes import Circle, Drawing, Line, PolyLine, Polygon, Rect, String, Wedge
     from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
     from . import docs_pdf, exports
     st, mm, colors, _ = docs_pdf._doc("Match report")
@@ -159,6 +160,76 @@ def pdf(d: dict, company: str) -> bytes:
         story += [Paragraph(t(f"{x['title']}" + (f": {x['evidence']}" if x.get("evidence") else "")), st["bullet"], bulletText="•") for x in (vf.get("findings") or [])[:5]]
     if ai.get("summary"):
         story += [Paragraph("AI summary", st["h2"]), Paragraph(t(ai["summary"]), st["base"])]
+
+    # The same three charts the page shows: fit profile, must-haves, and where this candidate sits among everyone scored.
+    grey, ink, avgc = colors.HexColor("#9aa3b2"), colors.HexColor("#5f6878"), colors.HexColor("#c2410c")
+    pw, ph = 56 * mm, 62 * mm
+    charts = Drawing(3 * pw + 6 * mm, ph)
+    def title(x, text, sub):
+        charts.add(String(x, ph - 8, text, fontName="VeraBd", fontSize=9))
+        charts.add(String(x, ph - 18, sub, fontName="Vera", fontSize=6.5, fillColor=ink))
+    # Radar
+    sig, n = d["signals"], len(d["signals"])
+    short_n = d.get("shortlist_size") or 0
+    title(0, "Fit profile", f"Candidate vs top {short_n} average" if short_n else "Each signal, 0 to 100")
+    cx, cy, rad = pw / 2, (ph - 22) / 2 + 2, 17 * mm
+    pt = lambda i, v: (cx + rad * v / 100 * math.sin(2 * math.pi * i / n), cy + rad * v / 100 * math.cos(2 * math.pi * i / n))
+    if n >= 3:
+        for ring in (25, 50, 75, 100):
+            charts.add(Polygon(sum((list(pt(i, ring)) for i in range(n)), []), fillColor=None, strokeColor=track, strokeWidth=0.6))
+        for i, sg in enumerate(sig):
+            charts.add(Line(cx, cy, *pt(i, 100), strokeColor=track, strokeWidth=0.6))
+            lx, ly = pt(i, 122)
+            charts.add(String(lx, ly - 2, {"skills": "Skills", "experience": "Experience", "relevance": "Relevance", "location": "Location", "logistics": "Notice & pay"}.get(sg["key"], sg["label"]),
+                              fontName="Vera", fontSize=6, textAnchor="middle", fillColor=ink))
+        if short_n:
+            avg_pts = sum((list(pt(i, (d.get("shortlist_avg") or {}).get(sg["key"], 0))) for i, sg in enumerate(sig)), [])
+            charts.add(PolyLine(avg_pts + avg_pts[:2], strokeColor=avgc, strokeWidth=1, strokeDashArray=[2, 2]))
+        charts.add(Polygon(sum((list(pt(i, sg["score"])) for i, sg in enumerate(sig)), []), fillColor=colors.Color(0.157, 0.282, 0.902, alpha=0.18), strokeColor=brand, strokeWidth=1.2))
+        charts.add(Rect(0, 0, 6, 3, fillColor=brand, strokeColor=None)); charts.add(String(9, -1, "Candidate", fontName="Vera", fontSize=6.5))
+        if short_n:
+            charts.add(Line(48, 1.5, 54, 1.5, strokeColor=avgc, strokeDashArray=[2, 2])); charts.add(String(57, -1, f"Top {short_n} average", fontName="Vera", fontSize=6.5))
+    # Must-have donut
+    must = [x for x in d["skills"] if x["kind"] == "Must-have"]
+    parts = [("Has it", sum(x["status"] == "matched" for x in must), green), ("Related", sum(x["status"] == "related" for x in must), amber),
+             ("Missing", sum(x["status"] == "missing" for x in must), red)]
+    x0 = pw + 3 * mm
+    title(x0, "Must-have skills", "Has it, related experience, or missing")
+    if must:
+        dcx, dr_ = x0 + pw / 2, 15 * mm
+        start = 90.0
+        for _, v, col in parts:
+            if v:
+                ext = 360.0 * v / len(must)
+                charts.add(Wedge(dcx, cy, dr_, start - ext, start, fillColor=col, strokeColor=colors.white, strokeWidth=1))
+                start -= ext
+        charts.add(Circle(dcx, cy, dr_ * 0.6, fillColor=colors.white, strokeColor=None))
+        charts.add(String(dcx, cy, f"{parts[0][1]}/{len(must)}", fontName="VeraBd", fontSize=12, textAnchor="middle"))
+        charts.add(String(dcx, cy - 9, "has it", fontName="Vera", fontSize=6.5, textAnchor="middle", fillColor=ink))
+        lx = x0
+        for label, v, col in parts:
+            charts.add(Rect(lx, 0, 5, 5, fillColor=col, strokeColor=None)); charts.add(String(lx + 7, 0.5, f"{label} {v}", fontName="Vera", fontSize=6.5)); lx += 18 * mm
+    else:
+        charts.add(String(x0, cy, "The job lists no must-have skills.", fontName="Vera", fontSize=7.5, fillColor=ink))
+    # Distribution: ten bands of fit score, the candidate's band highlighted.
+    x0 = 2 * (pw + 3 * mm)
+    dist = d.get("distribution") or []
+    title(x0, "Against everyone scored", f"Fit scores of all {len(dist)} candidates for this job")
+    bins = [0] * 10
+    for v in dist:
+        bins[min(9, max(0, int(v // 10)))] += 1
+    mine = min(9, max(0, int(d["score"] // 10)))
+    top, bh, bw = max(bins) or 1, ph - 48, (pw - 4) / 10
+    for i, v in enumerate(bins):
+        h = bh * v / top
+        charts.add(Rect(x0 + i * bw + 1, 10, bw - 2, max(h, 0.6), fillColor=brand if i == mine else grey, strokeColor=None))
+        if v:
+            charts.add(String(x0 + i * bw + bw / 2, 12 + h, str(v), fontName="Vera", fontSize=5.5, textAnchor="middle", fillColor=ink))
+    for i in (0, 5, 10):
+        charts.add(String(x0 + i * bw, 2, str(i * 10), fontName="Vera", fontSize=6, textAnchor="middle", fillColor=ink))
+    better = sum(v > d["score"] for v in dist)
+    charts.add(String(x0 + pw - 4, ph - 28, f"This candidate: {round(d['score'])}" + (f", {better} scored higher" if dist else ""), fontName="Vera", fontSize=6.5, textAnchor="end", fillColor=brand))
+    story += [Spacer(1, 10), charts]
 
     story.append(Paragraph("How the fit score is built", st["h2"]))
     width, row_h = 174 * mm, 15
@@ -195,5 +266,5 @@ def pdf(d: dict, company: str) -> bytes:
             story.append(Paragraph(title, st["h2"]))
             story += [Paragraph(t(x), st["bullet"], bulletText="•") for x in items]
     if not ai:
-        story += [Spacer(1, 8), Paragraph("No AI report yet: it is written for each job's shortlist from the Match center.", st["small"])]
+        story += [Spacer(1, 8), Paragraph("No AI report yet. Open this report in TalentLoop and press Write AI report on the AI score card, or write reports for the whole shortlist from the job's Matches tab.", st["small"])]
     return docs_pdf._build(story, f"{c['name']} - {j['title']}", f"{company} · Match report · {c['name']} for {j['title']} · {time.strftime('%d %b %Y')}")

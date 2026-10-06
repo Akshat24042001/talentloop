@@ -486,6 +486,25 @@ def pending_reports(s, org_id: str, job_ids: list[str]) -> list[tuple[db.Job, st
     return todo
 
 
+async def run_ai_one(org_id: str, job_id: str, cand_id: str) -> dict:
+    """Write (or rewrite) the AI report for one candidate and one job, whatever their rank."""
+    _LAST_ERROR.clear()
+    with db.session() as s:
+        j, c = s.get(db.Job, job_id), s.get(db.Candidate, cand_id)
+        m = s.query(db.Match).filter_by(job_id=job_id, candidate_id=cand_id).first()
+        if not (j and c and m) or j.org_id != org_id:
+            return {"generated": 0, "error": "This candidate hasn't been ranked for this job yet. Open the job's Best matches first."}
+        rep, model, inp, outp = await _one_report(j, c, m, asyncio.Semaphore(1))
+        if model != "mock":
+            s.add(db.AIUsage(org_id=org_id, kind="match_report", model=model, input_chars=inp, output_chars=outp))
+        if not rep:
+            from .api_hiring import ai_unavailable
+            return {"generated": 0, "error": ai_unavailable(_LAST_ERROR.get("error") or RuntimeError("no answer"))}
+        m.ai_report, m.ai_score, m.ai_model, m.ai_at = rep, rep.get("score"), model, db.now()
+        m.ai_hash = report_hash(j, c.content_hash or content_hash(c))
+        return {"generated": 1, "score": rep.get("score")}
+
+
 def pending_count(s, org_id: str, job_ids: list[str]) -> dict[str, int]:
     out: dict[str, int] = {}
     for j, _, _ in pending_reports(s, org_id, job_ids):

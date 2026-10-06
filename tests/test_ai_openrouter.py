@@ -73,7 +73,7 @@ def main():
     # The key alone switches on OpenRouter and its free models; only the network address is redirected to the fake.
     assert llm.OPENROUTER and llm.BASE_URL == "https://openrouter.ai/api/v1", llm.BASE_URL
     assert all(m.endswith(":free") or m == "openrouter/free" for m in llm.FAST_CHAIN + llm.SMART_CHAIN), (llm.FAST_CHAIN, llm.SMART_CHAIN)
-    llm._client = AsyncOpenAI(api_key=llm.API_KEY, base_url=f"http://127.0.0.1:{PORT}/api/v1", max_retries=0)
+    llm._clients["openrouter"] = AsyncOpenAI(api_key=llm.API_KEY, base_url=f"http://127.0.0.1:{PORT}/api/v1", max_retries=0)
 
     with TestClient(app) as c:      # one event loop for the whole run, like the real server
         run(c)

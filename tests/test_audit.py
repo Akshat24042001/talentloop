@@ -219,7 +219,8 @@ h = ok(hr.get("/api/health"))
 check("company users see server configuration in /api/health", any(k in h for k in ("fast_model", "storage", "llm_key_set", "platform")), str(sorted(h)))
 check("anonymous visitors see server configuration", any(k in ok(pub.get("/api/health")) for k in ("fast_model", "storage")))
 os.environ["ALLOW_SAMPLE_DATA"] = "0"
-check("a company owner can load sample data", hr.post("/api/demo/seed").status_code != 403)
+# Outside production any company manager may load sample data (Settings > Sample data); production refuses it (test_appenv).
+check("a company owner can't load sample data on a development server", hr.post("/api/demo/seed").status_code == 403)
 os.environ["ALLOW_SAMPLE_DATA"] = "1"
 me_ = ok(hr.get("/api/auth/me"))
 check("the account payload doesn't say the user's role and title", not me_["memberships"][0].get("role_label"), str(me_["memberships"][0]))

@@ -5,6 +5,7 @@ import { Loading, PageHeader, Tabs, TagInput, useApi } from '../components/kit'
 import { api } from '../lib/api'
 import { navigate, useLocation } from '../lib/router'
 import { useMe, useSession } from '../lib/session'
+import { useHealth } from '../lib/health'
 import HiringSettings from './HiringSettings'
 import { ask } from '../components/dialogs'
 
@@ -29,15 +30,16 @@ export default function Settings() {
   const tab = (q as Tab) || 'company'
   const { data: orgInfo, reload: reloadOrg } = useApi<{ has_sample_data: boolean }>('/api/org')
   const samples = !!orgInfo?.has_sample_data
+  const dev = useHealth()?.production === false
   const setTab = (t: Tab) => navigate(`/app/settings?tab=${t}`, { replace: true, keepScroll: true })
-  const tabs = [...(me.can.manage_team ? [{ id: 'company' as Tab, label: 'Company' }, { id: 'careers' as Tab, label: 'Careers page' }, { id: 'hiring' as Tab, label: 'Hiring' }, { id: 'matching' as Tab, label: 'Matching & AI' }, ...(samples ? [{ id: 'data' as Tab, label: 'Sample data' }] : [])] : [])]
+  const tabs = [...(me.can.manage_team ? [{ id: 'company' as Tab, label: 'Company' }, { id: 'careers' as Tab, label: 'Careers page' }, { id: 'hiring' as Tab, label: 'Hiring' }, { id: 'matching' as Tab, label: 'Matching & AI' }, ...(samples || dev ? [{ id: 'data' as Tab, label: 'Sample data' }] : [])] : [])]
   return (
     <>
       <PageHeader title="Settings" description={me.org?.name} />
       <Tabs className="mb-5" tabs={tabs} value={tab} onChange={setTab} />
       {['company', 'careers', 'matching'].includes(tab) && me.can.manage_team && <OrgSettings tab={tab} />}
       {tab === 'hiring' && me.can.manage_team && <HiringSettings />}
-      {tab === 'data' && me.can.manage_team && <DataTab onDone={() => { reloadOrg(); setTab('company') }} />}
+      {tab === 'data' && me.can.manage_team && <DataTab samples={samples} onDone={reloadOrg} />}
     </>
   )
 }
@@ -125,7 +127,7 @@ function OrgSettings({ tab }: { tab: string }) {
   )
 }
 
-function DataTab({ onDone }: { onDone: () => void }) {
+function DataTab({ samples, onDone }: { samples: boolean; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   async function clear() {
     if (!await ask('Remove all sample jobs and sample candidates? Your own data is kept.')) return
@@ -133,6 +135,15 @@ function DataTab({ onDone }: { onDone: () => void }) {
     try { const r = await api('/api/demo/clear', { method: 'POST' }); toast(`Removed ${r.jobs} jobs and ${r.candidates} candidates`); onDone() } catch (e: any) { toast(e.message) }
     setBusy(false)
   }
+  async function load() {
+    setBusy(true)
+    try { const r = await api('/api/demo/seed', { method: 'POST' }); toast(`Loaded ${r.jobs} sample jobs and ${r.candidates} sample candidates`); onDone() } catch (e: any) { toast(e.message) }
+    setBusy(false)
+  }
+  if (!samples) return (
+    <Card className="max-w-3xl"><CardHeader title="Sample data" description="Development server only: load sample jobs, resumes and matches (tagged Sample) to try the product. Production servers never offer this. Remove them here any time; your own data is never touched." />
+      <CardBody><Button variant="primary" loading={busy} onClick={load}>Load sample data</Button></CardBody></Card>
+  )
   return (
     <Card className="max-w-3xl"><CardHeader title="Sample data" description="This workspace still has sample jobs and resumes (tagged Sample). Remove them before you go live; your own jobs and candidates are kept." />
       <CardBody><Button variant="danger" loading={busy} onClick={clear}>Remove sample data</Button></CardBody></Card>

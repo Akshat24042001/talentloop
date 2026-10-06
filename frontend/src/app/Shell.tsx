@@ -70,9 +70,11 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
   const h = useHealth()
   const problems = h ? healthProblems(h) : []
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      <a href="/app" className="px-2" onClick={onNav}><Logo /></a>
-      <div className="mt-5"><OrgSwitcher /></div>
+    <div className="flex h-full flex-col">
+      <a href="/app" className="shrink-0 px-2" onClick={onNav}><Logo /></a>
+      {/* Only the middle scrolls: the logo stays at the top and the signed-in user stays at the bottom. */}
+      <div className="-mx-2 mt-5 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      <OrgSwitcher />
       <nav className="mt-5 space-y-0.5">{NAV.map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}</nav>
       {me?.can.manage_jobs && <>
         <div className="mx-3 mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Hiring</div>
@@ -83,7 +85,8 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
         {NAV2.filter(n => n.href !== '/app/settings' || me?.can.manage_team).map(n => <NavLink key={n.href} {...n} path={path} onClick={onNav} />)}
         {me?.platform_admin && <NavLink href="/admin" label="Platform admin" icon={Shield} path={path} onClick={onNav} />}
       </nav>
-      <div className="mt-auto space-y-3 pt-6">
+      </div>
+      <div className="shrink-0 space-y-3 border-t border-slate-100 pt-3 dark:border-ink-800">
         {h?.detail && me?.platform_admin && (h.mock || problems.length > 0) && (
           <a href="/admin" onClick={onNav} className="block rounded-xl bg-slate-50 p-3 text-xs ring-1 ring-slate-200/70 hover:bg-slate-100 dark:bg-ink-850 dark:ring-ink-700 dark:hover:bg-ink-800">
             <div className="flex items-center justify-between"><span className="font-semibold text-slate-700 dark:text-slate-200">Server</span>
@@ -92,10 +95,12 @@ function Sidebar({ path, onNav }: { path: string; onNav?: () => void }) {
           </a>
         )}
         {me && (
-          <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
-            <Avatar name={me.user.name || me.user.email} size="sm" />
-            <a href="/app/account" onClick={onNav} className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{me.user.name || me.user.email}</span><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{me.user.email}</span></a>
-            <button onClick={() => { onNav?.(); confirmSignOut() }} aria-label="Sign out" title="Sign out" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white"><LogOut className="size-4" /></button>
+          <div className="flex items-start gap-1">
+            <a href="/app/account" onClick={onNav} title="Your account" className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-ink-800">
+              <Avatar name={me.user.name || me.user.email} size="sm" />
+              <span className="min-w-0 flex-1"><span className="block break-words text-sm font-medium leading-snug">{me.user.name || me.user.email}</span><span className="block break-all text-xs leading-snug text-slate-500 dark:text-slate-400">{me.user.email}</span></span>
+            </a>
+            <button onClick={() => { onNav?.(); confirmSignOut() }} aria-label="Sign out" title="Sign out" className="mt-1 shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ink-800 dark:hover:text-white"><LogOut className="size-4" /></button>
           </div>
         )}
       </div>
@@ -137,7 +142,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <>
       {me?.user.id && me.org && <Tour uid={me.user.id} steps={tourSteps(me)} auto={path === '/app'} />}
-      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-64 overflow-y-auto border-r border-slate-200/80 bg-white px-4 py-5 dark:border-ink-700 dark:bg-ink-900 lg:block">
+      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-64 overflow-hidden border-r border-slate-200/80 bg-white px-4 py-5 dark:border-ink-700 dark:bg-ink-900 lg:block">
         <Sidebar path={path} />
       </aside>
       <header className="no-print sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-3 backdrop-blur dark:border-ink-700 dark:bg-ink-900/90 lg:hidden">
@@ -147,7 +152,7 @@ export function Shell({ children }: { children: ReactNode }) {
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-ink-950/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-y-auto bg-white px-4 py-5 shadow-2xl dark:bg-ink-900 animate-rise">
+          <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] overflow-hidden bg-white px-4 py-5 shadow-2xl dark:bg-ink-900 animate-rise">
             <button aria-label="Close menu" onClick={() => setOpen(false)} className="absolute right-3 top-4 rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-ink-800"><X className="size-4" /></button>
             <Sidebar path={path} onNav={() => setOpen(false)} />
           </div>

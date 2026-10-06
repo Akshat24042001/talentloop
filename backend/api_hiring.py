@@ -262,7 +262,16 @@ def ai_unavailable(e: Exception) -> str:
         return "The AI provider rejected the key. Check the provider's API key on the server, or switch provider in Platform admin > AI models."
     if "402" in msg or "credit" in msg:
         return "The AI account is out of credit. Add credit at openrouter.ai."
-    return "The AI didn't respond. Try again in a minute."
+    if "empty answer" in msg or "not in the expected json" in msg or "cut off" in msg or "no answer" in msg or "json object" in msg:
+        return (f"The AI answered, but unusably: {str(e)[:160]}. Try again, or pick a different model in Platform admin > AI models "
+                "(the Test button there shows which models work).")
+    if "no endpoints" in msg or "404" in msg or "not found" in msg or "not a valid model" in msg:
+        return f"The AI model isn't available any more ({str(e)[:120]}). Pick another in Platform admin > AI models."
+    if "timeout" in msg or "timed out" in msg:
+        return "The AI model took too long to answer. Try again, or pick a faster model in Platform admin > AI models."
+    if "no vision model" in msg or "no model" in msg:
+        return "No AI model is set for this. Choose one in Platform admin > AI models."
+    return f"The AI request failed: {str(e)[:160]}. Try again in a minute, or check Platform admin > AI models."
 
 
 AI_WRITE_SYSTEM = """You help a recruiter write a clear, inclusive, specific job description. Output ONLY JSON:
@@ -904,8 +913,30 @@ def job_matches(job_id: str, req: Request, limit: int = 30):
                 "ai_pending": pending, "ai_budget": st["ai_reports_per_run"], "items": rows, "can_run_ai": perm == "manage"}
 
 
+@router.post("/api/jobs/{job_id}/match/{cid}/ai-report")
+async def match_ai_one(job_id: str, cid: str, req: Request):
+    """Write the AI report for this one candidate now (also outside the top N, and to refresh an old one)."""
+    with db.session() as s:
+        ctx = ctx_of(req, s)
+        auth.require(ctx, auth.MANAGE_JOBS, "generate AI match reports")
+        job, _ = get_job(s, ctx, job_id)
+        cand = get_candidate(s, ctx, cid)
+        if org_settings(org_of(s, ctx))["ai_reports_per_run"] <= 0:
+            raise HTTPException(400, "AI reports are switched off in Settings > Matching & AI.")
+        jid, cand_id, org_id, name = job.id, cand.id, ctx.org_id, cand.name
+        if not s.query(db.Match).filter_by(job_id=jid, candidate_id=cand_id).first():
+            st = org_settings(org_of(s, ctx))
+            matching.run(s, org_id, st["match_weights"], st["match_top_n"], [jid])
+    res = await matching.run_ai_one(org_id, jid, cand_id)
+    if res.get("error"):
+        raise HTTPException(503, res["error"])
+    with db.session() as s:
+        log_activity(s, ctx, "ai_reports", f"AI match report for {name}", org_id=org_id, job_id=jid, candidate_id=cand_id)
+    return res
+
+
 @router.get("/api/jobs/{job_id}/match/{cid}")
-def match_report(job_id: str, cid: str, req: Request, format: str = "json"):
+def match_report(job_id: str, cid: str, req: Request, format: str = "json", inline: int = 0):
     """The full fit report for one candidate and one job (also as a PDF with ?format=pdf)."""
     from . import match_report as mr
     with db.session() as s:
@@ -918,7 +949,7 @@ def match_report(job_id: str, cid: str, req: Request, format: str = "json"):
         if format == "pdf":
             name = re.sub(r"[^A-Za-z0-9]+", "-", f"{cand.name}-{job.title}-match").strip("-")[:80] or "match-report"
             return Response(mr.pdf(d, org.name), media_type="application/pdf",
-                            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"', "Cache-Control": "no-store"})
+                            headers={"Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{name}.pdf"', "Cache-Control": "no-store"})
         return d
 
 
@@ -1302,8 +1333,6 @@ def demo_seed(req: Request):
         from . import appenv
         if appenv.IS_PRODUCTION:
             raise HTTPException(403, "Sample data is only available in development (APP_ENV=development).")
-        if not (ctx.platform_admin or ctx.via_key or appenv.allowed_in_dev("ALLOW_SAMPLE_DATA")):
-            raise HTTPException(403, "Sample data is loaded by the platform admin.")
         if s.query(db.Candidate).filter_by(org_id=ctx.org_id, source="demo").count():
             raise HTTPException(409, "Sample data is already loaded. Remove it first.")
         out = demo.seed(s, s.get(db.Org, ctx.org_id), ctx.user_id)

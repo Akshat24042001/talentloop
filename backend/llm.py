@@ -353,12 +353,25 @@ async def _openai_json(pid: str, kwargs: dict) -> dict:
             raise
     else:
         raise RuntimeError("LLM request failed after retries")
+    model = kwargs.get("model", "?")
     if not resp.choices:
-        raise ValueError(f"LLM returned no choices: {getattr(resp, 'error', '')}")
-    out = parse_json(resp.choices[0].message.content)
+        raise BadAnswer(f"{model} returned no answer: {getattr(resp, 'error', '')}")
+    ch = resp.choices[0]
+    cut = getattr(ch, "finish_reason", "") == "length"
+    text = (ch.message.content or "") if ch.message else ""
+    if not text.strip():
+        raise BadAnswer(f"{model} returned an empty answer" + (" (it ran out of room, usually while reasoning)" if cut else ""))
+    try:
+        out = parse_json(text)
+    except (ValueError, json.JSONDecodeError):
+        raise BadAnswer(f"{model} answered, but not in the expected JSON" + (" (the answer was cut off)" if cut else ""))
     if not isinstance(out, dict):
-        raise ValueError("model did not return a JSON object")
+        raise BadAnswer(f"{model} did not return a JSON object")
     return out
+
+
+class BadAnswer(ValueError):
+    """The provider answered, but the answer is empty, cut off or not JSON (as opposed to an HTTP error)."""
 
 
 async def complete_json(system: str, user: str, model: str, temperature: float = 0.2,
@@ -377,21 +390,38 @@ async def complete_json(system: str, user: str, model: str, temperature: float =
                 err = e
                 log.warning("Claude %s failed: %s", m, e)
         raise err
+    # Room for reasoning models (OpenRouter free models, OpenAI o-series/gpt-5): their thinking counts against this.
     kwargs = dict(model=model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                  temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+                  temperature=temperature, max_tokens=max(max_tokens, 1024 if (fast or model == FAST_MODEL) else 2048), timeout=timeout)
     if pid == "openrouter":
         extra = {}
         if len(chain) > 1:
             extra["models"] = chain[:3]           # OpenRouter itself moves on when a model is down or rate-limited
-        if fast or model == FAST_MODEL:
-            extra["reasoning"] = {"effort": "low", "exclude": True}   # hidden thinking = seconds of silence
+        # Reasoning models (common among free OpenRouter models) count their thinking against max_tokens: with a small
+        # budget they think, run out and return an empty or cut-off answer. So: low, hidden reasoning, and room for it.
+        # max_tokens is a ceiling, not a charge: only tokens actually produced are billed.
+        extra["reasoning"] = {"effort": "low", "exclude": True}
         if fast:
             extra["provider"] = {"sort": "throughput"}
         if extra:
             kwargs["extra_body"] = extra
     if JSON_MODE:
         kwargs["response_format"] = {"type": "json_object"}
-    if pid == "openrouter" or len(chain) == 1:
+    if pid == "openrouter":
+        try:
+            return await _openai_json(pid, kwargs)
+        except BadAnswer as e:                     # an answer, but unusable: OpenRouter won't fall back by itself
+            err = e
+            log.warning("%s", e)
+        for m in chain[1:3]:
+            k = {**kwargs, "model": m, "extra_body": {x: v for x, v in kwargs.get("extra_body", {}).items() if x != "models"}}
+            try:
+                return await _openai_json(pid, k)
+            except Exception as e:
+                err = e
+                log.warning("openrouter %s failed: %s", m, e)
+        raise err
+    if len(chain) == 1:
         return await _openai_json(pid, kwargs)
     err = None
     for m in chain[:3]:                            # other providers: try the chain ourselves
