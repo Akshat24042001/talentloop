@@ -1,14 +1,13 @@
 // The full fit report for one candidate and one job: scores, how the fit score is built, requirement by
 // requirement comparison, skills, and the AI report. Downloadable as a PDF.
-import { CircleCheck, CircleDashed, CircleMinus, CircleX, Download, Printer, Sparkles, Video } from 'lucide-react'
+import { CircleCheck, CircleDashed, CircleMinus, CircleX, Download, Printer, Video } from 'lucide-react'
 import { Badge, Button, Card, CardBody, CardHeader, cn } from '../components/ui'
 import { useState } from 'react'
 import { BackLink, ErrorBox, PageHeader, PageSkeleton, ScoreRing, useApi } from '../components/kit'
-import { when } from '../lib/format'
 import { useMe } from '../lib/session'
 import { VERDICT } from './labels'
 import { Distribution, Donut, Radar } from '../components/reportCharts'
-import { WriteReportButton } from './match'
+import { ReportView, WriteReportButton, type AIReport } from './match'
 import { ResumeCheckSummary, type Verification } from './ResumeCheck'
 import { navigate } from '../lib/router'
 
@@ -79,8 +78,8 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
         <p className="text-[15px] font-medium leading-snug">{d.verdict_line.text}</p></div>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.score} size={64} label="Fit score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">Fit score</div><div className="text-sm font-semibold">Skills, experience, location, notice</div></div></Card>
-        <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.ai_score} size={64} label="AI score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">AI score</div><div className="text-sm font-semibold">{d.ai_score != null ? 'Reads the whole resume' : 'Not run yet'}</div>
+        <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.score} size={64} label="Fit score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">Fit score</div><div className="text-sm font-semibold">Keyword and rules match, not AI</div></div></Card>
+        <Card className="flex items-center gap-4 p-4"><ScoreRing value={d.ai_score} size={64} label="AI score" /><div><div className="text-xs text-slate-500 dark:text-slate-400">AI score</div><div className="text-sm font-semibold">{d.ai_score != null ? 'AI reading of the resume and public info' : 'Not run yet'}</div>
           {me.can.manage_jobs && <span className="mt-1.5 inline-block print:hidden"><WriteReportButton jobRef={jobId} candRef={candId} has={d.ai_score != null} auto={d.ai?.source === 'rules'} onDone={reload} /></span>}</div></Card>
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Shortlist rank</div><div className="mt-1 text-2xl font-semibold tabular">{d.rank ? `#${d.rank}` : '-'}<span className="text-sm font-normal text-slate-500 dark:text-slate-400">{d.rank ? ` of ${d.ranked}` : ' not ranked'}</span></div></Card>
         <Card className="p-4"><div className="text-xs text-slate-500 dark:text-slate-400">Verdict</div><div className="mt-1.5">{v ? <Badge tone={v.tone}>{v.label}</Badge> : <span className="text-sm text-slate-500 dark:text-slate-400">After the AI report</span>}</div>
@@ -101,11 +100,7 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
       </div>
       {d.verification && <div className="mt-5"><ResumeCheckSummary v={d.verification} onOpen={() => navigate(`/app/candidates/${d.candidate.ref}?tab=check`)} /></div>}
 
-      {d.ai?.summary && (
-        <Card className="mt-5 bg-gradient-to-br from-brand-50/80 to-violet-50/60 p-5 ring-brand-100 dark:from-brand-500/10 dark:to-violet-500/10 dark:ring-brand-500/20">
-          <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-brand-600 dark:text-brand-300" />{d.ai.source === 'rules' ? 'Automatic summary (no AI yet)' : 'AI summary'}{d.ai_at && <span className="font-normal text-slate-500 dark:text-slate-400">· {when(d.ai_at)}</span>}</div>
-          <p className="mt-2 leading-relaxed text-slate-700 dark:text-slate-200">{d.ai.summary}</p>
-        </Card>)}
+      {d.ai && <div className="mt-5"><ReportView r={d.ai as unknown as AIReport} /></div>}
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <Card><CardHeader title="How the fit score is built" description="Each signal's score, times its weight (set in Settings, Matching), adds up to the fit score." />
@@ -152,27 +147,9 @@ export default function MatchReport({ jobId, candId }: { jobId: string; candId: 
             </tr>) })}</tbody>
         </table></Card>
 
-      {d.ai ? (
-        <div className="mt-5 grid gap-5 md:grid-cols-2">
-          <Points title="Strengths" items={d.ai.strengths} tone="emerald" />
-          <Points title="Gaps" items={d.ai.gaps} tone="amber" />
-          {!!d.ai.risks?.length && <Points title="Risks" items={d.ai.risks} tone="red" />}
-          <Card><CardHeader title="Ask in the interview" description="Questions that test the gaps." /><CardBody>
-            <ol className="space-y-2">{(d.ai.interview_questions || []).map((q, i) => <li key={i} className="flex gap-3 text-sm"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-50 text-xs font-bold text-brand-700 dark:bg-brand-500/15 dark:text-brand-200">{i + 1}</span>{q}</li>)}</ol>
-            {me.can.manage_jobs && <Button className="mt-4" size="sm" icon={<Video />} href={`/app/interviews/new?job=${d.job.ref}&candidate=${d.candidate.ref}${d.application ? `&application=${d.application.ref}` : ''}`}>Send an AI interview</Button>}
-          </CardBody></Card>
-        </div>
-      ) : <Card className="mt-5"><CardBody><p className="text-sm text-slate-600 dark:text-slate-300">No AI report yet. AI reports are written for each job's shortlist from the Match center; the fit score above is always available.</p></CardBody></Card>}
+      {d.ai && me.can.manage_jobs && <div className="mt-4 print:hidden"><Button size="sm" icon={<Video />} href={`/app/interviews/new?job=${d.job.ref}&candidate=${d.candidate.ref}${d.application ? `&application=${d.application.ref}` : ''}`}>Send an AI interview</Button></div>}
+      {!d.ai && <Card className="mt-5"><CardBody><p className="text-sm text-slate-600 dark:text-slate-300">No AI report yet. AI reports are written for each job's shortlist from the Match center; use Write AI report on the AI score card above for just this candidate. The fit score is always available.</p></CardBody></Card>}
     </>
   )
 }
 
-function Points({ title, items, tone }: { title: string; items?: string[]; tone: 'emerald' | 'amber' | 'red' }) {
-  if (!items?.length) return null
-  const dot = { emerald: 'bg-emerald-500', amber: 'bg-amber-500', red: 'bg-red-500' }[tone]
-  return (
-    <Card><CardHeader title={title} /><CardBody>
-      <ul className="space-y-2">{items.map((x, i) => <li key={i} className="flex gap-2.5 text-sm leading-relaxed"><span className={cn('mt-2 size-1.5 shrink-0 rounded-full', dot)} />{x}</li>)}</ul>
-    </CardBody></Card>
-  )
-}

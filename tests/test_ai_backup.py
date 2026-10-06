@@ -111,7 +111,7 @@ check("the report is not the backup's", (m.get("ai") or {}).get("summary") != "B
 check("the AI score isn't stored", m.get("ai_score") != 77, str(m.get("ai_score")))
 with db.session() as s:
     row = s.query(db.Match).filter_by(job_id=job["id"], candidate_id=cand["id"]).first()
-    check("the model that really answered isn't recorded", "gpt-4.1-mini" not in (row.ai_model or ""), str(row.ai_model))
+    check("the model that really answered isn't recorded", "gpt-4.1" not in (row.ai_model or ""), str(row.ai_model))
     check("the usage isn't billed to the backup's model", s.query(db.AIUsage).filter(db.AIUsage.model.like("%gpt%")).count() == 0)
 
 # a good report is never replaced by an automatic summary when the AI fails later

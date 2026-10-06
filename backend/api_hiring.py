@@ -933,7 +933,7 @@ async def match_ai_one(job_id: str, cid: str, req: Request):
         if not s.query(db.Match).filter_by(job_id=jid, candidate_id=cand_id).first():
             st = org_settings(org_of(s, ctx))
             matching.run(s, org_id, st["match_weights"], st["match_top_n"], [jid])
-    res = await matching.run_ai_one(org_id, jid, cand_id)
+    res = await matching.run_ai_one(org_id, jid, cand_id, refresh=req.query_params.get("refresh") == "1")
     with db.session() as s:
         log_activity(s, ctx, "ai_reports" if res.get("generated") else "ai_reports_failed",
                      f"AI match report for {name}" if res.get("generated") else f"AI match report for {name} failed: {str(res.get('error'))[:200]}",

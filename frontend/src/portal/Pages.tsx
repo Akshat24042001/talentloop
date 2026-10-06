@@ -367,7 +367,7 @@ export function DrivePage({ code }: { code: string }) {
               : camOn ? <div className="space-y-2">{cam.error ? <Alert tone="danger">{cam.error}</Alert> : <Preview stream={cam.stream} className="aspect-[4/3] w-full max-w-xs" />}<Button type="button" icon={<Camera />} disabled={!cam.stream} onClick={snap}>Take photo</Button></div>
                 : <Button type="button" icon={<Camera />} onClick={() => setCamOn(true)}>Open camera</Button>}</Field>}
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e => setConsent(e.target.checked)} required />
-            <span>I agree that {data.org.name} may store and process my details, photo and test results to consider me for this role. I can ask for them to be deleted at any time.</span></label>
+            <span>I agree that {data.org.name} may store and process my details, photo and test results to consider me for this role, and may check the links I give and public professional pages about me. I can ask for them to be deleted at any time.</span></label>
           <div id="dv-err" aria-live="assertive">{err && <Alert tone="danger" title="Not registered yet">{err}</Alert>}</div>
           <Button type="submit" variant="primary" size="lg" loading={busy}>{multi && picked.length > 1 ? `Register for ${picked.length} roles` : 'Register'}</Button>
         </form></Card>)}

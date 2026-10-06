@@ -9,7 +9,7 @@ import { ask } from '../components/dialogs'
 
 type Role = 'fast' | 'smart' | 'vision'
 interface Provider { id: string; label: string; available: boolean; env: string; note: string; site: string }
-interface State { providers: Provider[]; config: Record<Role, { provider: string; models: string[] }>; source: 'admin' | 'environment'; suggest: Record<string, Record<Role, string[]>>; note: string; mock: boolean; backup: { on: boolean; targets: { provider: string; model: string }[]; last: { provider: string; model: string; at: number; because: string } | null; blocked: Record<string, string> } }
+interface State { providers: Provider[]; config: Record<Role, { provider: string; models: string[] }>; source: 'admin' | 'environment'; suggest: Record<string, Record<Role, string[]>>; note: string; mock: boolean; research: { search: string | null; github_token: boolean; people_data: boolean }; backup: { on: boolean; targets: { provider: string; model: string }[]; last: { provider: string; model: string; at: number; because: string } | null; blocked: Record<string, string> } }
 interface Model { id: string; name: string; free: boolean; vision: boolean | null; context?: number }
 const ROLES: { id: Role; title: string; help: string }[] = [
   { id: 'fast', title: 'Fast: live interviews and plans', help: 'Answers every turn of an AI interview, so speed matters most. Pick small, quick models.' },
@@ -51,6 +51,11 @@ export default function AIModels() {
         </div>
         {data.note && <Alert tone="info">{data.note}</Alert>}
         {Object.entries(data.backup.blocked).map(([k, why]) => <Alert key={k} tone="warning" title={`${k} is refusing requests right now`}>{why}. The app stops asking it for a few minutes so it doesn't use up what is left.</Alert>)}
+        <Alert tone={data.research.search ? 'success' : 'warning'} title="Public lookup for AI match reports">
+          {data.research.search ? <>Web search is on ({data.research.search === 'tavily' ? 'Tavily' : 'Brave'}): reports also search the open web for the candidate's public professional pages, scored against the resume.</>
+            : <>Web search is not set up, so reports only check the candidate's own links, GitHub and Gravatar. Add <code>TAVILY_API_KEY</code> (1,000 free searches a month) or <code>BRAVE_API_KEY</code> on Render to search the open web (up to 4 searches per candidate, cached for a week).</>}
+          {' '}GitHub: {data.research.github_token ? 'token set' : <>no token (60 lookups an hour; add <code>GITHUB_TOKEN</code> for more)</>}. People-data provider: {data.research.people_data ? 'on' : 'off'}.
+        </Alert>
         <Alert tone={data.backup.on && data.backup.targets.length ? 'success' : 'info'} title="Backup provider">
           {data.backup.on && data.backup.targets.length
             ? <>If the main provider fails a one-off job (match reports, scoring, resume reads, JD writing), the app asks <b>{data.backup.targets.map(t => `${t.provider} (${t.model})`).join(' or ')}</b> instead. That uses the paid key on this server, one small request per job. Live interview turns never use it. Switch it off with <code>LLM_BACKUP=off</code> on Render.</>

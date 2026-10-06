@@ -109,6 +109,8 @@ function OrgSettings({ tab }: { tab: string }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Default shortlist size per job" htmlFor="s-topn" hint="New jobs start with this. Each job can override it."><Input id="s-topn" type="number" min={1} max={50} value={s.match_top_n} onChange={e => set('match_top_n', +e.target.value)} /></Field>
             <Field label="Best-fit minimum score" htmlFor="s-fit" hint="A candidate's Best-fit jobs tab lists only open jobs they score at least this on (0 to 100). Below it, no job is shown."><Input id="s-fit" type="number" min={0} max={100} value={s.best_fit_min_score ?? 55} onChange={e => set('best_fit_min_score', +e.target.value)} /></Field>
+            <div className="sm:col-span-2"><Switch id="s-lookup" checked={s.public_lookup !== false} onChange={v => set('public_lookup', v)} label="Look up public profiles in AI match reports"
+              description="The report checks the links the candidate gave (website, GitHub) and public professional pages about them (a GitHub profile with their email, a web search when a search key is set on the server), and shows what it found with the evidence. Never their phone number or personal social media. Candidates are told on the application form." /></div>
             <Field label="AI reports per run (cost cap)" htmlFor="s-budget" hint="The most AI match reports one click can write. 0 turns AI reports off."><Input id="s-budget" type="number" min={0} max={500} value={s.ai_reports_per_run} onChange={e => set('ai_reports_per_run', +e.target.value)} /></Field>
           </div>
           <div>

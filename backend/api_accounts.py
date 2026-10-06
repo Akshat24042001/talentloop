@@ -16,6 +16,8 @@ DEFAULT_SETTINGS = {
     "logo_url": "", "brand_color": "#2848e6", "careers_enabled": True, "careers_headline": "",
     "default_currency": "INR", "eeo_statement": "",
     "match_top_n": 5, "ai_reports_per_run": 25,
+    # the AI match report may look at the candidate's own links and public professional pages (GitHub, their site, a web search)
+    "public_lookup": True,
     # A candidate's "best-fit jobs" list only shows open jobs they score at least this on (0-100) and are not screened out of
     "best_fit_min_score": 55,
     "match_weights": {"skills": 45, "experience": 20, "relevance": 20, "location": 10, "logistics": 5},
@@ -451,6 +453,8 @@ async def update_org(req: Request):
                 v = max(1, min(50, int(v or 5)))
             if k == "best_fit_min_score":
                 v = max(0, min(100, int(v or 0)))
+            if k == "public_lookup":
+                v = bool(v)
             if k == "ai_reports_per_run":
                 v = max(0, min(500, int(v or 0)))
             if k in ("retention_days", "recording_retention_days"):
@@ -909,7 +913,9 @@ _model_cache: dict[str, tuple[float, list]] = {}
 
 def _llm_state() -> dict:
     from . import llm
-    return {"providers": [{"id": k, "label": p["label"], "available": llm.available(k), "env": p["env"], "note": p["note"], "site": p["site"],
+    from . import research
+    return {"research": {"search": research.search_provider() or None, "github_token": bool(os.getenv("GITHUB_TOKEN")), "people_data": bool(os.getenv("PEOPLE_DATA_API_KEY"))},
+            "providers": [{"id": k, "label": p["label"], "available": llm.available(k), "env": p["env"], "note": p["note"], "site": p["site"],
                            "base_url": p["base_url"]} for k, p in llm.PROVIDERS.items() if k != "custom" or p["base_url"]],
             "config": llm.CONFIG, "source": llm.SOURCE, "suggest": llm.SUGGEST, "note": llm.MODEL_CHECK.get("note", ""), "mock": llm.MOCK,
             "backup": {"on": llm.backups_on(), "targets": [{"provider": llm.PROVIDERS[p]["label"], "model": m} for p, m in llm._backup_targets(llm.FAST_MODEL)],

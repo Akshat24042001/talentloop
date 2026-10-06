@@ -52,7 +52,7 @@ async def chat(req: Request):
     sys_prompt = body["messages"][0]["content"]
     if "design structured first-round job interviews" in sys_prompt:
         out = PLAN
-    elif "assess how well a candidate fits" in sys_prompt:
+    elif "candidate assessment" in sys_prompt:
         out = {"score": 81, "verdict": "strong", "summary": "Solid backend engineer.", "strengths": ["Java at scale"], "gaps": ["No Kafka"],
                "risks": [], "interview_questions": ["Tell me about Kafka."]}
     else:
@@ -128,9 +128,9 @@ def run(c):
     r = ok(c.post("/api/match/ai-reports", json={"job_ids": [job["id"]], "max": 10}))
     assert r["generated"] == 3 and r["skipped_over_budget"] == 2, r
     first = CALLS[0]
-    assert first["model"] == llm.FAST_MODEL and first["models"][:1] == [llm.FAST_MODEL] and len(first["models"]) >= 2, first.get("models")
+    assert first["model"] == llm.SMART_MODEL and first["models"][:1] == [llm.SMART_MODEL] and len(first["models"]) >= 2, first.get("models")   # reports use the stronger model
     assert first["reasoning"] == {"effort": "low", "exclude": True}
-    assert "Senior Backend Engineer" in first["messages"][1]["content"] and "CANDIDATE" in first["messages"][1]["content"]
+    assert "Senior Backend Engineer" in first["messages"][1]["content"] and "RESUME of" in first["messages"][1]["content"]
     rows = ok(c.get(f"/api/jobs/{job['id']}/matches"))["items"]
     assert rows[0]["ai_report"]["verdict"] == "strong" and rows[0]["ai_score"] == 81
     r = ok(c.post("/api/match/ai-reports", json={"job_ids": [job["id"]]}))

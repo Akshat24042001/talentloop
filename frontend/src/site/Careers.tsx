@@ -266,7 +266,7 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
             <div key={k} className="flex justify-between gap-3"><dt className="text-slate-500 dark:text-slate-400">{k}</dt><dd className="truncate text-right">{v || <button type="button" className="text-brand-600 underline dark:text-brand-400" onClick={() => go(s)}>add</button>}</dd></div>))}</dl>
         </div>
         <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" className="mt-1" checked={consent} onChange={e => setConsent(e.target.checked)} required />
-          <span>I agree that {orgName} may store and process my details to consider me for roles, including automated matching. I can ask for them to be deleted at any time.</span></label>
+          <span>I agree that {orgName} may store and process my details to consider me for roles, including automated matching. To check what I wrote, it may look at the links I give and at public professional pages about me (for example GitHub or a personal site); it does not search my phone number or personal social media. I can ask for my data to be deleted at any time.</span></label>
       </div>}
 
       <div ref={errRef} aria-live="assertive">{err && <Alert tone="danger" title={last ? (talentPool ? 'Not sent yet' : 'Your application was not sent') : 'A few details are missing'}>{err}</Alert>}</div>

@@ -154,7 +154,10 @@ function MatchCard({ m, job, onAdd, canManage, canAI, onDone, compact }: { m: Ma
     <Card className={m.knocked_out ? 'opacity-70' : ''}>
       <div className="flex flex-wrap items-start gap-4 p-4 sm:p-5">
         <span className="tabular w-6 pt-3 text-center text-sm font-bold text-slate-500 dark:text-slate-400">{m.rank}</span>
-        <ScoreRing value={m.score} label="Match score" />
+        <div className="flex w-14 shrink-0 flex-col items-center gap-0.5" title="Keyword match: skills, experience, location and notice period compared with the job. It is not an AI score.">
+          <ScoreRing value={m.score} label="Keyword match score" /><span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Keyword</span>
+          {m.ai_report && m.ai_report.source !== 'rules' && m.ai_report.score != null && <span className="mt-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-bold text-brand-700 dark:bg-brand-500/15 dark:text-brand-200" title="The AI's own score after reading the resume and what is public about the candidate">AI {m.ai_report.score}</span>}
+        </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <a href={`/app/candidates/${c.ref}`} className="font-semibold text-slate-900 hover:underline dark:text-white">{c.name}</a>

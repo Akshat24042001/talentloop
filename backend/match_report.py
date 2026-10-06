@@ -260,7 +260,47 @@ def pdf(d: dict, company: str) -> bytes:
     if d["skills"]:
         story += [Paragraph("Skills", st["h2"]),
                   table([["Skill", "Type", "Status"]] + [[x["skill"], x["kind"], x["status"].title()] for x in d["skills"]], [80 * mm, 50 * mm, 44 * mm], colour_col=2)]
+    rec = ai.get("recommendation") or {}
+    if rec.get("action") and ai.get("source") != "rules":
+        story += [Paragraph("Suggested next step (a person decides)", st["h2"]), Paragraph(t(f"{rec['action'].title()}. {rec.get('why', '')}"), st["base"])]
+    if ai.get("must_haves"):
+        label = {"proven": "Proven", "claimed": "Only listed", "related": "Related", "missing": "Missing"}
+        story += [Paragraph("Must-have skills, with proof from the resume", st["h2"]),
+                  table([["Skill", "Evidence", "Where / quote"]] + [[x["skill"], label.get(x["status"], x["status"]), P((x.get("where") or "") + (f' "{x["quote"]}"' if x.get("quote") else ""))] for x in ai["must_haves"]],
+                        [40 * mm, 28 * mm, 106 * mm])]
+    cr = ai.get("career") or {}
+    if any(cr.get(k) for k in ("total_years", "jobs", "avg_tenure_months", "notes")):
+        bits = [f"{cr['total_years']:g} years in total" if cr.get("total_years") is not None else "", f"{cr['jobs']:g} jobs" if cr.get("jobs") is not None else "",
+                f"about {cr['avg_tenure_months']:g} months per job" if cr.get("avg_tenure_months") is not None else "", f"trajectory: {cr.get('trajectory')}" if cr.get("trajectory") not in (None, "unclear") else "", cr.get("notes") or ""]
+        story += [Paragraph("Career", st["h2"]), Paragraph(t("; ".join(b for b in bits if b)), st["base"])]
+    for title, key, field in (("Achievements", "achievements", "what"), ("Red flags to look into", "red_flags", "flag")):
+        for x in ai.get(key) or []:
+            if title == "Achievements" and x is (ai.get(key) or [])[0]:
+                story.append(Paragraph(title, st["h2"]))
+            if title != "Achievements" and x is (ai.get(key) or [])[0]:
+                story.append(Paragraph(title, st["h2"]))
+            story.append(Paragraph(t(x.get(field, "") + (f' "{x["quote"]}"' if x.get("quote") else "")), st["bullet"], bulletText="•"))
+    web = (ai.get("web") or {}).get("items") or []
+    if ai.get("source") != "rules":
+        story.append(Paragraph("Found online", st["h2"]))
+        if web:
+            story += [Paragraph(t(f"{'Confirmed' if w['status'] == 'confirmed' else 'Possible (may be a namesake)'}: {w['kind']} {w['url']}" + ("  [does not load]" if w.get("dead") else "")
+                                   + (" - " + "; ".join(w.get("evidence") or []) if w.get("evidence") else "")), st["bullet"], bulletText="•") for w in web]
+        else:
+            story.append(Paragraph("Nothing public found beyond the resume.", st["small"]))
+        for n in (ai.get("online") or {}).get("notes") or []:
+            story.append(Paragraph(t(n), st["small"]))
+        for n in (ai.get("web") or {}).get("notes") or []:
+            story.append(Paragraph(t(n), st["small"]))
+    if ai.get("interview_focus"):
+        story.append(Paragraph("What to ask in the interview", st["h2"]))
+        story += [Paragraph(t(f"{x['topic']}: {x['question']}" + (f" ({x['why']})" if x.get("why") else "")), st["bullet"], bulletText="•") for x in ai["interview_focus"]]
+    if ai.get("verify_next"):
+        story.append(Paragraph("Check outside the interview", st["h2"]))
+        story += [Paragraph(t(x), st["bullet"], bulletText="•") for x in ai["verify_next"]]
     for title, key in (("Strengths", "strengths"), ("Gaps", "gaps"), ("Risks", "risks"), ("Questions to ask in the interview", "interview_questions")):
+        if key == "interview_questions" and ai.get("interview_focus"):
+            continue
         items = ai.get(key) or []
         if items:
             story.append(Paragraph(title, st["h2"]))
