@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/vendor-face-models.mjs && vite",
-    "build": "node scripts/vendor-face-models.mjs && tsc --noEmit && vite build",
+    "dev": "node scripts/vendor-face-models.mjs && node scripts/vendor-flags.mjs && vite",
+    "build": "node scripts/vendor-face-models.mjs && node scripts/vendor-flags.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,6 +17,8 @@
     "@vercel/functions": "^3.9.9",
     "@vladmandic/face-api": "^1.7.15",
     "clsx": "^2.1.1",
+    "country-flag-icons": "^1.6.20",
+    "libphonenumber-js": "^1.13.15",
     "lucide-react": "^1.49.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",

@@ -9,6 +9,7 @@ import { ask } from '../../components/dialogs'
 import { api } from '../../lib/api'
 import { navigate } from '../../lib/router'
 import { JOB_STATUS, SOURCE_LABEL, STAGE_TONE } from '../../app/labels'
+import { PhoneInput, PhoneText } from '../../components/PhoneInput'
 
 // AI interview recommendation (brain.RECOMMENDATIONS) -> colour
 export const RECOMMENDATION_TONE: Record<string, 'success' | 'warning' | 'danger'> = { strong_yes: 'success', yes: 'success', maybe: 'warning', no: 'danger' }
@@ -131,7 +132,7 @@ export function CandidatePanel({ id, onClose, onChanged }: { id: string | null; 
       {error ? <p className="text-sm text-red-600">{error}</p> : !c ? <Loading /> : <>
         <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ id: 'profile', label: 'Profile' }, { id: 'resume', label: 'Resume text' }, { id: 'activity', label: 'Applications', count: c.applications.length }]} />
         {tab === 'profile' && <dl className="divide-y divide-slate-100 dark:divide-ink-800">
-          <KV k="Headline">{c.headline}</KV><KV k="Phone">{c.phone}</KV><KV k="Location">{c.location}</KV>
+          <KV k="Headline">{c.headline}</KV><KV k="Phone"><PhoneText value={c.phone} /></KV><KV k="Location">{c.location}</KV>
           <KV k="Current company">{c.current_company}</KV><KV k="College">{c.college}</KV><KV k="Experience">{c.years != null ? `${c.years} years` : ''}</KV>
           <KV k="Notice period">{c.notice_days != null ? `${c.notice_days} days` : ''}</KV><KV k="Expected salary">{c.expected_salary ? c.expected_salary.toLocaleString() : ''}</KV>
           <KV k="Skills"><span className="font-normal">{c.skills.split(/[|,]/).map(x => x.trim()).filter(Boolean).join(", ")}</span></KV><KV k="Came from">{SOURCE_LABEL[c.source] || label(c.source || '')}</KV>
@@ -139,7 +140,7 @@ export function CandidatePanel({ id, onClose, onChanged }: { id: string | null; 
         </dl>}
         {tab === 'edit' && <div className="grid gap-3 sm:grid-cols-2">{([['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location'], ['headline', 'Headline'], ['current_company', 'Current company'],
           ['college', 'College'], ['years', 'Experience (years)'], ['notice_days', 'Notice period (days)'], ['expected_salary', 'Expected salary'], ['tags', 'Tags (comma separated)']] as const).map(([k, l]) =>
-          <Field key={k} label={l} htmlFor={`ce-${k}`}><Input id={`ce-${k}`} inputMode={['years', 'notice_days', 'expected_salary'].includes(k) ? 'decimal' : undefined} value={f[k] ?? ''} onChange={e => setF({ ...f, [k]: e.target.value })} /></Field>)}</div>}
+          <Field key={k} label={l} htmlFor={`ce-${k}`}>{k === 'phone' ? <PhoneInput id="ce-phone" value={f.phone ?? ''} onChange={v => setF({ ...f, phone: v })} /> : <Input id={`ce-${k}`} inputMode={['years', 'notice_days', 'expected_salary'].includes(k) ? 'decimal' : undefined} value={f[k] ?? ''} onChange={e => setF({ ...f, [k]: e.target.value })} />}</Field>)}</div>}
         {tab === 'resume' && (c.resume_text ? <pre className="whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-relaxed dark:bg-ink-850">{c.resume_text}</pre> : <p className="text-sm text-slate-500">No resume text.</p>)}
         {tab === 'activity' && <div className="space-y-4">
           {c.applications.length ? <ul className="space-y-2">{c.applications.map(a => (

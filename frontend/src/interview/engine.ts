@@ -2,6 +2,7 @@
 // integrity signals (warnings spoken by the interviewer), rejoin window. Framework-free; React subscribes to
 // `state` (useSyncExternalStore) and to `onLevels` for the 60 fps audio meters.
 import { post } from '../lib/api'
+import { FW, FH, NEED_CIRCLE, NEED_DOWN, NEED_UP, RoomScan } from './roomscan'
 import { AnswerTiming, FaceMatch, HeadTurn, VoiceWatch, virtualCameraLabel, yaw } from './signals'
 import { GazeAway, LipSync, ReadingWatch, SpeechLevel, earphonesInUse, gaze, newEarphones, shapesOf, type DeviceInfo } from './behaviour'
 
@@ -35,7 +36,7 @@ export interface State {
   P: PublicInfo | null
   checks: Record<CheckKey, Check>
   startReady: boolean; checkMsg: string; err2: string; err3: string; shareErr: string
-  roomScan: { running: boolean; left: number }
+  roomScan: { running: boolean; left: number; pct: number; up: number; down: number; hint: string }
   spot: { left: number } | null
   starting: boolean
   status: 'connecting' | 'speaking' | 'listening'
@@ -75,7 +76,7 @@ export class InterviewEngine {
       face: { state: '', text: 'Your face is clearly visible', hidden: false }, live: { state: '', text: 'Turn your head slowly to one side, then the other', hidden: true },
       room: { state: '', text: 'Show the room: turn your camera slowly all around you', hidden: true }, ears: { state: '', text: 'No earphones or earbuds (checked from the head-turn photos)', hidden: true }, screen: { state: '', text: 'Single screen', hidden: true },
       share: { state: '', text: 'Entire screen shared', hidden: true } },
-    startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false, roomScan: { running: false, left: 0 }, spot: null,
+    startReady: false, checkMsg: '', err2: '', err3: '', shareErr: '', starting: false, roomScan: { running: false, left: 0, pct: 0, up: 0, down: 0, hint: '' }, spot: null,
     status: 'connecting', question: null, lines: [], muted: false, sharing: false, hasVolume: false,
     warnings: 0, maxWarnings: 2, warnBar: null, overlay: { share: false, fs: false, mon: false, dq: false }, offline: false,
     done: { title: 'Thank you', msg: 'Your interview is complete. The HR team will get back to you.', tone: 'ok' },
@@ -114,6 +115,8 @@ export class InterviewEngine {
   private spotSeen = false
   private camChecksFailed = false
   private roomDone = false
+  private userFinalAt = 0
+  private roomTries = 0
   private earsDone = false
   private earShots: (string | null)[] = [null, null]
   private earBusy = false
@@ -535,34 +538,71 @@ export class InterviewEngine {
       this.setCheck('live', 'ok', 'Head-turn check skipped'); this.earCheck(); this.updateStart()
     }
   }
-  /** Before the start: the candidate turns the camera slowly around the room for 12 seconds. Every frame is checked
-   * here for other people; three photos go to the AI photo check and are kept for HR. */
+  /** Before the start: the candidate picks up the laptop and sweeps the camera round the whole room, then up to the ceiling and down to
+   * the floor. The sweep is measured from the pictures (roomscan.ts): it only completes when the whole circle and both tilts were
+   * actually seen, so holding the laptop still, wiggling it or showing one side of the room does not pass. People are looked for in
+   * every few frames; photos of each part of the room (up to 8) go to the AI photo check and are kept for HR. */
   async roomScan() {
     if (this.state.roomScan.running || !this.objDet) return
     const v = this.videos.preview
     if (!v || !v.videoWidth) return
-    let most = 0, phone = 0
-    const shots: string[] = []
-    this.setCheck('room', '', 'Turn your camera (or laptop) slowly to the left, behind you, and to the right')
-    for (let left = 12; left > 0; left--) {
-      this.set({ roomScan: { running: true, left } })
-      const o = this.objects(v)
-      most = Math.max(most, o.persons); phone = Math.max(phone, o.phones)
-      if (left === 11 || left === 7 || left === 3) { const f = this.frame(640); if (f) shots.push(f) }
-      await new Promise(r => setTimeout(r, 1000))
+    const scan = new RoomScan()
+    const cv = document.createElement('canvas'); cv.width = FW; cv.height = FH
+    const g = cv.getContext('2d', { willReadFrequently: true })!
+    const MIN_MS = 10000, MAX_MS = 90000, t0 = Date.now()
+    const sectorShots: string[] = [], extra: string[] = []
+    let most = 0, phone = 0, ticks = 0, far = 0
+    this.roomTries++
+    this.setCheck('room', '', 'Pick up your laptop and turn slowly in a full circle, then show the ceiling and the floor')
+    while (!this.ended) {
+      const el = Date.now() - t0
+      g.drawImage(v, 0, 0, FW, FH)
+      const px = g.getImageData(0, 0, FW, FH).data, grey = new Uint8Array(FW * FH)
+      for (let i = 0; i < grey.length; i++) grey[i] = (px[i * 4]! * 77 + px[i * 4 + 1]! * 150 + px[i * 4 + 2]! * 29) >> 8
+      const shot = scan.feed(grey)
+      if (shot) { const f = this.frame(640); if (f) (shot === 'sector' ? sectorShots : extra).push(f) }
+      if (++ticks % 5 === 0) {
+        const o = this.objects(v)
+        most = Math.max(most, o.persons); phone = Math.max(phone, o.phones)
+        const away = Math.abs((((scan.yaw % 360) + 360) % 360) - 0), fromStart = Math.min(away, 360 - away)
+        if (o.persons >= 1 && fromStart > 75 && ++far <= 3 && extra.length < 5) { const f = this.frame(640); if (f) extra.unshift(f) }   // a person where the candidate is not
+      }
+      const p = scan.progress()
+      this.set({ roomScan: { running: true, left: Math.max(0, Math.ceil((MAX_MS - el) / 1000)), pct: p.circle / 360, up: Math.min(1, p.up / NEED_UP), down: Math.min(1, p.down / NEED_DOWN), hint: p.hint } })
+      if ((p.done && el >= MIN_MS) || el >= MAX_MS || most >= 2) break
+      await new Promise(r => setTimeout(r, 150))
     }
-    this.set({ roomScan: { running: false, left: 0 } })
+    const p = scan.progress()
+    this.set({ roomScan: { running: false, left: 0, pct: p.circle / 360, up: Math.min(1, p.up / NEED_UP), down: Math.min(1, p.down / NEED_DOWN), hint: '' } })
     if (most >= 2) {
       this.ev('room_scan_failed', `${most} people seen`); this.snap('room_scan_failed')
       this.setCheck('room', 'bad', 'Someone else was seen. You must be alone in the room. Scan again when you are.'); this.roomDone = false; return this.updateStart()
     }
+    if (!p.done) {
+      this.ev('room_scan_incomplete', `${Math.round(p.circle)} of 360 degrees, tilt up ${Math.round(p.up)}, down ${Math.round(p.down)}${scan.unreadable ? ', picture unreadable' : ''}`)
+      // A camera that cannot be followed at all (very dark, plain walls) must not lock an honest candidate out for ever: after three tries it
+      // goes on, marked "not verified" for HR. A scan that was readable but not completed never passes.
+      if (scan.unreadable && this.roomTries >= 3) {
+        this.ev('room_scan_unverified', 'the camera picture could not be followed after 3 tries'); this.snap('room_scan_unverified')
+        this.roomDone = true; this.setCheck('room', 'ok', 'Room scan could not be measured; the hiring team will review the photos'); return this.updateStart()
+      }
+      this.setCheck('room', 'bad', p.dark ? p.hint : p.circle < NEED_CIRCLE ? `Only ${Math.round(p.circle / 360 * 100)}% of the room was shown. Turn all the way round, slowly.`
+        : p.up < NEED_UP ? 'Show the ceiling too: tilt the camera up.' : 'Show the floor and under your desk: tilt the camera down.')
+      this.roomDone = false; return this.updateStart()
+    }
+    // up to 8 photos: the tilts and any person away from the candidate first, then parts of the room spread round the circle
+    const pick = extra.slice(0, 4), want = 8 - pick.length
+    const room = sectorShots.length <= want ? sectorShots : Array.from({ length: want }, (_, i) => sectorShots[Math.floor(i * sectorShots.length / want)]!)
+    const shots = [...room, ...pick]
     this.setCheck('room', '', 'Checking the room photos...')
     const r = await this.visionCheck('room', shots)
-    if (r?.checked && r.people > 1) {
-      this.ev('room_scan_failed', `AI photo check: ${r.people} people${r.note ? `. ${r.note}` : ''}`)
-      this.setCheck('room', 'bad', 'Someone else was seen in the room photos. You must be alone. Scan again when you are.'); this.roomDone = false; return this.updateStart()
+    const others = r?.checked ? (typeof r.others === 'number' ? r.others : Math.max(0, (r.people || 0) - 1)) : 0
+    if (others > 0 || (!r?.checked && far >= 5)) {
+      this.ev('room_scan_failed', r?.checked ? `AI photo check: ${others} other person${others > 1 ? 's' : ''}${r.note ? `. ${r.note}` : ''}` : 'a person was seen away from the candidate')
+      this.setCheck('room', 'bad', 'Someone else was seen in the room. You must be alone. Scan again when you are.'); this.roomDone = false; return this.updateStart()
     }
-    this.ev('room_scan_passed', r?.checked ? 'AI photo check: nobody else' : `nobody else seen on this device${phone ? '; a phone was in view' : ''}`)
+    if (r?.checked && (r.notes || r.second_screen)) this.ev('room_items', [r.notes && 'written notes in view', r.second_screen && 'another screen in view'].filter(Boolean).join(', '))
+    this.ev('room_scan_passed', `${Math.round(p.circle)} degrees, ceiling and floor shown. ` + (r?.checked ? 'AI photo check: nobody else' : `nobody else seen on this device${phone ? '; a phone was in view' : ''}`))
     this.roomDone = true; this.setCheck('room', 'ok', 'Room checked: nobody else with you'); this.updateStart()
   }
   /** Before the start: photos of both ears (from the head turn) checked by the AI for earphones and earbuds. */
@@ -852,6 +892,7 @@ export class InterviewEngine {
       } catch { /* no audio analysis on this browser */ }
     })
     vapi.on('speech-start', () => {
+      if (this.userFinalAt) { const gap = (Date.now() - this.userFinalAt) / 1000; this.userFinalAt = 0; if (gap > 6 && this.once('slowturn', 20000)) this.ev('slow_turn', `${gap.toFixed(1)}s from the candidate finishing to the interviewer speaking`) }
       this.setStatus('speaking')
       const t = this.timing.aiStarted()
       if (t) this.ev('answer_timing', `${t.delay.toFixed(1)}s pause, ${t.words} words, ${t.wpm} wpm`)
@@ -867,7 +908,7 @@ export class InterviewEngine {
         if (this.lastWarnSay && t && this.lastWarnSay.includes(t)) return
         this.addLine('ai', m.transcript, true); this.pollProgress()
       }
-      else if (m.role === 'user') { this.addLine('you', m.transcript, m.transcriptType === 'final'); this.timing.heard(m.transcriptType === 'final', m.transcript || '') }
+      else if (m.role === 'user') { if (m.transcriptType === 'final') this.userFinalAt = Date.now(); this.addLine('you', m.transcript, m.transcriptType === 'final'); this.timing.heard(m.transcriptType === 'final', m.transcript || '') }
     })
     vapi.on('error', (e: unknown) => { this.ev('vapi_error', JSON.stringify(e).slice(0, 200)); console.error(e) })
     vapi.on('call-end', () => this.finish())

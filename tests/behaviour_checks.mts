@@ -1,4 +1,6 @@
 // Detector logic on synthetic signals (run by tests/test_behaviour.py). A check passes when the problem does NOT happen.
+import { RoomScan, FW, FH, HFOV } from '../frontend/src/interview/roomscan.ts'
+import { VoiceWatch } from '../frontend/src/interview/signals.ts'
 import { EARPHONE, GazeAway, LipSync, ReadingWatch, earphonesInUse, gaze, newEarphones, voiced } from '../frontend/src/interview/behaviour.ts'
 
 const res: [string, boolean][] = []
@@ -68,6 +70,91 @@ const tone = (f: number) => Float32Array.from({ length: N }, (_, i) => 0.3 * Mat
 check('a 140 Hz voice is not recognised as a voice', !voiced(tone(140), rate))
 check('white noise counts as a voice', voiced(Float32Array.from({ length: N }, () => (rnd() - 0.5) * 0.6), rate))
 check('a 2 kHz whine counts as a voice', voiced(Float32Array.from({ length: N }, (_, i) => 0.3 * Math.sin(2 * Math.PI * 2000 * i / rate) * (rnd() > 0.5 ? 1 : -1)), rate))
+
+
+// --- room scan coverage, on a synthetic panorama (360 degrees, ceiling and floor) seen through a moving 80x45 window
+{
+  const PPD = FW / HFOV                                   // pixels per degree
+  const PW = Math.round(360 * PPD), PH = 45 + 2 * 40      // panorama: full circle wide, 40 px of ceiling and floor beyond the view
+  let sd = 3; const r2 = () => ((sd = (sd * 16807) % 2147483647) / 2147483647)
+  let pan = new Float32Array(PW * PH).map(() => r2() * 255)
+  for (let k = 0; k < 2; k++) { const o = new Float32Array(pan.length); for (let y = 1; y < PH - 1; y++) for (let x = 0; x < PW; x++) o[y * PW + x] = (pan[y * PW + x]! * 2 + pan[y * PW + (x + 1) % PW]! + pan[y * PW + (x + PW - 1) % PW]! + pan[(y - 1) * PW + x]! + pan[(y + 1) * PW + x]!) / 6; pan = o }
+  const view = (yawDeg: number, pitchDeg: number, noise = 0) => {                 // pitch + = looking up = window moves up
+    const out = new Uint8Array(FW * FH), cx = Math.round(yawDeg * PPD), cy = 40 - Math.round(pitchDeg * PPD)
+    for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) out[y * FW + x] = Math.max(0, Math.min(255, pan[Math.max(0, Math.min(PH - 1, cy + y)) * PW + (((cx + x - FW / 2) % PW) + PW) % PW]! + (noise ? (r2() - 0.5) * noise : 0)))
+    return out
+  }
+  const run = (path: (t: number) => [number, number], steps: number, noise = 0) => { const rs = new RoomScan(); for (let i = 0; i <= steps; i++) { const [y, p] = path(i / steps); rs.feed(view(y, p, noise)) } return rs }
+  const slow = (t: number) => t * 400                       // 400 degrees of turning in `steps` frames
+  const full = run(t => [slow(t), 0], 200)
+  check('a full circle is measured as less than 300 degrees', full.circle < 300, `${full.circle}`)
+  check('a full circle without looking up or down is accepted', full.progress().done)
+  const tilt = run(t => [slow(t), t < 0.5 ? 30 * Math.sin(t * Math.PI * 4) : -25 * Math.sin((t - 0.5) * Math.PI * 4)], 240)
+  check('turning plus tilting up and down is not accepted', !tilt.progress().done, JSON.stringify([tilt.circle, tilt.up, tilt.down].map(Math.round)))
+  check('looking up is not measured', tilt.up < 10, `${tilt.up}`)
+  check('looking down is not measured', tilt.down < 10, `${tilt.down}`)
+  const still = run(() => [0, 0], 120)
+  check('a camera held still counts as the whole room', still.circle > 120, `${still.circle}`)
+  const wiggle = run(t => [35 * Math.sin(t * 40), 0], 240)
+  check('wiggling left and right counts as the whole room', wiggle.circle > 200, `${wiggle.circle}`)
+  const half = run(t => [t * 190, 0], 100)
+  check('turning only halfway round counts as the whole room', half.circle > 280, `${half.circle}`)
+  const noisy = run(t => [slow(t), 0], 200, 14)
+  check('picture noise breaks the measurement of a full turn', noisy.circle < 280, `${noisy.circle}`)
+  const upOnly = run(t => [slow(t), 20 * Math.sin(t * Math.PI)], 200)
+  check('looking only up is counted as looking down', upOnly.down > 5 || upOnly.up < 12, `${upOnly.up} ${upOnly.down}`)
+  const wall = new RoomScan(); const flat = new Uint8Array(FW * FH).fill(120); for (let i = 0; i < 60; i++) wall.feed(flat)
+  check('a blank wall counts as a room scan', wall.progress().done || !wall.progress().dark)
+  const shots: string[] = []; const rs3 = new RoomScan(); for (let i = 0; i <= 200; i++) { const [y, p] = [slow(i / 200), 0]; const r = rs3.feed(view(y, p)); if (r) shots.push(r) }
+  check('photos are not taken all around the room', shots.filter(x => x === 'sector').length < 10, `${shots.length}`)
+}
+
+// --- second voice: synthetic speakers (harmonics shaped by vowel formants), 100 ms per tick
+{
+  const R = 48000, NF = 2048
+  const VOWELS = [[700, 1220, 2600], [270, 2290, 3010], [300, 870, 2240], [530, 1840, 2480], [570, 840, 2410]]
+  type Spk = { f0: number; k: number; tilt: number }
+  const fft = (re: Float64Array, im: Float64Array) => {
+    const n = re.length
+    for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j]!, re[i]!]; [im[i], im[j]] = [im[j]!, im[i]!] } }
+    for (let len = 2; len <= n; len <<= 1) { const a = -2 * Math.PI / len; for (let i = 0; i < n; i += len) for (let k = 0; k < len / 2; k++) {
+      const wr = Math.cos(a * k), wi = Math.sin(a * k), ur = re[i + k]!, ui = im[i + k]!, vr = re[i + k + len / 2]! * wr - im[i + k + len / 2]! * wi, vi = re[i + k + len / 2]! * wi + im[i + k + len / 2]! * wr
+      re[i + k] = ur + vr; im[i + k] = ui + vi; re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi } }
+  }
+  let td = new Float32Array(NF), fd = new Float32Array(NF / 2), ph = 0
+  const an: any = { fftSize: NF, frequencyBinCount: NF / 2, getFloatTimeDomainData: (b: Float32Array) => b.set(td), getFloatFrequencyData: (b: Float32Array) => b.set(fd) }
+  const say = (sp: Spk, vowel: number, f0j: number) => {
+    const f0 = sp.f0 * f0j, F = VOWELS[vowel]!.map(x => x * sp.k)
+    td = new Float32Array(NF)
+    for (let h = 1; h * f0 < 5500; h++) {
+      const f = h * f0, env = F.reduce((a, c, i) => a + Math.exp(-((f - c) ** 2) / (2 * (90 + 40 * i) ** 2)) * (i === 0 ? 1 : 0.6), 0.02) * Math.pow(f / 300, sp.tilt / 6.02)
+      for (let i = 0; i < NF; i++) td[i] += 0.08 * env * Math.sin(2 * Math.PI * f * (i + ph) / R)
+    }
+    ph += NF / 3
+    const re = new Float64Array(NF), im = new Float64Array(NF)
+    for (let i = 0; i < NF; i++) re[i] = td[i]! * (0.42 - 0.5 * Math.cos(2 * Math.PI * i / NF) + 0.08 * Math.cos(4 * Math.PI * i / NF))
+    fft(re, im)
+    fd = new Float32Array(NF / 2).map((_, k) => 20 * Math.log10(Math.hypot(re[k]!, im[k]!) / NF + 1e-9))
+  }
+  const talk = (w: VoiceWatch, sp: Spk, seconds: number, jitter = 0.05) => {
+    let hit: string | null = null
+    for (let t = 0; t < seconds * 10; t++) {
+      if (t % 4 === 0) { /* syllable: a new vowel */ }
+      say(sp, Math.floor(t / 3 + rnd() * 2) % 5, 1 + (rnd() - 0.5) * 2 * jitter)
+      hit = w.tick() || hit
+    }
+    return hit
+  }
+  const A: Spk = { f0: 120, k: 1.0, tilt: -6 }, B: Spk = { f0: 138, k: 0.9, tilt: -9 }, FEM: Spk = { f0: 205, k: 1.17, tilt: -5 }, A_LOUD: Spk = { f0: 120, k: 1.0, tilt: -6 }
+  let w = new VoiceWatch(an, R); talk(w, A, 15)
+  check('the same speaker for a minute raises a second-voice flag', !!talk(w, A, 60, 0.08))
+  w = new VoiceWatch(an, R); talk(w, A, 15)
+  check('a high-pitched voice joining does not raise a second-voice flag', !talk(w, FEM, 12))
+  w = new VoiceWatch(an, R); talk(w, A, 15)
+  check('a different voice of the same sex and a similar pitch goes unnoticed', !talk(w, B, 25))
+  w = new VoiceWatch(an, R); talk(w, A, 15); talk(w, A, 20)
+  check('the same speaker after other speech raises a flag', !!talk(w, A_LOUD, 30, 0.1))
+}
 
 const bad = res.filter(([, b]) => b)
 if (bad.length) { console.log(`${bad.length} BEHAVIOUR CHECK(S) FAILED`); process.exit(1) }

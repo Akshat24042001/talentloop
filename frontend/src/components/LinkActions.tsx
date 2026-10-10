@@ -7,7 +7,8 @@ import { Tip, cn, copyText } from './ui'
 
 export interface ShareTo { email?: string; phone?: string; name?: string }
 
-const digits = (p?: string) => (p || '').replace(/[^\d]/g, '')
+import { parsePhoneNumberFromString } from 'libphonenumber-js/min'
+const digits = (p?: string) => (parsePhoneNumberFromString(p || '', 'IN')?.number.replace('+', '')) || (p || '').replace(/[^\d]/g, '')
 const SEG = 'inline-flex items-center gap-1.5 whitespace-nowrap bg-white font-semibold text-slate-800 ring-1 ring-inset ring-slate-200 transition-colors hover:bg-slate-50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-brand-600 dark:bg-ink-850 dark:text-slate-100 dark:ring-ink-700 dark:hover:bg-ink-800'
 
 export function LinkActions({ url, label = 'Copy link', copied = 'Link copied', subject, message, to, size = 'sm', icon, className }: {

@@ -173,3 +173,80 @@ def extract(text: str) -> set[str]:
 
 def all_names() -> list[str]:
     return sorted(SKILLS)
+
+
+# --- skills written in a "Skills" section that the dictionary does not know ---------------------------------------------
+_HEAD = re.compile(r"^\s*(?:(?:technical|key|core|primary|professional|it|soft|functional|top)\s+)?(?:skills?(?:\s*(?:set|summary|&\s*tools|and\s+tools))?|"
+                   r"competenc(?:y|ies)|core competencies|tech(?:nical)? stack|technologies|tools(?:\s*(?:&|and)\s*technologies)?|tools|expertise|areas of expertise|"
+                   r"proficienc(?:y|ies)|languages\s*(?:&|and)\s*frameworks|programming languages)\s*[:\-–—]?\s*$", re.I)
+_INLINE = re.compile(r"^\s*(?:(?:technical|key|core|primary|professional|it|soft|functional)\s+)?(?:skills?|competenc(?:y|ies)|tech(?:nical)? stack|technologies|tools|expertise)"
+                     r"(?:\s*(?:set|summary))?\s*[:\-–—]\s*(.+)$", re.I)
+_OTHER_HEAD = re.compile(r"^\s*(?:work\s+|professional\s+)?(?:experience|employment|education|academics?|projects?|certifications?|achievements?|awards?|"
+                         r"summary|profile|objective|references?|declaration|personal|interests|hobbies|responsibilities|requirements|qualifications|"
+                         r"about|languages?|publications|training|internships?|contact)\b[^,.]{0,30}[:\-–—]?\s*$", re.I)
+_JUNK = {"and", "or", "etc", "others", "other", "more", "good", "basic", "advanced", "intermediate", "beginner", "expert", "proficient", "knowledge",
+         "experience", "skills", "skill", "tools", "technologies", "familiar", "working", "strong", "excellent", "years", "year", "of", "in", "with", "the"}
+
+
+def _items(line: str) -> list[str]:
+    line = re.sub(r"^[\s•●▪◦*·\-–—>]+", "", line)
+    if ":" in line and len(line.split(":", 1)[0].split()) <= 4:        # "Languages: Python, Java" -> the part after the label
+        line = line.split(":", 1)[1]
+    out = []
+    for part in re.split(r"[,;|•●▪◦·/]\s*|\s{3,}|\t", line):
+        part = re.sub(r"\s*[\(\[].*?[\)\]]", "", part).strip(" .-–—:")            # drop "(2 years)" / "[Advanced]"
+        if re.search(r"\s[-–—]\s", part) and not re.search(r"[-–—]\s*(?:basic|advanced|intermediate|expert|beginner|proficient)$", part, re.I):
+            part = re.split(r"\s[-–—]\s", part)[-1].strip()                          # "Vector databases - Pinecone" -> "Pinecone"
+        part = re.sub(r"\s*[-–]\s*(?:basic|advanced|intermediate|expert|beginner|proficient)$", "", part, flags=re.I)
+        if 2 <= len(part) <= 40 and len(part.split()) <= 4 and not re.fullmatch(r"[\d\W]+", part) and part.lower() not in _JUNK \
+                and not re.search(r"\b(?:years?|yrs?)\b|@|https?:", part, re.I):
+            out.append(part)
+    return out
+
+
+def extract_listed(text: str, limit: int = 60) -> list[str]:
+    """Skills the person wrote in a Skills / Tools / Tech stack section, canonical when known, else as written.
+    Order of appearance is kept."""
+    lines = [ln.rstrip() for ln in (text or "").splitlines()]
+    found: list[str] = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        m = _INLINE.match(ln)
+        if m:
+            found += _items(m.group(1))
+        elif _HEAD.match(ln):
+            j, blanks = i + 1, 0
+            while j < len(lines) and j - i <= 25:
+                nxt = lines[j].strip()
+                if not nxt:
+                    blanks += 1
+                    if blanks >= 2:
+                        break
+                    j += 1
+                    continue
+                if _OTHER_HEAD.match(nxt) or (_HEAD.match(nxt) and j > i + 0):
+                    break
+                if len(nxt) > 140:
+                    break
+                found += _items(nxt)
+                j += 1
+            i = j - 1
+        i += 1
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in found:
+        c = canonical(x)
+        if c.lower() not in seen:
+            seen.add(c.lower())
+            out.append(c)
+    return out[:limit]
+
+
+def extract_all(text: str) -> list[str]:
+    """Dictionary matches plus everything listed in a skills section, in order of first appearance in the text."""
+    base = extract(text)
+    low = (text or "").lower()
+    ordered = sorted(base, key=lambda s: (min((low.find(a) for a in {s.lower(), *SKILLS.get(s, [])} if low.find(a) >= 0), default=10**9), s))
+    seen = {s.lower() for s in ordered}
+    return ordered + [x for x in extract_listed(text) if x.lower() not in seen]

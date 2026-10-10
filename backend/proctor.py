@@ -21,6 +21,7 @@ LABELS = {
     "call_start": "Call started", "call_end": "Call ended", "call_dropped": "Call dropped unexpectedly",
     "ended_by_candidate": "Candidate ended the interview", "recording_upload_failed": "Part of the recording failed to upload",
     "recorder_unsupported": "Browser could not record video", "ai_audio_not_recorded": "Interviewer voice could not be added to the recording",
+    "slow_turn": "The interviewer was slow to take its turn", "room_scan_incomplete": "Room scan not completed", "room_scan_unverified": "Room scan could not be measured", "room_items": "Notes or another screen seen in the room",
     "session_start": "Joined the call", "device_changed": "Rejoined from a different device or browser",
     "ip_changed": "Rejoined from a different network (IP)", "reconnect_denied": "Tried to rejoin after the allowed window",
     "camera_off": "Camera stopped", "mic_off": "Microphone stopped", "devtools_suspected": "Browser developer tools may be open",
@@ -214,6 +215,10 @@ def summary(rec: dict) -> dict:
         add(1, "Ear photos were not checked by AI: look at them before deciding")
     if counts.get("room_scan_failed"):
         add(2, f"Someone else was found during the room scan ({_x(counts['room_scan_failed'])}) before the start")
+    if counts.get("room_scan_unverified"):
+        add(3, "The room scan could not be measured on this camera: look at the room photos before deciding")
+    if counts.get("room_items"):
+        add(2, "Written notes or another screen were seen in the room scan: look at the room photos")
     if counts.get("vision_flag"):
         add(min(9, 3 * counts["vision_flag"]), f"The AI photo check found a problem {_x(counts['vision_flag'])} (people, earphones, phone or screen)")
     if counts.get("camera_checks_unavailable"):

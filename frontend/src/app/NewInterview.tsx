@@ -36,7 +36,7 @@ function Steps({ step, max, onGo }: { step: number; max: number; onGo: (n: numbe
   )
 }
 
-function UploadLink({ onText }: { onText: (t: string) => void }) {
+function UploadLink({ onText, resume, onParsed }: { onText: (t: string) => void; resume?: boolean; onParsed?: (p: { name?: string; email?: string }) => void }) {
   const ref = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   return (
@@ -47,7 +47,10 @@ function UploadLink({ onText }: { onText: (t: string) => void }) {
       <input ref={ref} type="file" accept=".pdf,.txt,.docx" className="hidden" onChange={async e => {
         const f = e.target.files?.[0]; if (!f) return
         const fd = new FormData(); fd.append('file', f); setBusy(true)
-        try { onText((await api<{ text: string }>('/api/extract', { method: 'POST', body: fd })).text) } catch (err: any) { toast(err.message) }
+        try {
+          const r = await api<{ text: string; parsed?: { name?: string; email?: string } }>(`/api/extract${resume ? '?kind=resume' : ''}`, { method: 'POST', body: fd })
+          onText(r.text); if (r.parsed) onParsed?.(r.parsed)
+        } catch (err: any) { toast(err.message) }
         setBusy(false); e.target.value = ''
       }} />
     </>
@@ -170,7 +173,7 @@ export default function NewInterview() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Field label="Job description" htmlFor="jd" action={<UploadLink onText={t => setF(v => ({ ...v, jd: t }))} />}>
               <Textarea id="jd" className="min-h-56" placeholder="Paste the JD, or upload a PDF, TXT or DOCX" value={f.jd} onChange={set('jd')} /></Field>
-            <Field label="Resume" htmlFor="cv" action={<UploadLink onText={t => setF(v => ({ ...v, cv: t }))} />}>
+            <Field label="Resume" htmlFor="cv" action={<UploadLink resume onText={t => setF(v => ({ ...v, cv: t }))} onParsed={pp => setF(v => ({ ...v, cand: v.cand || pp.name || '', email: v.email || pp.email || '' }))} />}>
               <Textarea id="cv" className="min-h-56" placeholder="Paste the resume, or upload a PDF, TXT or DOCX" value={f.cv} onChange={set('cv')} /></Field>
           </div>
           <Field label="Your questions" htmlFor="qs" hint="One per line. Every one of them will be asked.">

@@ -268,11 +268,21 @@ function Lobby({ s }: { s: State }) {
             <CheckRow id="ckLive" c={s.checks.live} icon={<ScanFace />} />
             <CheckRow id="ckEars" c={s.checks.ears} icon={<Headphones />} action={s.checks.ears.state === 'bad' && <Button size="sm" variant="ghost" className="shrink-0 text-slate-200 hover:bg-white/10" onClick={() => engine.retryEars()}>Check again</Button>} />
             <CheckRow id="ckRoom" c={s.checks.room} icon={<Scan />} action={s.checks.room.state !== 'ok' && (s.roomScan.running
-              ? <span className="shrink-0 text-xs font-semibold tabular-nums text-amber-300">{s.roomScan.left}s</span>
+              ? <span className="shrink-0 text-right text-xs font-semibold tabular-nums text-amber-300">{Math.round(s.roomScan.pct * 100)}%<br /><span className="font-normal text-slate-400">{s.roomScan.left}s left</span></span>
               : <Button id="roomBtn" size="sm" variant="ghost" className="shrink-0 text-slate-200 hover:bg-white/10" onClick={() => engine.roomScan()}>{s.checks.room.state === 'bad' ? 'Scan again' : 'Scan the room'}</Button>)} />
             <CheckRow id="ckScreen" c={s.checks.screen} icon={<Monitor />} />
             <CheckRow id="ckShare" c={s.checks.share} icon={<ScreenShare />} />
           </ul>
+          {s.roomScan.running && (
+            <div id="roomHint" className="mt-3 rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+              <p className="text-sm font-medium text-amber-200">{s.roomScan.hint}</p>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-300">
+                {([['Around you', s.roomScan.pct], ['Ceiling', s.roomScan.up], ['Floor, under desk', s.roomScan.down]] as const).map(([l, x]) => (
+                  <div key={l}><div className="mb-1">{l}</div><div className="h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-amber-400 transition-all" style={{ width: `${Math.round(Math.min(1, x) * 100)}%` }} /></div></div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mt-4 flex flex-wrap gap-2">
             <Button id="speakerBtn" variant="ghost" size="sm" className="text-slate-300 hover:bg-white/10 hover:text-white" icon={<Volume2 />} onClick={() => { engine.speakerTest(); setBeeped(true) }}>{beeped ? 'Heard a beep? Good.' : 'Test speakers'}</Button>
             {P.require_screen_share && <Button id="shareBtn" variant="ghost" size="sm" className="text-slate-300 hover:bg-white/10 hover:text-white" icon={<MonitorUp />} onClick={() => engine.share(true)}>{s.sharing ? 'Share a different screen' : 'Share entire screen'}</Button>}

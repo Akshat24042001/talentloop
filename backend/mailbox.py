@@ -69,7 +69,7 @@ def import_message(org: db.Org, msg) -> dict | None:
     parsed = resumes.parse(text)
     sender_name, sender = email.utils.parseaddr(str(msg.get("From") or ""))
     emails = parsed.get("emails") or []          # the resume's own address first; the sender may be a job board
-    profile = {"name": parsed.get("name_guess") or sender_name or "", "email": emails[0] if emails else sender}
+    profile = {"name": parsed.get("name_guess") or resumes.safe_name(sender_name) or "", "email": emails[0] if emails else sender}
     if not profile["email"]:
         return None
     with db.session() as s:

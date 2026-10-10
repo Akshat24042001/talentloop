@@ -1,4 +1,4 @@
-import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Pencil, Phone, Trash2, UserPlus, Video, FileBarChart } from 'lucide-react'
+import { Briefcase, Download, ExternalLink, FileText, Mail, MapPin, Pencil, Trash2, UserPlus, Video, FileBarChart } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Modal, Select, Textarea, toast } from '../components/ui'
 import { Ago, Avatar, BackLink, ErrorBox, KV, PageHeader, PageSkeleton, ScoreRing, Tabs, TagInput, useApi } from '../components/kit'
@@ -11,6 +11,7 @@ import { ACTION_LABEL, SOURCE_LABEL, STAGE_TONE, actor } from './labels'
 import { BreakdownBars, ReportView, SkillChips, type AIReport, type Breakdown } from './match'
 import { ask } from '../components/dialogs'
 import ResumeCheck, { ResumeCheckSummary } from './ResumeCheck'
+import { PhoneInput, PhoneText } from '../components/PhoneInput'
 
 interface Detail extends Cand {
   tags: string[]; resume_name?: string; resume_type?: string; resume_v?: string; college?: string; created_at: number; profile: Record<string, any>; parsed: Record<string, any>; resume_text: string
@@ -113,7 +114,7 @@ export default function CandidateDetail({ id }: { id: string }) {
           <ResumeCheckSummary v={c.parsed?.verification} onOpen={() => setTab('check')} />
           <Card><CardBody className="space-y-2 text-sm">
             {c.email && <a href={`mailto:${c.email}`} className="flex items-center gap-2 hover:underline"><Mail className="size-4 text-slate-500 dark:text-slate-400" />{c.email}</a>}
-            {c.phone && <a href={`tel:${c.phone}`} className="flex items-center gap-2"><Phone className="size-4 text-slate-500 dark:text-slate-400" />{c.phone}</a>}
+            {c.phone && <PhoneText value={c.phone} />}
             {c.location && <div className="flex items-center gap-2"><MapPin className="size-4 text-slate-500 dark:text-slate-400" />{c.location}</div>}
             {p.linkedin && <a href={p.linkedin.startsWith('http') ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noopener" className="flex items-center gap-2 text-brand-600 dark:text-brand-400 hover:underline"><ExternalLink className="size-4" />LinkedIn</a>}
             <div className="pt-2 text-xs text-slate-500">{SOURCE_LABEL[c.source] || c.source} · added <Ago ts={c.created_at} />{c.notice_days != null ? ` · ${c.notice_days} days notice` : ''}</div>
@@ -182,7 +183,9 @@ function EditCandidate({ c, onClose, onSaved }: { c: Detail; onClose: () => void
     setBusy(false)
   }
   const F = (k: string, label: string, type = 'text', wide = false) => (
-    <Field className={wide ? 'sm:col-span-2' : ''} label={label} htmlFor={`e-${k}`}><Input id={`e-${k}`} type={type} value={f[k]} onChange={set(k)} /></Field>)
+    <Field className={wide ? 'sm:col-span-2' : ''} label={label} htmlFor={`e-${k}`}>{type === 'tel'
+      ? <PhoneInput id={`e-${k}`} value={f[k]} onChange={v => setF((o: any) => ({ ...o, [k]: v }))} />
+      : <Input id={`e-${k}`} type={type} value={f[k]} onChange={set(k)} />}</Field>)
   return (
     <Modal open onOpenChange={o => !o && onClose()} title={`Edit ${c.name}`}>
       <div className="mt-4 grid max-h-[65vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">

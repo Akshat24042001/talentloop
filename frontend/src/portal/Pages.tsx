@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, Field, Input, Modal, Select, Textarea, cn }
 import { when } from '../lib/format'
 import { fullWhen } from '../components/SlotPicker'
 import { Frame, HowItWorks, PageState, Preview, grab, send, useCamera, useLoad, type Brand, type Transparency } from './common'
+import { PhoneInput } from '../components/PhoneInput'
 
 // ---------------------------------------------------------------------------------------------- status page
 interface Status {
@@ -350,7 +351,7 @@ export function DrivePage({ code }: { code: string }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name *" htmlFor="dv-n"><Input id="dv-n" required autoComplete="name" value={f.name} onChange={set('name')} /></Field>
             <Field label="Email *" htmlFor="dv-e"><Input id="dv-e" type="email" required autoComplete="email" value={f.email} onChange={set('email')} /></Field>
-            <Field label="Phone *" htmlFor="dv-p"><Input id="dv-p" type="tel" required autoComplete="tel" value={f.phone} onChange={set('phone')} /></Field>
+            <Field label="Phone *" htmlFor="dv-p"><PhoneInput id="dv-p" required value={f.phone} onChange={v => setF(o => ({ ...o, phone: v }))} /></Field>
             <Field label="Degree *" htmlFor="dv-d"><Input id="dv-d" required value={f.degree} onChange={set('degree')} placeholder="B.Tech, BCA, B.Com…" /></Field>
             <Field label="Branch" htmlFor="dv-b"><Input id="dv-b" value={f.branch} onChange={set('branch')} /></Field>
             <Field label="Year of passing *" htmlFor="dv-y"><Input id="dv-y" required inputMode="numeric" value={f.graduation_year} onChange={set('graduation_year')} /></Field>

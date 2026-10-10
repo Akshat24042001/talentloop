@@ -7,6 +7,7 @@ import { navigate, useLocation } from '../lib/router'
 import { useMe } from '../lib/session'
 import type { Cand } from './JobDetail'
 import { SOURCE_LABEL } from './labels'
+import { PhoneInput } from '../components/PhoneInput'
 
 type Row = Cand & { applications: number; applied_to?: { job: string; stage: string; stage_label: string }[]; created_at: number; tags: string[]; resume_name?: string }
 
@@ -113,7 +114,7 @@ function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => vo
         {err && <Alert className="sm:col-span-2" tone="danger">{err}</Alert>}
         <Field label="Name *" htmlFor="c-name"><Input id="c-name" value={f.name} onChange={set('name')} /></Field>
         <Field label="Email" htmlFor="c-email"><Input id="c-email" type="email" value={f.email} onChange={set('email')} /></Field>
-        <Field label="Phone" htmlFor="c-phone"><Input id="c-phone" value={f.phone} onChange={set('phone')} /></Field>
+        <Field label="Phone" htmlFor="c-phone"><PhoneInput id="c-phone" value={f.phone} onChange={v => setF(o => ({ ...o, phone: v }))} /></Field>
         <Field label="Location" htmlFor="c-loc"><Input id="c-loc" value={f.location} onChange={set('location')} /></Field>
         <Field className="sm:col-span-2" label="Current title" htmlFor="c-head"><Input id="c-head" value={f.headline} onChange={set('headline')} /></Field>
         <Field label="Experience (years)" htmlFor="c-yrs"><Input id="c-yrs" type="number" value={f.total_experience_years} onChange={set('total_experience_years')} /></Field>

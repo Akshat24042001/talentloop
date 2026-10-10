@@ -58,15 +58,29 @@ export class AnswerTiming {
   pattern(): boolean { if (this.suspicious >= 3 && !this.reported) { this.reported = true; return true } return false }
 }
 
-/** Possible second voice: a sustained run of voiced speech whose pitch is far from the candidate's usual pitch.
- * Uses autocorrelation on the microphone (no recording, no upload). Short pitch errors are ignored: it needs
- * about three seconds of clearly different voice within a few seconds. */
+/** Possible second voice, from two things measured on the microphone (no recording, no upload):
+ *  - pitch: a sustained run of voiced speech far from the candidate's usual pitch (a man answering for a woman, or the reverse);
+ *  - voice colour: the long-run shape of the sound spectrum over 3-second stretches of speech, compared with the first stretch
+ *    of the candidate's own speech. Two people of the same sex have different vocal tracts even at the same pitch.
+ * A different pitch AND a different colour in one stretch, or a clearly different colour in two stretches in a row, raises the flag.
+ * It is a flag for a person to review, never a verdict: a cough, a TV, a very different mood of speaking can also move it. */
 export class VoiceWatch {
   private buf: Float32Array<ArrayBuffer>
+  private fbuf: Float32Array<ArrayBuffer>
   private base: number[] = []
   private baseline = 0
   private recent: boolean[] = []
-  constructor(private analyser: AnalyserNode, private rate: number) { this.buf = new Float32Array(analyser.fftSize) }
+  private baseSpec: number[][] = []
+  private refSpec: number[] | null = null
+  private thr = 0
+  private win: { spec: number[]; pitch: number }[] = []
+  private bad: number[] = []
+  private edges: number[]
+  constructor(private analyser: AnalyserNode, private rate: number) {
+    this.buf = new Float32Array(analyser.fftSize); this.fbuf = new Float32Array(analyser.frequencyBinCount)
+    const lo = 150, hi = Math.min(5000, rate / 2 - 100), n = 16
+    this.edges = Array.from({ length: n + 1 }, (_, i) => lo * (hi / lo) ** (i / n))
+  }
   private pitch(): number | null {
     const b = this.buf
     this.analyser.getFloatTimeDomainData(b)
@@ -83,19 +97,52 @@ export class VoiceWatch {
     }
     return best > 0.8 && lag ? this.rate / lag : null
   }
+  /** 16 log-spaced band levels in dB, with the overall loudness taken out (so distance from the mic does not matter). */
+  private spectrum(): number[] {
+    this.analyser.getFloatFrequencyData(this.fbuf)
+    const hz = this.rate / 2 / this.fbuf.length, out: number[] = []
+    for (let i = 0; i < this.edges.length - 1; i++) {
+      let sum = 0, n = 0
+      for (let k = Math.max(1, Math.floor(this.edges[i]! / hz)); k < Math.min(this.fbuf.length, Math.ceil(this.edges[i + 1]! / hz)); k++) { sum += Math.max(-120, this.fbuf[k]!); n++ }
+      out.push(n ? sum / n : -120)
+    }
+    const m = out.reduce((a, b) => a + b, 0) / out.length
+    return out.map(x => x - m)
+  }
+  private static mean(rows: number[][]): number[] { return rows[0]!.map((_, j) => rows.reduce((a, r) => a + r[j]!, 0) / rows.length) }
+  private static dist(a: number[], b: number[]): number { return Math.sqrt(a.reduce((s, x, i) => s + (x - b[i]!) ** 2, 0) / a.length) }
   /** Call about every 100 ms while the candidate may be speaking. Returns a description when a second voice is likely. */
   tick(): string | null {
     const p = this.pitch()
     if (p == null) { if (this.recent.length) this.recent.push(false); this.recent = this.recent.slice(-40); return null }
+    const spec = this.spectrum()
     if (!this.baseline) {
-      this.base.push(p)
-      if (this.base.length >= 80) { const s = [...this.base].sort((a, b) => a - b); this.baseline = s[Math.floor(s.length / 2)]! }
+      this.base.push(p); this.baseSpec.push(spec)
+      if (this.base.length >= 120) {      // about 12 seconds of the candidate's own voiced speech
+        const s = [...this.base].sort((a, b) => a - b); this.baseline = s[Math.floor(s.length / 2)]!
+        this.refSpec = VoiceWatch.mean(this.baseSpec)
+        // how much the candidate's own 3-second stretches differ from their average: the margin for "a different voice"
+        let spread = 0
+        for (let i = 0; i + 30 <= this.baseSpec.length; i += 30) spread = Math.max(spread, VoiceWatch.dist(VoiceWatch.mean(this.baseSpec.slice(i, i + 30)), this.refSpec))
+        this.thr = Math.max(spread * 1.7, 4)
+        this.baseSpec = []
+      }
       return null
     }
     const r = p / this.baseline
     this.recent.push(r > 1.55 || r < 0.65)
     this.recent = this.recent.slice(-40)
     if (this.recent.filter(Boolean).length >= 28) { this.recent = []; return `${Math.round(p)} Hz against the usual ${Math.round(this.baseline)} Hz` }
+    this.win.push({ spec, pitch: p })
+    if (this.win.length < 30) return null
+    const w = VoiceWatch.mean(this.win.map(x => x.spec)), d = VoiceWatch.dist(w, this.refSpec!)
+    const med = [...this.win.map(x => x.pitch)].sort((a, b) => a - b)[15]!, pr = med / this.baseline
+    this.win = []
+    const pitchOff = pr > 1.18 || pr < 0.85
+    this.bad.push(d > this.thr * (pitchOff ? 1 : 1.6) ? d : 0)
+    this.bad = this.bad.slice(-2)
+    if (pitchOff && this.bad[this.bad.length - 1]) { this.bad = []; return `different voice colour (${d.toFixed(1)} dB against ${this.thr.toFixed(1)}) and pitch ${Math.round(med)} Hz against ${Math.round(this.baseline)} Hz` }
+    if (this.bad.length === 2 && this.bad.every(Boolean)) { this.bad = []; return `different voice colour for two stretches of speech (${d.toFixed(1)} dB against ${this.thr.toFixed(1)})` }
     return null
   }
 }

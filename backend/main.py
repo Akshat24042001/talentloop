@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from sqlalchemy import or_  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
-from . import (api_accounts, api_candidate, api_flows, route_tags, api_hiring, api_portal, auth, brain, db, exports, interviews, ivindex, llm,  # noqa: E402
+from . import (api_accounts, api_candidate, api_flows, route_tags, api_hiring, api_portal, auth, brain, db, exports, extract_ai, interviews, ivindex, llm,  # noqa: E402
                communication, mailbox, matching, media, messages, proctor, refs, retention, store, worker)
 from .vapi_config import build_assistant, public_url  # noqa: E402
 
@@ -374,7 +374,14 @@ async def extract_text(req: Request, file: UploadFile = File(...)):
         raise HTTPException(400, f"Could not read file: {e}")
     if len(text.strip()) < 50:
         raise HTTPException(400, "Very little text found. Scanned PDF? Paste the text instead.")
-    return {"text": text.strip()}
+    out = {"text": text.strip()}
+    if req.query_params.get("kind") == "resume":          # fill the candidate's name and email from the resume
+        try:
+            p = await extract_ai.read_resume(out["text"])
+            out["parsed"] = {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"][:40]}
+        except Exception:
+            log.exception("resume reading failed")
+    return out
 
 
 @app.post("/api/plan")
@@ -1100,8 +1107,13 @@ including the background, edges, reflections and partly hidden people. Output ON
 {"people": int (how many different real people are visible, counting partial ones; the candidate counts as 1; photos,
 posters and screens showing people do not count), "earphones": "yes" | "no" | "unclear" (any earphone, earbud, AirPod,
 headset or headphone on or in the candidate's ears, including wireless buds; "unclear" if ears are not visible),
-"phone": bool (a mobile phone or tablet is visible), "second_screen": bool (another monitor, laptop or TV with content is
-visible), "note": str (one short sentence about anything suspicious, or "")}"""
+"others": int (people visible who are NOT the candidate: in room photos the candidate holds the camera and is usually not
+in the picture, so every real person you see except the candidate's own face at the start or end is "others"; sleeping or
+partly hidden people, people in mirrors or doorways and people behind furniture count; photos, posters, statues and screens
+do not), "phone": bool (a mobile phone or tablet is visible), "second_screen": bool (another monitor, laptop or TV with
+content is visible), "notes": bool (handwritten notes, sticky notes, a book, a whiteboard or printed pages with text that
+could help answer questions, within reach of the candidate), "note": str (one short sentence about anything suspicious,
+or "")}"""
 VISION_REASONS = ("room", "ears", "periodic")
 _vision_last: dict[str, float] = {}
 
@@ -1127,7 +1139,7 @@ async def vision_check(iid: str, req: Request):
     if reason not in VISION_REASONS:
         raise HTTPException(400, "unknown reason")
     imgs = []
-    for x in (body.get("images") or [])[:3]:
+    for x in (body.get("images") or [])[:(8 if reason == "room" else 3)]:
         try:
             b = base64.b64decode(str(x).split(",")[-1], validate=True)
         except Exception:
@@ -1158,7 +1170,7 @@ async def vision_check(iid: str, req: Request):
             server_event(rec, "vision_check", f"{reason}: not checked ({'demo mode' if llm.MOCK else 'no vision model' if not llm.VISION_MODEL else 'limit reached'})")
             store.save(rec)
         return {"checked": False, "reason": "mock" if llm.MOCK else "no_vision_model" if not llm.VISION_MODEL else "limit"}
-    what = {"room": "These photos were taken while the candidate turned the camera around the room before the interview.",
+    what = {"room": "These photos were taken one after another while the candidate swept the camera round the whole room, then up to the ceiling and down to the floor, before the interview. Look in every photo for people.",
             "ears": "These photos show the candidate's head turned to each side, so both ears should be visible.",
             "periodic": "This photo was taken during the interview."}[reason]
     try:
@@ -1176,8 +1188,13 @@ async def vision_check(iid: str, req: Request):
         people = 0
     ear = str(out.get("earphones") or "unclear").lower()
     res = {"checked": True, "people": people, "earphones": ear if ear in ("yes", "no", "unclear") else "unclear",
-           "phone": bool(out.get("phone")), "second_screen": bool(out.get("second_screen")), "note": str(out.get("note") or "")[:200]}
-    found = [x for x, hit in (("other people", people > 1), ("earphones", res["earphones"] == "yes"), ("phone", res["phone"]),
+           "phone": bool(out.get("phone")), "second_screen": bool(out.get("second_screen")), "notes": bool(out.get("notes")),
+           "note": str(out.get("note") or "")[:200]}
+    try:
+        res["others"] = max(0, int(out["others"])) if "others" in out else max(0, people - 1)
+    except (TypeError, ValueError):
+        res["others"] = max(0, people - 1)
+    found = [x for x, hit in (("other people", res["others"] > 0 if reason == "room" else people > 1), ("written notes", res["notes"]), ("earphones", res["earphones"] == "yes"), ("phone", res["phone"]),
                               ("second screen", res["second_screen"])) if hit]
     async with store.lock(iid):
         rec = get_rec(iid)

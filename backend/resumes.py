@@ -79,16 +79,78 @@ def _years_from_ranges(text: str) -> float | None:
     return round(total / 365.25, 1)
 
 
+# --- names ------------------------------------------------------------------------------------------------------------
+_LABEL = re.compile(r"^\s*(?:(?:candidate|applicant|employee)\s+)?(?:full\s+|first\s+|last\s+)?name\s*(?:of\s+(?:the\s+)?(?:candidate|applicant))?\s*[:\-–—=|]\s*", re.I)
+_DOC_WORDS = re.compile(r"^\s*(?:(?:resume|résumé|curriculum\s+vitae|cv|profile|bio-?data|biodata)(?:\s+(?:of|for))?\s*[:\-–—|]?\s*)+", re.I)
+_HONORIFIC = re.compile(r"^\s*(?:mr|mrs|ms|miss|dr|prof|shri|smt|sri|kumari)\b\.?\s+", re.I)
+_CREDENTIALS = re.compile(r"[,\s]+(?:mba|pmp|ca|cs|cfa|frm|phd|ph\.d|m\.?tech|b\.?tech|b\.?e|m\.?e|b\.?sc|m\.?sc|bca|mca|b\.?com|m\.?com|"
+                          r"cissp|cism|aws|csm|six sigma|pgdm|llb|md)\.?\s*$", re.I)
+_NOT_A_NAME = {"resume", "résumé", "curriculum", "vitae", "cv", "profile", "summary", "objective", "contact", "details", "personal", "information",
+               "experience", "education", "skills", "projects", "references", "declaration", "page", "career", "about", "me", "name", "email", "phone",
+               "mobile", "address", "linkedin", "github", "portfolio", "engineer", "developer", "manager", "analyst", "executive", "consultant",
+               "designer", "architect", "intern", "lead", "senior", "junior", "associate", "specialist", "administrator", "officer", "director",
+               "recruiter", "sales", "software", "data", "business", "customer", "support", "product", "project", "marketing", "operations", "hr",
+               "technical", "professional", "fresher", "student", "graduate", "present", "confidential", "private", "limited", "ltd", "pvt", "inc",
+               "technologies", "solutions", "services", "university", "college", "institute", "school", "bachelor", "master", "degree", "certificate"}
+
+
+def clean_name(raw: str) -> str:
+    """A person's name from a header line or a form value: "Name: Priya Sharma", "RESUME OF PRIYA SHARMA", "Dr. Priya Sharma, MBA |
+    Pune" and "priya.sharma" all give "Priya Sharma". Empty when the text is not a plausible name."""
+    s = re.sub(r"\s+", " ", str(raw or "")).strip()
+    for _ in range(3):                                     # labels can stack: "Resume - Name: ..."
+        n = _DOC_WORDS.sub("", _LABEL.sub("", s)).strip()
+        if n == s:
+            break
+        s = n
+    s = _HONORIFIC.sub("", s)
+    s = re.split(r"\s[|•·/–—-]\s|\s{2,}|[|•·@()\[\]:;\d]|,\s*(?=[a-z.]*\s*$)", s)[0].strip(" ,.-")
+    s = _CREDENTIALS.sub("", s).strip(" ,.-")
+    words = s.split()
+    if not 1 <= len(words) <= 5 or len(s) > 60:
+        return ""
+    if any(not re.fullmatch(r"[^\W\d_](?:[^\W\d_]|['.\u2019-])*", w) for w in words):
+        return ""
+    if any(w.lower().strip(".") in _NOT_A_NAME for w in words) or (len(words) == 1 and len(words[0]) < 3):
+        return ""
+    if s.isupper() or s.islower():
+        s = " ".join(w if len(w) <= 2 and w.endswith(".") else w[:1].upper() + w[1:].lower() for w in words)
+        s = re.sub(r"\b(Mc|Mac|O')([a-z])", lambda m: m.group(1) + m.group(2).upper(), s)
+    return s
+
+
+def safe_name(raw: str) -> str:
+    """clean_name, but a name it cannot judge (one unusual word, an initial) is kept with only its label removed."""
+    n = clean_name(raw)
+    if n:
+        return n
+    s = _LABEL.sub("", re.sub(r"\s+", " ", str(raw or "")).strip()).strip()
+    return "" if not s or len(s) > 80 or re.search(r"[\d@:/]", s) else s
+
+
 def _guess_name(text: str, email: str) -> str:
-    for line in [ln.strip() for ln in text.splitlines() if ln.strip()][:6]:
-        if EMAIL.search(line) or any(ch.isdigit() for ch in line) or len(line) > 40:
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    for ln in lines[:25]:                                  # an explicit "Name: ..." line wins over any guess
+        m = _LABEL.match(ln)
+        if m and (n := clean_name(ln)):
+            return n
+    local = [p.lower() for p in re.split(r"[._\d\-+]+", email.split("@")[0]) if len(p) > 1] if email else []
+    found = []
+    for ln in lines[:10]:
+        if EMAIL.search(ln) and len(ln) > 60:
             continue
-        words = line.replace("|", " ").split()
-        if 1 < len(words) <= 4 and all(w[:1].isupper() for w in words if w.isalpha()):
-            return " ".join(words[:4])
-    if email:
-        local = re.split(r"[._\d]+", email.split("@")[0])
-        return " ".join(p.capitalize() for p in local if p)[:60]
+        n = clean_name(ln)
+        if n and len(n.split()) >= 2:
+            found.append(n)
+        if len(found) == 3:
+            break
+    if found:                                              # prefer the line that agrees with the email address
+        for n in found:
+            if any(tok in n.lower() for tok in local):
+                return n
+        return found[0]
+    if local:
+        return " ".join(p.capitalize() for p in local)[:60]
     return ""
 
 
@@ -114,7 +176,7 @@ def parse(text: str) -> dict:
     location = next((c for c in CITIES if cm and c.lower() == cm.group(1).lower()), "")
     return {
         "emails": emails, "location": location, "phones": phones[:2], "links": list(dict.fromkeys(LINK.findall(t)))[:5],
-        "skills": sorted(skills.extract(t)), "years": years, "years_source": "stated" if stated else ("dates" if ranged else None),
+        "skills": skills.extract_all(t), "years": years, "years_source": "stated" if stated else ("dates" if ranged else None),
         "notice_days": notice, "name_guess": _guess_name(t, emails[0] if emails else ""), "chars": len(t), "parsed_at": time.time(),
     }
 

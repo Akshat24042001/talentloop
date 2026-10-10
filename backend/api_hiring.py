@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import defer
 
-from . import auth, db, docs_pdf, jd_schema, llm, matching, refs, resumes, skills, store, verify
+from . import auth, db, docs_pdf, extract_ai, jd_schema, jdparse, llm, matching, refs, resumes, skills, store, verify
 from .offload import offload
 from .api_accounts import log_activity, org_settings
 
@@ -323,6 +323,8 @@ async def _ai_write(org_id: str, fields: dict) -> dict:
     draft = {k: v for k, v in draft.items() if v not in (None, "", [])}
     if not draft:
         raise HTTPException(502, "The AI answered, but not with a usable job description. Try again, or pick another model in Platform admin > AI models.")
+    if llm.MOCK:
+        draft["_demo"] = True        # canned placeholder text, not written by an AI: the page must say so
     return draft
 
 
@@ -525,7 +527,7 @@ def upsert_candidate(s, org_id: str, *, text: str, parsed: dict, profile: dict, 
         s.add(cand); s.flush()
     merged = {**(cand.profile or {}), **{k: v for k, v in profile.items() if v not in (None, "", [])}}
     cand.profile = merged
-    cand.name = (profile.get("name") or cand.name or parsed.get("name_guess") or "")[:200]
+    cand.name = (resumes.safe_name(profile.get("name")) or cand.name or parsed.get("name_guess") or "")[:200]
     cand.email = email or cand.email
     cand.phone = (profile.get("phone") or cand.phone or (parsed.get("phones") or [""])[0])[:60]
     cand.location = (profile.get("location") or cand.location or parsed.get("location") or "")[:200]
@@ -1299,9 +1301,10 @@ async def public_parse_resume(req: Request, resume: UploadFile = File(...)):
     raw = await resume.read()
     check_resume(raw, resume.filename or "")
     text = await verify.read_resume_text(raw, resume.filename or "")
-    p = resumes.parse(text)
+    p = await extract_ai.read_resume(text)
     return {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"],
-            "total_experience_years": p["years"], "notice_days": p["notice_days"], "links": p["links"]}
+            "total_experience_years": p["years"], "notice_days": p["notice_days"], "links": p["links"], "location": p.get("location", ""),
+            "read_by": p.get("read_by", "rules")}
 
 
 # ---------------------------------------------------------------------------
@@ -1309,25 +1312,16 @@ async def public_parse_resume(req: Request, resume: UploadFile = File(...)):
 # ---------------------------------------------------------------------------
 @router.post("/api/jobs/parse-jd")
 async def parse_jd(req: Request, file: UploadFile = File(...)):
-    """Prefill the JD form from an existing JD file (free: no AI)."""
-    import re
+    """Prefill the JD form from an existing JD file: the section-aware free reader, improved by the AI when it is on."""
     with db.session() as s:
         auth.require(ctx_of(req, s), auth.MANAGE_JOBS, "create jobs")
     raw = await file.read()
     check_resume(raw, file.filename or "")
     text = await verify.read_resume_text(raw, file.filename or "")
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if not lines:
+    if not text.strip():
         raise HTTPException(400, "No readable text in that file.")
-    title = next((ln for ln in lines[:5] if 3 <= len(ln) <= 80 and not ln.endswith((".", ":"))), "")
-    bullets = [re.sub(r"^[-•*▪●◦\d.)\s]+", "", ln).strip() for ln in lines if re.match(r"^([-•*▪●◦]|\d+[.)])\s+", ln)]
-    paras = [ln for ln in lines if len(ln) > 120]
-    yrs = re.search(r"(\d{1,2})\s*\+?\s*(?:-|to)?\s*(\d{1,2})?\s*\+?\s*years?", text, re.I)
-    found = sorted(skills.extract(text))
-    fields = jd_schema.clean({"title": title, "summary": (paras[0] if paras else "")[:900], "responsibilities": bullets[:8],
-                              "must_have_skills": found[:6], "nice_to_have_skills": found[6:12], "tools": found[:12],
-                              **({"experience_min": int(yrs.group(1))} if yrs else {}), **({"experience_max": int(yrs.group(2))} if yrs and yrs.group(2) else {})})
-    return {"fields": fields, "chars": len(text)}
+    out = await extract_ai.read_jd(text)
+    return {"fields": out["fields"], "chars": len(text), "read_by": out["read_by"]}
 
 
 @router.post("/api/demo/seed")

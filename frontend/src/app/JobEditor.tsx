@@ -71,6 +71,7 @@ export default function JobEditor({ id }: { id?: string }) {
     try {
       // The AI works from what is on screen now (unsaved edits included); nothing is saved until you press Save.
       const out = await api<Record<string, unknown>>(id ? `/api/jobs/${id}/ai-write` : '/api/jobs/ai-write', { json: { fields: v } })
+      const demo = !!out._demo; delete out._demo
       const label = (k: string) => (meta?.sections || []).flatMap(x => x.fields).find(f => f.key === k)?.label || k
       const filled = Object.keys(out).filter(k => !empty(out[k]) && !empty(v[k]))
       let replace = false
@@ -79,7 +80,8 @@ export default function JobEditor({ id }: { id?: string }) {
       const take = Object.keys(out).filter(k => !empty(out[k]) && (replace || empty(v[k])))
       if (take.length) {
         setV(o => ({ ...o!, ...Object.fromEntries(take.map(k => [k, out[k]])) }))
-        toast(`AI wrote ${take.map(label).join(', ')}. Review it, then Save.`)
+        toast(demo ? `Demo text in ${take.map(label).join(', ')}: no AI is connected, so this is placeholder wording. Connect an AI key in Platform admin > AI models.`
+          : `AI wrote ${take.map(label).join(', ')}. Review it, then Save.`)
       } else toast('Nothing changed: those fields already have your text.')
     } catch (e: any) { setErr(e.message) }
     setAiBusy(false)

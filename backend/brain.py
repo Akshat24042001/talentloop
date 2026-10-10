@@ -687,12 +687,28 @@ def _next_index(st: dict, plan: dict, active: float) -> int | None:
     return None
 
 
-def _recent(st: dict, k: int = 6) -> str:
+def _recent(st: dict, k: int = 8) -> str:
     lines = []
     for e in st["log"][-k:]:
         who = "INTERVIEWER" if e["role"] == "ai" else "CANDIDATE"
-        lines.append(f"{who}: {e['text'][:400]}")
+        lines.append(f"{who}: {e['text'][:500]}")
     return "\n".join(lines)
+
+
+def answer_so_far(st: dict, q_id: str, said: str) -> str:
+    """All of the candidate's words on the current main question, including its follow-ups: the speech-to-text often cuts one answer
+    into several turns, and judging only the last piece makes a complete answer look thin (and a thin one look complete)."""
+    start = 0
+    for i, e in enumerate(st["log"]):
+        if e["role"] == "ai" and e.get("action") == "next_question":
+            start = i + 1                               # the interviewer moved on here: earlier turns belong to earlier questions
+    parts = [e["text"] for e in st["log"][start:] if e["role"] == "candidate" and e.get("q_id") == q_id]
+    parts.append(said)
+    return " ".join(parts)[-2500:]
+
+
+def followups_asked(st: dict, q_id: str) -> list[str]:
+    return [e["text"] for e in st["log"] if e["role"] == "ai" and e.get("action") == "follow_up" and e.get("q_id") == q_id][-3:]
 
 
 async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list | None = None, lang: str = "en") -> dict:
@@ -712,10 +728,12 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list 
         already=json.dumps(ctx["already"]), fu_used=st["fu_used"], fu_max=q["max_followups"],
         next_q=(plan["questions"][st["q_idx"] + 1]["ask"] if st["q_idx"] + 1 < len(plan["questions"]) else "(none, this is the last question)"),
         recent=_recent(st), said=said[:2500], accommodation=plan.get("accommodation") or "(none)",
+        so_far=answer_so_far(st, q["id"], said), fu_asked=json.dumps(followups_asked(st, q["id"]), ensure_ascii=False),
+        uncovered=json.dumps([c for i, c in enumerate(q["good_answer_covers"]) if i not in ctx["already"]][:4], ensure_ascii=False),
         claims=json.dumps((plan.get("resume_claims_to_verify") or [])[:4], ensure_ascii=False),
     )
     return await asyncio.wait_for(
-        llm.complete_json(prompts.TURN_SYSTEM, user, llm.FAST_MODEL, temperature=0.3, max_tokens=300,
+        llm.complete_json(prompts.TURN_SYSTEM, user, llm.FAST_MODEL, temperature=0.3, max_tokens=420,
                           timeout=TURN_TIMEOUT, backup=False),
         timeout=TURN_TIMEOUT + 1,
     )
@@ -909,6 +927,14 @@ def apply_turn(rec: dict, prep: dict, d: dict, latency_ms: int, failed: bool) ->
             action, d = "follow_up", {**d, "followup": _clean(d.get("followup")) or GENERIC_PROBE[q["type"]]}
         elif "invite_continue" in allowed and st["stall"] < 1 and words < 12:
             action, d = "invite_continue", {**d, "reply": "Take your time. Is there anything you'd like to add?"}
+    # A confident-sounding but generic answer is not enough: the model said "move on", yet fewer than half of the key points were
+    # addressed and it wrote a usable probe for the gap. Ask it while follow-ups remain.
+    if action == "next_question" and q["type"] in DEEP_TYPES and "follow_up" in allowed and not _gives_up(said):
+        covers = q.get("good_answer_covers") or []
+        got = set(st["covered"].get(q["id"], [])) | {i for i in (d.get("covered") or []) if isinstance(i, int)}
+        probe = safe_followup(d.get("followup"), q)
+        if covers and len(got) * 2 < len(covers) and probe:
+            action, d = "follow_up", {**d, "followup": probe, "note": (d.get("note") or "") + " Key points still missing; probed."}
     ack = safe_ack(d.get("ack"))
     current_q = (st.get("display") or {}).get("text") or q["ask"]
     facts = [str(x) for x in plan.get("company_facts") or []] + [f"{x.get('q', '')} {x.get('a', '')}" for x in prep.get("faq") or []]

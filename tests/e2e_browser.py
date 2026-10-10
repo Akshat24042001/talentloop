@@ -107,6 +107,29 @@ ANSWERS = ["Hi, I'm Rohan. I have three years of backend experience with Spring 
            "I led the migration of notifications to Kafka consumers with retries and a dead letter queue."] * 3
 
 
+def sweep_y4m(path: Path):
+    """A fake camera film for the room scan: the view turns a full circle (400 degrees), then tilts up and down, and repeats every 30 s.
+    Chrome plays it in a loop in place of its green test picture, so the scan's own measurement is what the test exercises."""
+    import numpy as np
+    W, H, FPS, N, HFOV = 320, 180, 10, 300, 66.0
+    ppd = W / HFOV
+    pw, ph = int(360 * ppd), H + 260
+    rng = np.random.default_rng(3)
+    pan = rng.random((ph, pw)) * 255
+    for _ in range(3):
+        pan = (pan * 2 + np.roll(pan, 1, 0) + np.roll(pan, -1, 0) + np.roll(pan, 1, 1) + np.roll(pan, -1, 1)) / 6
+    pan = (pan - pan.min()) / (pan.max() - pan.min()) * 200 + 25
+    with open(path, "wb") as f:
+        f.write(f"YUV4MPEG2 W{W} H{H} F{FPS}:1 Ip A1:1 C420jpeg\n".encode())
+        for i in range(N):
+            yaw = 400.0 * min(1.0, i / 190)
+            pitch = 0.0 if i < 190 else 25 * math.sin((i - 190) / 110 * 2 * math.pi) * 1.0
+            cx, cy = int(yaw * ppd), 130 - int(pitch * ppd)
+            cols = (np.arange(W) + cx - W // 2) % pw
+            frame = pan[cy:cy + H][:, cols]
+            f.write(b"FRAME\n" + frame.astype(np.uint8).tobytes() + bytes([128]) * (W * H // 2))
+
+
 def free_port_wait(port, up=True, timeout=30):
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -177,8 +200,11 @@ def scan_room(pg):
     """The room scan before the start (12 s with the stand-in detector); a no-op when the interview doesn't ask for it."""
     pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckEars'))", timeout=20000)
     if pg.locator("#roomBtn").count() and not pg.locator("#ckRoom.ok").count():
+        prev = pg.evaluate("window.__PERSONS")
+        pg.evaluate("window.__PERSONS = 0")                       # turned away from the candidate: nobody in view
         pg.click("#roomBtn")
-        pg.wait_for_selector("#ckRoom.ok", timeout=25000)
+        pg.wait_for_selector("#ckRoom.ok", timeout=110000)
+        pg.evaluate(f"window.__PERSONS = {json.dumps(prev)}")
 
 
 def tracks_stopped(pg) -> bool:
@@ -188,6 +214,8 @@ def tracks_stopped(pg) -> bool:
 
 def main():
     data = tempfile.mkdtemp()
+    film = Path(data) / "sweep.y4m"
+    sweep_y4m(film)
     env = dict(os.environ, ALLOW_SAMPLE_DATA="1", LLM_MOCK="1", PUBLIC_URL="https://example.onrender.com", VAPI_PUBLIC_KEY="pk_test",
                ADMIN_KEY=KEY, DATA_DIR=data, RECONNECT_WINDOW_SEC="12", SWEEP_EVERY_SEC="3", LOG_LEVEL="WARNING",
                PYTHONUNBUFFERED="1", PLATFORM_ADMIN_EMAILS="admin@e2e.test", DATABASE_URL="")
@@ -200,7 +228,7 @@ def main():
         with sync_playwright() as p:
             exe = "/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else None
             browser = p.chromium.launch(executable_path=exe, args=[
-                "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required",
+                "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", f"--use-file-for-fake-video-capture={film}", "--autoplay-policy=no-user-gesture-required",
                 "--auto-select-desktop-capture-source=Entire screen", "--enable-usermedia-screen-capturing",
                 "--allow-http-screen-capture"])
 
@@ -241,8 +269,13 @@ def main():
                 pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckEars'))", timeout=15000)   # ear photos (demo: kept for HR)
                 if pg.locator("#roomBtn").count():
                     assert pg.is_enabled("#startBtn") is False, "start must wait for the room scan"
+                    pg.evaluate("window.__PERSONS = 0")                                                   # turned away from the candidate: nobody in view
                     pg.click("#roomBtn")
-                    pg.wait_for_selector("#ckRoom.ok", timeout=25000)                                     # 12 s scan
+                    try:
+                        pg.wait_for_selector("#ckRoom.ok", timeout=110000)                                # the camera film turns a full circle, then tilts
+                    except Exception:
+                        raise AssertionError("room scan did not finish: " + pg.inner_text("#ckRoom") + " | " + (pg.inner_text("#roomHint") if pg.locator("#roomHint").count() else "no hint"))
+                    pg.evaluate("window.__PERSONS = undefined")
                 if share:
                     assert pg.is_enabled("#startBtn") is False, "start must wait for screen sharing"
                     pg.click("#shareBtn")
@@ -472,7 +505,7 @@ def main():
             pg6.wait_for_selector("#ckFace.bad", timeout=20000)
             assert "someone else" in pg6.inner_text("#ckFace").lower(), pg6.inner_text("#ckFace")
             pg6.wait_for_selector("#ckMic.ok", timeout=20000)
-            pg6.click("#roomBtn"); pg6.wait_for_selector("#ckRoom.bad", timeout=25000)       # the room scan finds them too
+            pg6.click("#roomBtn"); pg6.wait_for_selector("#ckRoom.bad", timeout=60000)       # the room scan finds them too
             assert pg6.is_enabled("#startBtn") is False, "someone else in the room must block the start"
             pg6.evaluate("window.__PERSONS = 1")
             pg6.wait_for_selector("#ckFace.ok", timeout=10000)

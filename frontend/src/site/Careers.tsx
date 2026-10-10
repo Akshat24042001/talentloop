@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { Alert, Badge, Button, Card, Field, Input, Logo, Select, Textarea, cn } from '../components/ui'
 import { Loading, TagInput, Ago } from '../components/kit'
 import { ApiError } from '../lib/api'
+import { PhoneInput } from '../components/PhoneInput'
 
 interface Org { name: string; slug: string; about: string; website: string; logo_url: string; brand_color: string; headline: string; industry: string; size: string; country: string }
 interface JobItem { id: string; ref: string; title: string; department: string; location: string; workplace_type: string; employment_type: string; experience: string; salary: string; published_at: number }
@@ -209,7 +210,7 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
       {step === 1 && <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Full name *" htmlFor="ap-name"><Input id="ap-name" autoComplete="name" value={f.name} onChange={set('name')} /></Field>
         <Field label="Email *" htmlFor="ap-email"><Input id="ap-email" type="email" autoComplete="email" value={f.email} onChange={set('email')} /></Field>
-        <Field label={star('Phone', 'phone')} htmlFor="ap-phone"><Input id="ap-phone" type="tel" autoComplete="tel" value={f.phone} onChange={set('phone')} /></Field>
+        <Field label={star('Phone', 'phone')} htmlFor="ap-phone"><PhoneInput id="ap-phone" value={f.phone} onChange={v => setF(o => ({ ...o, phone: v }))} /></Field>
         <Field label={star('Current city', 'location')} htmlFor="ap-loc"><Input id="ap-loc" autoComplete="address-level2" value={f.location} onChange={set('location')} /></Field>
         <Field label="Preferred work location" htmlFor="ap-pref"><Input id="ap-pref" value={f.preferred_location} onChange={set('preferred_location')} placeholder="e.g. Pune, or remote" /></Field>
         <Field label="Work authorisation" htmlFor="ap-auth"><Select id="ap-auth" value={f.work_authorization} onChange={set('work_authorization')}><option value="">Select…</option>{AUTH.map(x => <option key={x}>{x}</option>)}</Select></Field>

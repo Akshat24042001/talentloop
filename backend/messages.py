@@ -91,9 +91,11 @@ def delivery(s, m: db.Message) -> tuple[str | None, str]:
 
 def norm_phone(phone: str, default_cc: str = "91") -> str:
     """E.164 digits without '+' for WhatsApp: '098765 43210' -> '919876543210'."""
-    d = re.sub(r"\D", "", phone or "")
-    if d.startswith("00"):
-        d = d[2:]
+    raw = (phone or "").strip()
+    d = re.sub(r"\D", "", raw)
+    if raw.startswith("+") or d.startswith("00"):          # already international ("+65 8123 4567"): never add a country code
+        d = d[2:] if d.startswith("00") and not raw.startswith("+") else d
+        return d if 8 <= len(d) <= 15 else ""
     if len(d) == 11 and d.startswith("0"):
         d = d[1:]
     if len(d) == 10:
