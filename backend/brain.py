@@ -497,6 +497,7 @@ def reminder_message(plan: dict, kind: str, question: str = "") -> str:
             "multiple_people": "It looks like someone else is in view. Please make sure you're on your own",
             "phone_visible": "I can see a phone. Please put it away, out of reach",
             "earphones": "It looks like you're wearing earphones. Please take them out and use your device's speaker",
+            "second_voice": "I can hear another voice besides yours. Please make sure you're alone and answer in your own words",
             "quick_switches": "Please keep this interview screen in front of you"}.get(kind, "Please stay focused on the interview")
     again = f" Let's continue. {question}" if question else ""
     return f"{name}, quick reminder: {what}.{again}"

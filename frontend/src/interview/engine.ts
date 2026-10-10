@@ -580,12 +580,8 @@ export class InterviewEngine {
     }
     if (!p.done) {
       this.ev('room_scan_incomplete', `${Math.round(p.circle)} of 360 degrees, tilt up ${Math.round(p.up)}, down ${Math.round(p.down)}${scan.unreadable ? ', picture unreadable' : ''}`)
-      // A camera that cannot be followed at all (very dark, plain walls) must not lock an honest candidate out for ever: after three tries it
-      // goes on, marked "not verified" for HR. A scan that was readable but not completed never passes.
-      if (scan.unreadable && this.roomTries >= 3) {
-        this.ev('room_scan_unverified', 'the camera picture could not be followed after 3 tries'); this.snap('room_scan_unverified')
-        this.roomDone = true; this.setCheck('room', 'ok', 'Room scan could not be measured; the hiring team will review the photos'); return this.updateStart()
-      }
+      // Strict: an incomplete or unreadable scan never passes. A dark or plain-walled room needs a light and things in view.
+      if (scan.unreadable) { this.ev('room_scan_unverified', `the camera picture could not be followed (try ${this.roomTries})`); this.snap('room_scan_unverified') }
       this.setCheck('room', 'bad', p.dark ? p.hint : p.circle < NEED_CIRCLE ? `Only ${Math.round(p.circle / 360 * 100)}% of the room was shown. Turn all the way round, slowly.`
         : p.up < NEED_UP ? 'Show the ceiling too: tilt the camera up.' : 'Show the floor and under your desk: tilt the camera down.')
       this.roomDone = false; return this.updateStart()
@@ -597,7 +593,7 @@ export class InterviewEngine {
     this.setCheck('room', '', 'Checking the room photos...')
     const r = await this.visionCheck('room', shots)
     const others = r?.checked ? (typeof r.others === 'number' ? r.others : Math.max(0, (r.people || 0) - 1)) : 0
-    if (others > 0 || (!r?.checked && far >= 5)) {
+    if (others > 0 || far >= (r?.checked ? 4 : 2)) {
       this.ev('room_scan_failed', r?.checked ? `AI photo check: ${others} other person${others > 1 ? 's' : ''}${r.note ? `. ${r.note}` : ''}` : 'a person was seen away from the candidate')
       this.setCheck('room', 'bad', 'Someone else was seen in the room. You must be alone. Scan again when you are.'); this.roomDone = false; return this.updateStart()
     }
@@ -887,11 +883,12 @@ export class InterviewEngine {
         this.timers.voice = window.setInterval(() => {
           if (this.state.status === 'speaking' || this.state.muted || document.hidden) return
           const r = watch.tick()
-          if (r && this.once('voice2', 90000)) { this.ev('second_voice', r); this.snap('second_voice') }
+          if (r && this.once('voice2', 90000)) { this.ev('second_voice', r); this.snap('second_voice'); this.violation('second_voice', r) }
         }, 100)
       } catch { /* no audio analysis on this browser */ }
     })
     vapi.on('speech-start', () => {
+      this.disarmTurnWatch()
       if (this.userFinalAt) { const gap = (Date.now() - this.userFinalAt) / 1000; this.userFinalAt = 0; if (gap > 6 && this.once('slowturn', 20000)) this.ev('slow_turn', `${gap.toFixed(1)}s from the candidate finishing to the interviewer speaking`) }
       this.setStatus('speaking')
       const t = this.timing.aiStarted()
@@ -908,7 +905,7 @@ export class InterviewEngine {
         if (this.lastWarnSay && t && this.lastWarnSay.includes(t)) return
         this.addLine('ai', m.transcript, true); this.pollProgress()
       }
-      else if (m.role === 'user') { if (m.transcriptType === 'final') this.userFinalAt = Date.now(); this.addLine('you', m.transcript, m.transcriptType === 'final'); this.timing.heard(m.transcriptType === 'final', m.transcript || '') }
+      else if (m.role === 'user') { if (m.transcriptType === 'final') { this.userFinalAt = Date.now(); this.armTurnWatch() } else this.disarmTurnWatch(); this.addLine('you', m.transcript, m.transcriptType === 'final'); this.timing.heard(m.transcriptType === 'final', m.transcript || '') }
     })
     vapi.on('error', (e: unknown) => { this.ev('vapi_error', JSON.stringify(e).slice(0, 200)); console.error(e) })
     vapi.on('call-end', () => this.finish())
@@ -1021,8 +1018,21 @@ export class InterviewEngine {
     else if (r.earphones === 'yes') this.violation('earphones', r.note || 'AI photo check: earphones')
     else if (r.phone) { this.ev('phone_visible', 'AI photo check'); this.violation('phone_visible', 'AI photo check: phone') }
   }
+  /** Turn taking safety net: the candidate finished (a final transcript) and nobody speaks within 9 s. The interviewer's answer was lost, late
+   * or the end-of-speech model is still waiting, so the model is asked for its turn again. The server treats this as a retry of the same turn,
+   * not a new answer, and ignores it when a real reply is already on its way. */
+  private armTurnWatch() {
+    this.disarmTurnWatch()
+    this.timers.turnWatch = window.setTimeout(() => {
+      if (!this.inCall || this.ended || this.state.status === 'speaking' || this.state.muted || this.terminated) return
+      this.ev('turn_watchdog', 'no reply 9s after the candidate finished: asked for the interviewer to take its turn')
+      try { this.vapi.send({ type: 'add-message', message: { role: 'system', content: 'The candidate has finished speaking. Continue the interview now.' }, triggerResponseEnabled: true }) }
+      catch (e: any) { this.ev('turn_watchdog_failed', e.message) }
+    }, 9000)
+  }
+  private disarmTurnWatch() { clearTimeout(this.timers.turnWatch); this.timers.turnWatch = undefined }
   private async violation(kind: string, detail: string) {
-    const camera = ['left_camera', 'multiple_people', 'phone_visible', 'earphones'].includes(kind)
+    const camera = ['left_camera', 'multiple_people', 'phone_visible', 'earphones', 'second_voice'].includes(kind)
     if (camera ? !this.P.face_detection : !this.P.enforce_focus && kind !== 'multi_monitor') return
     await this.flushEvents()   // the evidence reaches the server before a warning that may end the interview
     let r: any
@@ -1030,7 +1040,7 @@ export class InterviewEngine {
     catch (e: any) { this.ev('violation_report_failed', e.message); return }
     if (!r || r.action === 'ignored') return
     if (r.action === 'remind') {   // camera or focus reminder: spoken, recorded for HR, never counts as a warning
-      this.set({ warnBar: { title: 'Reminder', final: false, text: ({ left_camera: 'Please stay in view of your camera.', multiple_people: 'Please make sure you are alone.', phone_visible: 'Please put your phone away.', earphones: 'Please take out earphones or earbuds.', quick_switches: 'Please keep the interview screen in front of you.' } as Record<string, string>)[kind] || 'Please stay focused on the interview.' } })
+      this.set({ warnBar: { title: 'Reminder', final: false, text: ({ left_camera: 'Please stay in view of your camera.', multiple_people: 'Please make sure you are alone.', phone_visible: 'Please put your phone away.', earphones: 'Please take out earphones or earbuds.', second_voice: 'Another voice was heard. Please be alone and answer in your own words.', quick_switches: 'Please keep the interview screen in front of you.' } as Record<string, string>)[kind] || 'Please stay focused on the interview.' } })
       clearTimeout(this.warnTimer); this.warnTimer = window.setTimeout(() => this.set({ warnBar: null }), 7000)
       this.lastWarnSay = norm(r.say); this.addLine('ai', r.say, true, true); this.speak(r.say, false)
       return

@@ -103,6 +103,20 @@ function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => vo
   const [f, setF] = useState({ name: '', email: '', phone: '', location: '', headline: '', total_experience_years: '', notice_days: '', resume_text: '' })
   const [sk, setSk] = useState<string[]>([]), [err, setErr] = useState(''), [busy, setBusy] = useState(false)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(v => ({ ...v, [k]: e.target.value }))
+  const [reading, setReading] = useState(false)
+  async function fromResume(file: File) {
+    setReading(true); setErr('')
+    try {
+      const fd = new FormData(); fd.append('resume', file)
+      const p = await api<any>('/api/public/parse-resume', { method: 'POST', body: fd })
+      setF(v => ({ ...v, name: p.name || v.name, email: p.email || v.email, phone: p.phone || v.phone, location: p.location || v.location,
+        total_experience_years: p.total_experience_years != null ? String(p.total_experience_years) : v.total_experience_years,
+        notice_days: p.notice_days != null ? String(p.notice_days) : v.notice_days }))
+      if (p.skills?.length) setSk(p.skills.slice(0, 40))
+      toast(`Read from the resume${p.read_by === 'ai' ? ' with AI' : ''}: check the details, then add.`)
+    } catch (e: any) { setErr(e.message) }
+    setReading(false)
+  }
   async function save() {
     setBusy(true); setErr('')
     try { const c = await api('/api/candidates', { json: { ...f, skills: sk } }); toast('Candidate added'); onDone(); onClose(); navigate(`/app/candidates/${c.ref}`) } catch (e: any) { setErr(e.message) }
@@ -112,6 +126,9 @@ function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => vo
     <Modal open={open} onOpenChange={o => !o && onClose()} title="Add a candidate">
       <div className="mt-4 grid max-h-[65vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
         {err && <Alert className="sm:col-span-2" tone="danger">{err}</Alert>}
+        <label className="sm:col-span-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-brand-400 bg-brand-50 px-3 py-3 text-sm font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+          <FileUp className="size-4" />{reading ? 'Reading the resume...' : 'Upload a resume to fill these fields with AI'}
+          <input type="file" accept=".pdf,.docx,.txt,.rtf" className="hidden" disabled={reading} onChange={e => { const x = e.target.files?.[0]; if (x) fromResume(x); e.target.value = '' }} /></label>
         <Field label="Name *" htmlFor="c-name"><Input id="c-name" value={f.name} onChange={set('name')} /></Field>
         <Field label="Email" htmlFor="c-email"><Input id="c-email" type="email" value={f.email} onChange={set('email')} /></Field>
         <Field label="Phone" htmlFor="c-phone"><PhoneInput id="c-phone" value={f.phone} onChange={v => setF(o => ({ ...o, phone: v }))} /></Field>

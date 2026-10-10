@@ -83,6 +83,12 @@ check("camera warnings run with camera checks switched off", c.post(f"/api/inter
 iid5 = new(enforce_focus=False); live(iid5)
 check("switching off focus rules also switches off the room rules", c.post(f"/api/interviews/{iid5}/violation", json={"type": "multiple_people"}).json().get("action") == "ignored")
 
+# a second voice is spoken to the candidate as a reminder, and never counts towards stopping the interview
+iid6 = new(max_warnings=1); live(iid6)
+r6 = c.post(f"/api/interviews/{iid6}/violation", json={"type": "second_voice", "detail": "different voice colour"}).json()
+check("a second voice is not told to the candidate", r6.get("action") != "remind" or "another voice" not in r6.get("say", ""), str(r6))
+check("a second voice counts as a warning that can end the interview", bool(store.load(iid6).get("warnings")))
+
 # the report: another person makes the interview high risk on its own
 rec = store.load(iid); rec["events"].append({"type": "extra_person", "ts": None, "server_ts": 10, "detail": "2 people", "source": "client"})
 sm = proctor.summary(rec)

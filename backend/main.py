@@ -944,10 +944,10 @@ def progress(iid: str):
 
 
 VIOLATION_KINDS = ("tab_hidden", "window_blur", "multi_monitor", "fullscreen_exit", "quick_switches", "left_camera", "multiple_people",
-                   "phone_visible", "earphones")
-CAMERA_KINDS = ("left_camera", "multiple_people", "phone_visible", "earphones")   # enforced whenever camera proctoring is on
+                   "phone_visible", "earphones", "second_voice")
+CAMERA_KINDS = ("left_camera", "multiple_people", "phone_visible", "earphones", "second_voice")   # enforced whenever camera proctoring is on
 VIOLATION_DEBOUNCE_SEC = 4
-SOFT_KINDS = ("left_camera", "quick_switches")    # reminders, never a reason to stop
+SOFT_KINDS = ("left_camera", "quick_switches", "second_voice")    # reminders, never a reason to stop
 # Someone else in the room, a phone in view or earphones are real warnings that count towards ending the interview
 # (setting strict_room, default on). Off: they are spoken reminders and records for HR, like left_camera.
 ROOM_KINDS = ("multiple_people", "phone_visible", "earphones")
