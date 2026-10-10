@@ -375,6 +375,12 @@ async def extract_text(req: Request, file: UploadFile = File(...)):
     if len(text.strip()) < 50:
         raise HTTPException(400, "Very little text found. Scanned PDF? Paste the text instead.")
     out = {"text": text.strip()}
+    if req.query_params.get("kind") == "jd":              # fill the role from the job description
+        try:
+            f = (await extract_ai.read_jd(out["text"]))["fields"]
+            out["parsed"] = {"title": f.get("title", ""), "skills": f.get("must_have_skills", [])[:20]}
+        except Exception:
+            log.exception("JD reading failed")
     if req.query_params.get("kind") == "resume":          # fill the candidate's name and email from the resume
         try:
             p = await extract_ai.read_resume(out["text"])

@@ -36,7 +36,7 @@ function Steps({ step, max, onGo }: { step: number; max: number; onGo: (n: numbe
   )
 }
 
-function UploadLink({ onText, resume, onParsed }: { onText: (t: string) => void; resume?: boolean; onParsed?: (p: { name?: string; email?: string }) => void }) {
+function UploadLink({ onText, resume, jd, onParsed }: { onText: (t: string) => void; resume?: boolean; jd?: boolean; onParsed?: (p: { name?: string; email?: string; title?: string }) => void }) {
   const ref = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   return (
@@ -48,7 +48,7 @@ function UploadLink({ onText, resume, onParsed }: { onText: (t: string) => void;
         const f = e.target.files?.[0]; if (!f) return
         const fd = new FormData(); fd.append('file', f); setBusy(true)
         try {
-          const r = await api<{ text: string; parsed?: { name?: string; email?: string } }>(`/api/extract${resume ? '?kind=resume' : ''}`, { method: 'POST', body: fd })
+          const r = await api<{ text: string; parsed?: { name?: string; email?: string; title?: string } }>(`/api/extract${resume ? '?kind=resume' : jd ? '?kind=jd' : ''}`, { method: 'POST', body: fd })
           onText(r.text); if (r.parsed) onParsed?.(r.parsed)
         } catch (err: any) { toast(err.message) }
         setBusy(false); e.target.value = ''
@@ -171,7 +171,7 @@ export default function NewInterview() {
           </div>
           {hist.map(w => <Alert key={w} tone="danger" icon={<TriangleAlert />}>{w}</Alert>)}
           <div className="grid gap-4 lg:grid-cols-2">
-            <Field label="Job description" htmlFor="jd" action={<UploadLink onText={t => setF(v => ({ ...v, jd: t }))} />}>
+            <Field label="Job description" htmlFor="jd" action={<UploadLink jd onText={t => setF(v => ({ ...v, jd: t }))} onParsed={pp => setF(v => ({ ...v, role: v.role || pp.title || '' }))} />}>
               <Textarea id="jd" className="min-h-56" placeholder="Paste the JD, or upload a PDF, TXT or DOCX" value={f.jd} onChange={set('jd')} /></Field>
             <Field label="Resume" htmlFor="cv" action={<UploadLink resume onText={t => setF(v => ({ ...v, cv: t }))} onParsed={pp => setF(v => ({ ...v, cand: v.cand || pp.name || '', email: v.email || pp.email || '' }))} />}>
               <Textarea id="cv" className="min-h-56" placeholder="Paste the resume, or upload a PDF, TXT or DOCX" value={f.cv} onChange={set('cv')} /></Field>
