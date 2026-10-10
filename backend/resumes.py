@@ -180,6 +180,7 @@ def parse(text: str) -> dict:
         "skills": skills.extract_all(t) + [x for x in skills.infer_soft(t) if x not in skills.extract_all(t)], "years": years,
         "years_from_dates": ranged, "jobs": hist["jobs"], "gaps": hist["gaps"], "skill_years": hist["skill_years"], "years_source": "stated" if stated else ("dates" if ranged else None),
         "notice_days": notice, "name_guess": _guess_name(t, emails[0] if emails else ""), "chars": len(t), "parsed_at": time.time(),
+        **details(t),
     }
 
 
@@ -366,3 +367,127 @@ def history(text: str) -> dict:
         "gaps": gaps,
         "skill_years": {k: round(v / 12, 1) for k, v in sorted(skill_months.items(), key=lambda kv: -kv[1]) if v >= 3},
     }
+
+
+# --- everything else a resume says: the fields of the application form and the candidate profile -------------------------------
+_SECTIONS = {
+    "summary": r"(?:professional\s+|career\s+|profile\s+)?(?:summary|profile|objective|career objective|about me|overview)",
+    "education": r"education(?:al)?(?:\s+(?:details|qualifications?|background))?|academic(?:s| details| qualifications?| background)?|qualifications?",
+    "certifications": r"certifications?(?:\s*(?:&|and)\s*(?:courses|trainings?|licenses?))?|licenses?(?:\s*(?:&|and)\s*certifications?)?|courses|trainings?",
+    "projects": r"(?:academic\s+|personal\s+|key\s+|major\s+)?projects?",
+    "achievements": r"achievements?|awards?(?:\s*(?:&|and)\s*(?:achievements?|recognitions?|honou?rs))?|honou?rs|recognitions?|accomplishments?",
+    "languages": r"languages?(?:\s+known|\s+spoken)?|linguistic\s+proficiency",
+}
+_SEC_RX = {k: re.compile(rf"^\s*(?:{v})\s*[:\-–]?\s*$", re.I) for k, v in _SECTIONS.items()}
+_ANY_HEAD = re.compile(r"^\s*[A-Z][A-Za-z &/]{2,40}\s*:?\s*$")
+_DEGREE = re.compile(r"\b(?:b\.?\s?tech|b\.?\s?e\.?|m\.?\s?tech|m\.?\s?e\.?|bachelor[a-z']*|master[a-z']*|mba|pgdm|bca|mca|b\.?\s?sc|m\.?\s?sc|b\.?\s?com|m\.?\s?com|"
+                     r"b\.?\s?a\.?|m\.?\s?a\.?|ph\.?\s?d|diploma|hsc|ssc|12th|10th|class\s*(?:xii|x|12|10)|intermediate|matriculation|ca\b|cs\b|llb|mbbs|b\.?\s?pharm|m\.?\s?pharm)\b", re.I)
+_GRADE = re.compile(r"\b(?:cgpa|gpa|cpi|sgpa|percentage|marks|grade)\s*[:\-]?\s*([\d.]+\s*(?:/\s*\d+|%)?)|\b(\d{2}(?:\.\d+)?\s*%)", re.I)
+_LANG_NAMES = ["English", "Hindi", "Bengali", "Marathi", "Telugu", "Tamil", "Gujarati", "Urdu", "Kannada", "Odia", "Oriya", "Malayalam", "Punjabi",
+               "Assamese", "Maithili", "Konkani", "Sindhi", "Nepali", "Kashmiri", "Sanskrit", "French", "German", "Spanish", "Japanese", "Mandarin",
+               "Chinese", "Arabic", "Russian", "Portuguese", "Italian", "Korean"]
+_LANG_RX = re.compile(r"\b(" + "|".join(_LANG_NAMES) + r")\b(?:\s*[\(\-:]\s*(native|fluent|proficient|professional|intermediate|basic|beginner|conversational|mother tongue)\)?)?", re.I)
+_MONEY = re.compile(r"(?:inr|rs\.?|₹)?\s*([\d][\d,]*(?:\.\d+)?)\s*(lpa|lakhs?|lacs?|l\b|cr(?:ores?)?|k\b|thousand)?", re.I)
+
+
+def _section_lines(lines: list[str], key: str, limit: int = 30) -> list[str]:
+    out, on = [], False
+    for ln in lines:
+        s = ln.strip()
+        if _SEC_RX[key].match(s):
+            on, out = True, out
+            continue
+        if on:
+            if s and (any(rx.match(s) for k, rx in _SEC_RX.items() if k != key) or _WORK_HEAD.match(s) or (_ANY_HEAD.match(s) and s.isupper())):
+                break
+            if s:
+                out.append(s.lstrip("-•*▪●◦➢✓ ").strip())
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _rupees(num: str, unit: str | None) -> float | None:
+    try:
+        n = float(num.replace(",", ""))
+    except ValueError:
+        return None
+    u = (unit or "").lower()
+    if u.startswith(("lpa", "lakh", "lac", "l")):
+        n *= 100000
+    elif u.startswith("cr"):
+        n *= 10000000
+    elif u.startswith(("k", "thousand")):
+        n *= 1000
+    return n if 10000 <= n <= 100000000 else None
+
+
+def details(text: str) -> dict:
+    """Headline, current role, summary, education, certifications, projects, achievements, spoken languages, salaries, links, preferred
+    location and work authorisation, read from the resume's sections. Personal details that must not affect hiring (date of birth,
+    gender, marital status, religion, caste, photo) are deliberately not read."""
+    t = text or ""
+    lines = t.splitlines()
+    out: dict = {}
+    summ = _section_lines(lines, "summary", 8)
+    if summ:
+        out["summary"] = " ".join(summ)[:1200]
+    edu = []
+    for ln in _section_lines(lines, "education", 25):
+        if _DEGREE.search(ln) or re.search(r"\b(university|college|institute|school|iit|nit|iiit|iim)\b", ln, re.I):
+            yr = re.findall(r"\b(?:19|20)\d{2}\b", ln)
+            g = _GRADE.search(ln)
+            edu.append({"text": ln[:200], "year": yr[-1] if yr else "", "grade": (g.group(1) or g.group(2)).strip() if g else ""})
+    if edu:
+        out["education"] = edu[:8]
+    for key in ("certifications", "projects", "achievements"):
+        items = [x for x in _section_lines(lines, key, 20) if 3 <= len(x) <= 300]
+        if items:
+            out[key] = items[:15]
+    langs = {}
+    for ln in _section_lines(lines, "languages", 6) or [ln for ln in lines if re.match(r"^\s*languages?\s*(?:known|spoken)?\s*[:\-]", ln, re.I)]:
+        for m in _LANG_RX.finditer(ln):
+            name = "Odia" if m.group(1).lower() == "oriya" else m.group(1).title()
+            langs[name] = (m.group(2) or "").lower()
+    if langs:
+        out["languages"] = [f"{k} ({v})" if v else k for k, v in langs.items()]
+    for kind in ("current", "expected"):
+        m = re.search(rf"{kind}\s*(?:ctc|salary|package|compensation)\s*[:\-]?\s*(.{{0,40}})", t, re.I)
+        if m:
+            mm = _MONEY.search(m.group(1))
+            v = _rupees(mm.group(1), mm.group(2)) if mm else None
+            if v:
+                out[f"{kind}_salary"] = v
+    for ln in lines:
+        low = ln.lower()
+        if "linkedin.com/" in low and "linkedin" not in out:
+            out["linkedin"] = re.search(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/[^\s|,;)]+", ln, re.I).group(0)
+        if "github.com/" in low and "github" not in out:
+            out["github"] = re.search(r"(?:https?://)?github\.com/[^\s|,;)]+", ln, re.I).group(0)
+        m = re.search(r"\b(?:portfolio|website|blog|behance|dribbble)\s*[:\-]\s*(\S+)", ln, re.I) or re.search(r"(?:https?://)?(?:www\.)?(?:behance\.net|dribbble\.com)/\S+", ln, re.I)
+        if m and "portfolio" not in out:
+            out["portfolio"] = (m.group(1) if m.lastindex else m.group(0)).strip(" |,;")
+        m = re.match(r"^\s*(?:preferred|desired)\s+(?:job\s+)?locations?\s*[:\-]\s*(.+)$", ln, re.I)
+        if m:
+            out["preferred_location"] = m.group(1).strip()[:200]
+        m = re.search(r"\b(?:work\s+authori[sz]ation|visa(?:\s+status)?|work\s+permit|citizenship)\s*[:\-]\s*(.+)$", ln, re.I)
+        if m:
+            out["work_authorization"] = m.group(1).strip()[:200]
+        if re.search(r"\b(?:willing|open|ready)\s+to\s+relocate\b", low):
+            out["willing_to_relocate"] = not re.search(r"\bnot\s+(?:willing|open|ready)\b", low)
+    h = history(t)
+    if h["jobs"]:
+        latest = h["jobs"][0]
+        parts = [p.strip() for p in re.split(r"\s*(?:\||,|\bat\b|@|–|-)\s*", latest["title"]) if p.strip()]
+        if parts:
+            out["current_title"] = parts[0][:120]
+            if len(parts) > 1:
+                out["current_company"] = parts[1][:120]
+    first = next((ln.strip() for ln in lines[1:6] if ln.strip() and 3 < len(ln.strip()) < 90 and not EMAIL.search(ln) and not re.search(r"\d{5,}", ln)
+                  and re.search(r"\b(engineer|developer|manager|analyst|designer|consultant|executive|specialist|lead|architect|scientist|officer|associate|"
+                                r"administrator|recruiter|accountant|intern|student|graduate|fresher)\b", ln, re.I)), "")
+    if first:
+        out["headline"] = first[:200]
+    elif out.get("current_title"):
+        out["headline"] = out["current_title"]
+    return out

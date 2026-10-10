@@ -172,3 +172,35 @@ show it. The AI reader runs on every new candidate in the background (3 at a tim
 **Write with AI.** It now shows that it is working, then outlines every field it wrote with a "Written by AI" label, opens the section
 where they are, names the model and the time it took, and offers Undo. Without an AI key it says plainly "Demo text, not written by an AI".
 It also suggests must-have skills (when empty) and soft skills.
+
+## 8. Update: Indian languages, complete resume and JD reading
+
+**Languages offered** (checked against Vapi's own API types, `@vapi-ai/server-sdk` 3.0.0, and Microsoft's voice announcements):
+
+| Language | Listens with | Speaks with |
+|---|---|---|
+| English | Deepgram Nova-3 (en-IN) | Vapi Naina |
+| Hindi | Deepgram Nova-3 (hi) | Azure hi-IN-SwaraNeural |
+| Hinglish | Deepgram Nova-3 (multi) | Vapi Naina |
+| Bengali, Marathi, Telugu, Tamil, Gujarati, Urdu, Kannada, Malayalam, Punjabi | Azure (xx-IN) | Azure neural voice of that language |
+| Odia, Assamese | Soniox stt-rt-v4 (Azure has no Odia or Assamese recognition in Vapi) | Azure or-IN-SubhasiniNeural, as-IN-YashicaNeural |
+
+Not offered because no Vapi speech provider recognises them today: Maithili, Konkani, Santali, Dogri, Manipuri, Bodo.
+**Before using a language with candidates, run one live call in it.** Soniox (Odia, Assamese) may need its key added in the Vapi dashboard.
+
+**How it works.** HR picks which languages are allowed (all by default) in New interview and in the hiring flow's AI interview round.
+The candidate chooses on the first screen. The questions are translated from the plan HR approved (HR's must-ask questions keep their
+meaning), the fixed lines are translated, and the voice and speech recognition switch. The language is fixed once the candidate speaks.
+If translation fails the candidate is told and the interview is not changed. Phone interviews use the default language.
+Scores and the report are written in English for the hiring team; quotes stay in the language spoken. The candidate page itself is in English.
+
+**Resume reading now covers** name, headline, current title and company, summary, every job with dates, total experience (stated or
+worked out), gaps, years per skill, all skill types including soft skills with evidence, education with year and grade, certifications,
+projects, achievements, spoken languages, current and expected salary, notice period, preferred location, relocation, work authorisation,
+LinkedIn, GitHub, portfolio, largest team led and industries. Date of birth, gender, marital status, religion, caste and photo are
+deliberately never read. The careers form fills every matching field.
+
+**JD reading now covers** every field of the job form it can find: title, department, seniority, employment type, workplace, locations,
+office days, openings, salary range with currency and period, must-have / nice-to-have / soft skills, experience range, education, field
+of study, certifications, languages, notice period, shift, travel, timezone, reporting line, industry, benefits, about the company,
+responsibilities. Choices are only taken from the form's allowed values and numbers only when written in the JD.

@@ -3,6 +3,7 @@ flow (setup.py), so both get the same settings, index row, application link and 
 import hashlib
 import hmac
 import os
+import copy
 import secrets
 import time
 
@@ -19,6 +20,16 @@ def _intish(v, default: int) -> int:
         return default
 
 
+def _languages(s: dict) -> list[str]:
+    from .vapi_config import LANGUAGE_CODES
+    want = s.get("languages")
+    out = [c for c in (want if isinstance(want, list) else LANGUAGE_CODES) if c in LANGUAGE_CODES]
+    lang = str(s.get("language") or "en")
+    if lang in LANGUAGE_CODES and lang not in out:
+        out.insert(0, lang)
+    return out or ["en"]
+
+
 def settings_from(s: dict | None) -> dict:
     s = s or {}
     out = {"candidate_email": str(s.get("candidate_email") or "")[:200],
@@ -32,6 +43,8 @@ def settings_from(s: dict | None) -> dict:
            "max_warnings": max(0, min(5, _intish(s.get("max_warnings"), 2))),
            "hr_note": str(s.get("hr_note") or "")[:500],
            "language": str(s.get("language") or "en")[:10],
+           # languages the candidate may choose from on the interview page (all supported ones unless HR narrowed the list)
+           "languages": _languages(s),
            "channel": "phone" if s.get("channel") == "phone" else "web",
            "practice_question": s.get("practice_question", True) is not False,
            "liveness_check": s.get("liveness_check", True) is not False,
@@ -52,7 +65,7 @@ def settings_from(s: dict | None) -> dict:
 
 def create_record(*, org_id: str | None, created_by: str | None, job_id: str | None, candidate_id: str | None,
                   application_id: str | None, round_result_id: str | None = None, plan: dict, inputs: dict, settings: dict,
-                  expires_hours: float = 72, lines: dict | None = None) -> dict:
+                  expires_hours: float = 72, lines: dict | None = None, plan_lang: str | None = None) -> dict:
     iid = secrets.token_urlsafe(9).replace("-", "x").replace("_", "y")
     now = time.time()
     starts = settings.get("available_from") or now
@@ -61,7 +74,10 @@ def create_record(*, org_id: str | None, created_by: str | None, job_id: str | N
            "expires_at": starts + max(0.5, float(expires_hours or 72)) * 3600,
            "status": "created", "plan": plan, "inputs": inputs, "state": None, "snapshots": [],
            "events": [], "media": [], "images": [], "sessions": [], "vapi": {}, "report": None, "hr": {},
-           "scoring": None, "settings": settings, "lines": lines or {}, "access": new_access()}
+           "scoring": None, "settings": settings, "lines": lines or {}, "access": new_access(),
+           # the plan as HR approved it, and its language: a language the candidate picks is translated from this
+           "plan_source": copy.deepcopy(plan), "plan_lang": plan_lang or plan.get("language") or settings.get("language") or "en"}
+    rec["plan"].setdefault("language", rec["plan_lang"])
     if settings.get("practice_question", True):
         from . import brain
         brain.add_practice(plan, rec)
@@ -172,3 +188,54 @@ def apply_accommodation(rec: dict, acc: dict | None) -> bool:
     rec["accommodation_applied"] = {"factor": factor, "at": time.time()}
     rec.setdefault("settings", {})["reconnect_window_sec"] = int(min(900, (rec["settings"].get("reconnect_window_sec") or RECONNECT_WINDOW_SEC) * factor))
     return True
+
+
+class LanguageError(Exception):
+    def __init__(self, msg: str, status: int):
+        super().__init__(msg)
+        self.status = status
+
+
+async def ensure_language(iid: str, lang: str) -> None:
+    """Make the interview run in `lang`: questions translated from the plan HR approved, fixed lines translated, voice and speech
+    recognition follow at call start. Only before the candidate has spoken. Raises LanguageError with a message for the candidate."""
+    from . import brain, store
+    from .vapi_config import LANGUAGE_CODES
+    async with store.lock(iid):
+        rec = store.load(iid)
+        if not rec:
+            raise LanguageError("Interview not found", 404)
+        if lang not in LANGUAGE_CODES or lang not in settings_from(rec["settings"])["languages"]:
+            raise LanguageError("That language is not offered for this interview.", 400)
+        spoke = any(e.get("role") == "candidate" for e in ((rec.get("state") or {}).get("log") or []))
+        current = (rec.get("plan") or {}).get("language") or rec.get("plan_lang") or "en"
+        if current == lang:
+            if rec["settings"].get("language") != lang and not spoke:
+                rec["settings"]["language"] = lang
+                store.save(rec)
+            return
+        if spoke or rec.get("status") in ("completed", "incomplete", "scored"):
+            raise LanguageError("The interview has already started, so its language can't change now.", 409)
+        source, src_lang = rec.get("plan_source") or rec["plan"], rec.get("plan_lang") or current
+        practice = any(q.get("practice") for q in rec["plan"].get("questions") or [])
+    try:
+        # the practice question is one of the fixed lines: it is re-added from the translated lines, not sent for translation
+        plan = await brain.translate_plan({**source, "questions": [q for q in source["questions"] if not q.get("practice")]}, src_lang, lang)
+        lines = await brain.localize_lines(lang)
+    except ValueError:
+        raise LanguageError("We couldn't prepare the interview in that language just now. Please try again, or choose another language.", 503)
+    async with store.lock(iid):
+        rec = store.load(iid)
+        if any(e.get("role") == "candidate" for e in ((rec.get("state") or {}).get("log") or [])):
+            raise LanguageError("The interview has already started, so its language can't change now.", 409)
+        rec.setdefault("plan_source", copy.deepcopy(source))
+        rec.setdefault("plan_lang", src_lang)
+        plan["language"] = lang
+        rec["settings"]["language"] = lang
+        rec["lines"] = lines
+        if practice:
+            brain.add_practice(plan, rec)
+        rec["plan"] = brain.normalize_plan(plan)
+        rec["state"] = None                                   # the opening line is rebuilt in the new language
+        rec.setdefault("events", []).append({"type": "language_chosen", "ts": None, "server_ts": time.time(), "detail": lang, "source": "server"})
+        store.save(rec)

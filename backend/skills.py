@@ -156,7 +156,8 @@ def canonical(skill: str) -> str:
 
 def extract(text: str) -> set[str]:
     """Canonical skills mentioned in free text."""
-    t = " " + (text or "").lower().replace("\n", " ") + " "
+    text = re.sub(r"(?:https?://|www\.)\S+|\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+|\b(?:linkedin|github|gitlab|behance|dribbble)\.com/\S*", " ", text or "")   # links and emails are not skills
+    t = " " + text.lower().replace("\n", " ") + " "
     found = {_ALIAS[m.group(1)] for m in _PATTERN.finditer(t)}
     # ambiguous short names only when clearly used as a skill list item: "Go," / "R," / "(Go)" etc.
     for a in ("go", "r", "c"):

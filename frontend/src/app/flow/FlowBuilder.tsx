@@ -8,6 +8,7 @@ import { setLeaveGuard } from '../../lib/router'
 import { when } from '../../lib/format'
 import { LANGUAGES, PASS_LABEL, SHORT_LABEL, newRound, type FlowMeta, type Round, type RoundType, type TeamMember } from './types'
 import { DatePicker, MINUTE_PRESETS, Stepper, TimePicker } from '../../components/pickers'
+import { LanguageChoice } from '../../components/LanguageChoice'
 import { ask } from '../../components/dialogs'
 
 export const ROUND_ICON: Record<RoundType, typeof Bot> = {
@@ -191,11 +192,12 @@ function RoundEditor({ r, meta, team, jobId, canEdit, saved, onChange }: { r: Ro
           </Section>}
           {r.type === 'ai_interview' && <Section title="AI interview">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Language" htmlFor="r-lang"><Select id="r-lang" value={c.language || 'en'} onChange={e => cfg('language', e.target.value)}>{LANGUAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+              <Field label="Default language" htmlFor="r-lang"><Select id="r-lang" value={c.language || 'en'} onChange={e => cfg('language', e.target.value)}>{LANGUAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
               <Field label="Channel" htmlFor="r-ch"><Select id="r-ch" value={c.channel || 'web'} onChange={e => cfg('channel', e.target.value)}><option value="web">Browser (video)</option><option value="phone">Phone call</option><option value="both">Candidate chooses</option></Select></Field>
               <Field label="Length (minutes)" htmlFor="r-dur"><Stepper id="r-dur" aria-label="Length" max={60} value={c.duration_min ?? 15} onChange={v => cfg('duration_min', v)} /></Field>
               <Field label="Warnings before it ends" htmlFor="r-warn"><Input id="r-warn" type="number" min={0} max={10} value={c.max_warnings ?? 2} onChange={e => cfg('max_warnings', num(e.target.value))} /></Field>
             </div>
+            <Field label="Languages the candidate can choose"><LanguageChoice value={c.languages} onChange={x => cfg('languages', x)} /></Field>
             <Switch id="r-sched" checked={c.allow_scheduling !== false} onChange={v => cfg('allow_scheduling', v)} label="Candidates can book a time"
               description="Besides starting right away, they can pick a 30-minute start time; we send a confirmation, a calendar invite and reminders, and they can change or cancel it." />
             {c.allow_scheduling !== false && <div className="grid gap-3 sm:grid-cols-3">

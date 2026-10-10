@@ -28,17 +28,28 @@ def public_url() -> str:
     return url.rstrip("/")
 
 
-# Interview languages. Speech-to-text: Deepgram Nova-3 handles English (en-IN), Hindi and Hindi-English code-switching
-# ("multi"); other Indian languages default to Azure speech through Vapi. Voices: Vapi's Naina for English, Azure
-# neural voices for Indian languages. Override any language with STT_<CODE>="provider:model:language" and
-# VOICE_<CODE>="provider:voiceId" (code upper-cased, '-' as '_', e.g. VOICE_HI, STT_HI_EN). Verify each language on a
-# live call before using it with candidates.
+# Interview languages: the major languages of India (the 2011 census's largest scheduled languages that Vapi's speech providers support).
+# Checked against the Vapi server SDK's own API types (@vapi-ai/server-sdk 3.0.0): Azure speech-to-text accepts bn-IN, gu-IN, hi-IN,
+# kn-IN, ml-IN, mr-IN, pa-IN, ta-IN, te-IN and ur-IN; Odia ("or") and Assamese ("as") are not in Azure's list but are in Soniox's.
+# Deepgram Nova-3 takes "hi" and "multi" (Hindi-English code-switching). Voices are Azure neural voices (Vapi takes any Azure voice name).
+# Not available on any Vapi speech provider today, so not offered: Maithili, Konkani, Santali, Dogri, Manipuri, Bodo.
+# Override any language with STT_<CODE>="provider:model:language" and VOICE_<CODE>="provider:voiceId" (code upper-cased, '-' as '_').
+# Verify each language on a live call before using it with candidates.
+LANGUAGES = [  # code, English name, name in its own script
+    ("en", "English", "English"), ("hi", "Hindi", "हिन्दी"), ("hi-en", "Hinglish (Hindi + English)", "Hinglish"),
+    ("bn", "Bengali", "বাংলা"), ("mr", "Marathi", "मराठी"), ("te", "Telugu", "తెలుగు"), ("ta", "Tamil", "தமிழ்"),
+    ("gu", "Gujarati", "ગુજરાતી"), ("ur", "Urdu", "اردو"), ("kn", "Kannada", "ಕನ್ನಡ"), ("or", "Odia", "ଓଡ଼ିଆ"),
+    ("ml", "Malayalam", "മലയാളം"), ("pa", "Punjabi", "ਪੰਜਾਬੀ"), ("as", "Assamese", "অসমীয়া"),
+]
+LANGUAGE_CODES = [c for c, _, _ in LANGUAGES]
 LANG_STT = {"en": ("deepgram", "nova-3", None), "hi": ("deepgram", "nova-3", "hi"), "hi-en": ("deepgram", "nova-3", "multi"),
             "ta": ("azure", "", "ta-IN"), "te": ("azure", "", "te-IN"), "kn": ("azure", "", "kn-IN"), "mr": ("azure", "", "mr-IN"),
-            "bn": ("azure", "", "bn-IN"), "gu": ("azure", "", "gu-IN"), "ml": ("azure", "", "ml-IN")}
+            "bn": ("azure", "", "bn-IN"), "gu": ("azure", "", "gu-IN"), "ml": ("azure", "", "ml-IN"), "pa": ("azure", "", "pa-IN"),
+            "ur": ("azure", "", "ur-IN"), "or": ("soniox", "stt-rt-v4", "or"), "as": ("soniox", "stt-rt-v4", "as")}
 LANG_VOICE = {"hi": ("azure", "hi-IN-SwaraNeural"), "ta": ("azure", "ta-IN-PallaviNeural"), "te": ("azure", "te-IN-ShrutiNeural"),
               "kn": ("azure", "kn-IN-SapnaNeural"), "mr": ("azure", "mr-IN-AarohiNeural"), "bn": ("azure", "bn-IN-TanishaaNeural"),
-              "gu": ("azure", "gu-IN-DhwaniNeural"), "ml": ("azure", "ml-IN-SobhanaNeural")}
+              "gu": ("azure", "gu-IN-DhwaniNeural"), "ml": ("azure", "ml-IN-SobhanaNeural"), "pa": ("azure", "pa-IN-VaaniNeural"),
+              "ur": ("azure", "ur-IN-GulNeural"), "or": ("azure", "or-IN-SubhasiniNeural"), "as": ("azure", "as-IN-YashicaNeural")}
 
 
 def _lang_env(prefix: str, lang: str) -> list[str] | None:

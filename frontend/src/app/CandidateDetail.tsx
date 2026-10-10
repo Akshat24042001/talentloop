@@ -211,10 +211,21 @@ function WorkHistory({ parsed }: { parsed: Record<string, any> }) {
   const sy: Record<string, number> = parsed?.skill_years || {}
   const soft: Record<string, string> = parsed?.soft_evidence || {}
   const dur = (m: number) => m >= 12 ? `${Math.floor(m / 12)} yr${m >= 24 ? 's' : ''}${m % 12 ? ` ${m % 12} mo` : ''}` : `${m} mo`
-  if (!jobs.length && !gaps.length && !Object.keys(sy).length && !Object.keys(soft).length) return null
+  const list = (k: string): string[] => (parsed?.[k] || []).map((x: any) => typeof x === 'string' ? x : [x.text, x.year, x.grade].filter(Boolean).join(' · '))
+  const money = (n?: number) => n ? (n >= 100000 ? `₹${(n / 100000).toFixed(n % 100000 ? 1 : 0)} LPA` : `₹${n.toLocaleString('en-IN')}`) : ''
+  const facts: [string, string][] = ([['Headline', parsed?.headline], ['Current role', [parsed?.current_title, parsed?.current_company].filter(Boolean).join(' at ')],
+    ['Current salary', money(parsed?.current_salary)], ['Expected salary', money(parsed?.expected_salary)], ['Notice period', parsed?.notice_days != null ? `${parsed.notice_days} days` : ''],
+    ['Preferred location', parsed?.preferred_location], ['Willing to relocate', parsed?.willing_to_relocate == null ? '' : parsed.willing_to_relocate ? 'Yes' : 'No'],
+    ['Work authorisation', parsed?.work_authorization], ['Largest team led', parsed?.team_size_managed ? `${parsed.team_size_managed} people` : ''],
+    ['Industries', (parsed?.industries || []).join(', ')]] as [string, any][]).filter(([, v]) => v) as [string, string][]
+  const groups: [string, string[]][] = ([['Education', list('education')], ['Certifications', list('certifications')], ['Projects', list('projects')],
+    ['Achievements', list('achievements')], ['Languages spoken', list('languages')]] as [string, string[]][]).filter(([, v]) => v.length)
+  if (!jobs.length && !gaps.length && !Object.keys(sy).length && !Object.keys(soft).length && !facts.length && !groups.length) return null
   return (
     <div className="mt-6 space-y-5">
       <div className="flex items-center gap-2 text-xs text-slate-500">{parsed.read_by === 'ai' ? <Badge tone="brand">Read by AI, checked against the resume</Badge> : <Badge>Read by rules</Badge>}</div>
+      {facts.length > 0 && <dl className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">{facts.map(([k, v]) => <div key={k} className="flex gap-2"><dt className="shrink-0 text-slate-500">{k}:</dt><dd className="min-w-0">{v}</dd></div>)}</dl>}
+      {parsed?.summary && <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">{parsed.summary}</p>}
       {jobs.length > 0 && <div>
         <h4 className="mb-2 text-sm font-semibold">Work history</h4>
         <ol className="space-y-1.5 text-sm">{jobs.map((j, i) => (
@@ -232,6 +243,7 @@ function WorkHistory({ parsed }: { parsed: Record<string, any> }) {
         <h4 className="mb-2 text-sm font-semibold">Years per skill <span className="font-normal text-slate-500">(from the jobs that mention it)</span></h4>
         <div className="flex flex-wrap gap-1.5">{Object.entries(sy).slice(0, 24).map(([k, v]) => <Badge key={k}>{k} · {v} yr{v === 1 ? '' : 's'}</Badge>)}</div>
       </div>}
+      {groups.map(([t, items]) => <div key={t}><h4 className="mb-2 text-sm font-semibold">{t}</h4><ul className="list-disc space-y-1 pl-5 text-sm">{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div>)}
       {Object.keys(soft).length > 0 && <div>
         <h4 className="mb-2 text-sm font-semibold">Soft skills, with the words that show them</h4>
         <ul className="space-y-1.5 text-sm">{Object.entries(soft).map(([k, q]) => <li key={k}><b>{k}</b> <span className="text-slate-500">"{q}"</span></li>)}</ul>

@@ -1,4 +1,6 @@
-import { ArrowLeft, Check, ExternalLink, FileText, FileUp, Link2, ShieldCheck, Sparkles, TriangleAlert, Wand2 } from 'lucide-react'
+import { ArrowLeft, Check, ExternalLink, FileText, FileUp, Languages, Link2, ShieldCheck, Sparkles, TriangleAlert, Wand2 } from 'lucide-react'
+import { LanguageChoice } from '../components/LanguageChoice'
+import { LANGUAGES } from './flow/types'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Switch, Textarea, cn, toast } from '../components/ui'
 import { api } from '../lib/api'
@@ -69,7 +71,7 @@ export default function NewInterview() {
   const [planWarn, setPlanWarn] = useState<string[]>([])
   const [json, setJson] = useState('')
   const [gen, setGen] = useState(false), [err1, setErr1] = useState('')
-  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, room: true, ears: true, strictRoom: true, vision: '120', snap: true, rejoin: '90', openAt: '', validH: '72', opening: 'pick' as 'pick' | 'now' | 'fixed', invite: true })
+  const [st, setSt] = useState({ focus: true, maxW: '2', mon: true, share: false, face: true, room: true, ears: true, strictRoom: true, vision: '120', snap: true, rejoin: '90', openAt: '', validH: '72', opening: 'pick' as 'pick' | 'now' | 'fixed', invite: true, language: 'en', languages: undefined as string[] | undefined })
   const [creating, setCreating] = useState(false), [err2, setErr2] = useState('')
   const [link, setLink] = useState<{ url: string; report: string; path: string; warnings: string[]; code: string; invited: boolean } | null>(null)
   const base = (health?.app_url || health?.public_url || location.origin).replace(/\/$/, '')
@@ -124,7 +126,7 @@ export default function NewInterview() {
     try {
       const settings = { candidate_email: f.email.trim(), require_screen_share: st.share, reconnect_window_sec: +st.rejoin || 90,
         opening: st.opening, available_from: st.opening === 'fixed' && st.openAt ? new Date(st.openAt).getTime() / 1000 : null, face_detection: st.face, snapshots: st.snap, room_scan: st.room, ear_check: st.ears, strict_room: st.strictRoom, vision_check_sec: Number(st.vision),
-        enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon }
+        enforce_focus: st.focus, max_warnings: +st.maxW, block_multi_monitor: st.mon, language: st.language, ...(st.languages ? { languages: st.languages } : {}) }
       const r = await api<{ candidate_path: string; report_path: string; warnings: string[]; access_code: string; invited: boolean }>('/api/interviews', { json: { plan, inputs, expires_hours: +st.validH || 72, settings, send_invite: st.invite && !!f.email.trim(), ...Object.fromEntries(Object.entries(link_).filter(([, x]) => x)) } })
       setLink({ url: base + r.candidate_path, report: r.report_path, path: r.candidate_path, warnings: r.warnings || [], code: r.access_code, invited: r.invited })
       go(4)
@@ -222,6 +224,10 @@ export default function NewInterview() {
           <Card>
             <CardHeader title="Interview rules" description="How strict the interview is, and how the link behaves." />
             <CardBody className="grid gap-6 lg:grid-cols-2">
+              <Group title="Language" icon={<Languages />}>
+                <Field label="Language the plan is written in" htmlFor="ivLang"><Select id="ivLang" value={st.language} onChange={e => setSt(s => ({ ...s, language: e.target.value }))}>{LANGUAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+                <Field label="Languages the candidate can choose"><LanguageChoice value={st.languages} onChange={x => setSt(s => ({ ...s, languages: x }))} /></Field>
+              </Group>
               <Group title="Integrity" icon={<ShieldCheck />}>
                 <Switch id="focusOn" checked={st.focus} onChange={v => setSt(s => ({ ...s, focus: v }))} label="Warn when the candidate leaves the interview" description="Switching tabs, windows or apps. The AI interviewer says the warning out loud and repeats the question." />
                 <div className={cn('pb-3', !st.focus && 'opacity-50')}>

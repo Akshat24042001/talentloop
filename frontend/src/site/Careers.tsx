@@ -132,8 +132,12 @@ function ApplyForm({ url, orgName, questions, talentPool, required = [] }: { url
     try {
       const fd = new FormData(); fd.append('resume', x)
       const p = await postForm('/api/public/parse-resume', fd)
+      const s = (x: unknown) => (x == null ? '' : String(x))
       setF(v => ({ ...v, name: v.name || p.name || '', email: v.email || p.email || '', phone: v.phone || p.phone || '', location: v.location || p.location || '',
-        headline: v.headline || p.headline || '', linkedin: v.linkedin || p.linkedin || '',
+        headline: v.headline || p.headline || p.current_title || '', linkedin: v.linkedin || p.linkedin || '', github: v.github || p.github || '',
+        portfolio: v.portfolio || p.portfolio || '', current_company: v.current_company || p.current_company || '', preferred_location: v.preferred_location || p.preferred_location || '',
+        work_authorization: v.work_authorization || p.work_authorization || '', summary: v.summary || p.summary || '',
+        current_salary: v.current_salary || s(p.current_salary), expected_salary: v.expected_salary || s(p.expected_salary),
         total_experience_years: v.total_experience_years || (p.total_experience_years ?? '').toString(), notice_days: v.notice_days || (p.notice_days ?? '').toString() }))
       if (p.skills?.length && !skills.length) setSkills(p.skills.slice(0, 25))
     } catch { /* prefill is optional */ }

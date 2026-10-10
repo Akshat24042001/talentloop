@@ -1352,7 +1352,10 @@ async def public_parse_resume(req: Request, resume: UploadFile = File(...)):
     p = await extract_ai.read_resume(text)
     return {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"],
             "total_experience_years": p["years"], "notice_days": p["notice_days"], "links": p["links"], "location": p.get("location", ""),
-            "read_by": p.get("read_by", "rules")}
+            "read_by": p.get("read_by", "rules"),
+            **{k: p[k] for k in ("headline", "current_title", "current_company", "summary", "preferred_location", "work_authorization", "linkedin",
+                                 "github", "portfolio", "current_salary", "expected_salary", "willing_to_relocate", "education", "certifications",
+                                 "projects", "achievements", "languages", "jobs", "gaps") if p.get(k) not in (None, "", [])}}
 
 
 # ---------------------------------------------------------------------------

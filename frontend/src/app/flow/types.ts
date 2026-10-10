@@ -28,8 +28,9 @@ export const STATUS_TONE: Record<string, Tone> = {
   pending: 'neutral', setting_up: 'neutral', invited: 'brand', in_progress: 'brand', booked: 'violet', submitted: 'warning', on_hold: 'warning',
   passed: 'success', failed: 'danger', expired: 'danger', no_show: 'danger', skipped: 'neutral',
 }
-export const LANGUAGES: [string, string][] = [['en', 'English'], ['hi', 'Hindi'], ['hi-en', 'Hinglish (Hindi + English)'], ['ta', 'Tamil'], ['te', 'Telugu'],
-  ['kn', 'Kannada'], ['mr', 'Marathi'], ['bn', 'Bengali'], ['gu', 'Gujarati'], ['ml', 'Malayalam']]
+/** Interview languages, the same list as backend/vapi_config.py LANGUAGES. */
+export const LANGUAGES: [string, string][] = [['en', 'English'], ['hi', 'Hindi'], ['hi-en', 'Hinglish (Hindi + English)'], ['bn', 'Bengali'], ['mr', 'Marathi'],
+  ['te', 'Telugu'], ['ta', 'Tamil'], ['gu', 'Gujarati'], ['ur', 'Urdu'], ['kn', 'Kannada'], ['or', 'Odia'], ['ml', 'Malayalam'], ['pa', 'Punjabi'], ['as', 'Assamese']]
 export const REC_TONE: Record<string, Tone> = { Strong: 'success', Maybe: 'warning', No: 'danger' }
 
 export function newRound(meta: FlowMeta, type: RoundType): Round {

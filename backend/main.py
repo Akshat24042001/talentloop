@@ -4,6 +4,7 @@ Run:  uvicorn backend.main:app --host 0.0.0.0 --port 8000   (one worker: locks l
 """
 import asyncio
 import base64
+import copy
 import io
 import json
 import logging
@@ -26,7 +27,7 @@ from starlette.background import BackgroundTask  # noqa: E402
 
 from . import (api_accounts, api_candidate, api_flows, route_tags, api_hiring, api_portal, auth, brain, db, exports, extract_ai, interviews, ivindex, llm,  # noqa: E402
                communication, mailbox, matching, media, messages, proctor, refs, retention, store, worker)
-from .vapi_config import build_assistant, public_url  # noqa: E402
+from .vapi_config import LANGUAGES, build_assistant, public_url  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("app")
@@ -122,7 +123,7 @@ class _CandidateGate:
     lets a signed-in team member preview their own; for anyone else it is "not found"."""
     ACTIONS = {"public", "unlock", "consent", "device", "assistant", "started", "heartbeat", "progress", "violation",
                "reference-photo", "events", "snapshot", "vision-check", "media", "complete", "feedback", "book", "slots",
-               "resend-code", "request-human"}
+               "resend-code", "request-human", "language"}
     OPEN = {"public", "unlock", "resend-code"}
 
     def __init__(self, app):
@@ -440,7 +441,8 @@ async def create_interview(req: Request):
     rec = interviews.create_record(org_id=ctx.org_id, created_by=ctx.user_id, job_id=job_id, candidate_id=cand_id,
                                    application_id=refs.app_id(str(body.get("application_id") or "")) or None, plan=plan, inputs=inputs,
                                    settings=settings, expires_hours=body.get("expires_hours") or 72,
-                                   lines=await brain.localize_lines(settings.get("language") or "en"))
+                                   lines=await brain.localize_lines(settings.get("language") or "en"),
+                                   plan_lang=(plan.get("language") or inputs.get("language") or "en"))
     iid = rec["id"]
     invited = False
     if body.get("send_invite", True) and settings.get("candidate_email"):
@@ -725,8 +727,25 @@ def public_info(iid: str, req: Request):
             "opening": s.get("opening") or "now", "human_requested": bool(rec.get("human_requested")), "booking": rec.get("booking") if rec.get("booking") and not rec["booking"].get("cancelled_at") else None,
             "needs_booking": s.get("opening") == "pick" and not (rec.get("booking") and not rec["booking"].get("cancelled_at")) and rec["status"] == "created",
             "reconnect_window_sec": reconnect_window(rec), "resuming": resuming,
+            "language": s.get("language") or "en", "languages": [{"code": c, "name": n, "native": nat} for c, n, nat in LANGUAGES
+                                                                  if c in interviews.settings_from(s)["languages"]],
             "reconnect_seconds_left": max(0, int(deadline - time.time())) if deadline else None,
             "server_time": time.time()}
+
+
+@app.post("/api/interviews/{iid}/language")
+async def choose_language(iid: str, req: Request):
+    """The candidate picks the interview language (from the ones HR allows) before the call starts."""
+    body = await req.json()
+    lang = str(body.get("language") or "")
+    get_rec(iid)
+    try:
+        await interviews.ensure_language(iid, lang)
+    except interviews.LanguageError as e:
+        if e.status == 503:
+            log.warning("[%s] language %s not prepared", iid, lang)
+        raise HTTPException(e.status, str(e))
+    return {"ok": True, "language": lang}
 
 
 @app.post("/api/interviews/{iid}/unlock")
@@ -872,6 +891,13 @@ async def assistant_for_call(iid: str, req: Request, bg: BackgroundTasks):
     if not key:
         raise HTTPException(500, "VAPI_PUBLIC_KEY not set on server")
     ip, ua = client_ip(req), req.headers.get("user-agent", "")[:300]
+    pre = get_rec(iid)
+    if not _spoke(pre):                     # never start a call whose questions are in another language than its voice
+        try:
+            await interviews.ensure_language(iid, (pre.get("settings") or {}).get("language") or "en")
+        except interviews.LanguageError as e:
+            if e.status != 409:
+                raise HTTPException(e.status, str(e))
     async with store.lock(iid):
         rec = get_rec(iid)
         _check_open(rec)

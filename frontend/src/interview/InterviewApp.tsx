@@ -1,6 +1,6 @@
 import {
   AudioLines, Bot, Captions, CaptionsOff, Check, Eye, Lock, MessageSquareText, Mic, MicOff, Monitor, MonitorUp, PhoneOff,
-  RefreshCw, ScanFace, ScreenShare, ScreenShareOff, ShieldCheck, Sun, TriangleAlert, UserRound, Video, Volume2, WifiOff, X, Headphones, Scan } from 'lucide-react'
+  RefreshCw, ScanFace, ScreenShare, ScreenShareOff, ShieldCheck, Sun, TriangleAlert, UserRound, Video, Volume2, WifiOff, X, Headphones, Scan, Languages } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, Logo, Modal, Spinner, Tip, Toaster, TooltipProvider, cn, toast } from '../components/ui'
 import { InterviewEngine, isMobile, type CheckKey, type State } from './engine'
@@ -166,6 +166,7 @@ function Schedule({ s }: { s: State }) {
 function Consent({ s }: { s: State }) {
   const P = s.P!
   const [agree, setAgree] = useState(!!P.resuming)
+  const [lang, setLang] = useState(P.language || 'en'), [langBusy, setLangBusy] = useState(false), [langErr, setLangErr] = useState('')
   const first = P.candidate_name?.split(' ')[0]
   const mw = P.max_warnings
   const rules: { icon: ReactNode; strict?: boolean; text: ReactNode; show?: boolean }[] = [
@@ -205,8 +206,26 @@ function Consent({ s }: { s: State }) {
               <input id="consent" type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} className="mt-0.5 size-[18px] shrink-0 accent-brand-500" />
               <span className="text-[12.5px] leading-relaxed text-slate-300">I agree that this interview (my camera video, audio, screen if shared, snapshots, transcript and the events above) will be recorded and processed by AI services, including cloud providers that may be outside India, only to evaluate my application. A person at the company reviews the result and makes the decision. I can ask HR for a human interview instead, and ask for my data to be deleted.</span>
             </label>
-            <Button id="toCheck" variant="primary" size="lg" className="mt-5 w-full" disabled={!agree || s.rejoin.left === 0} onClick={() => engine.toCheck()}>
-              {P.resuming ? 'Rejoin your interview' : 'Continue to device check'}
+            {!P.resuming && (P.languages?.length || 0) > 0 && (
+              <div className="mt-4">
+                <label htmlFor="ivLanguage" className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-white"><Languages className="size-4" />Interview language</label>
+                <select id="ivLanguage" value={lang} onChange={e => { setLang(e.target.value); setLangErr('') }}
+                  className="w-full rounded-xl bg-white/[.06] px-3 py-2.5 text-sm text-white ring-1 ring-white/15 focus:outline-none focus:ring-2 focus:ring-brand-400">
+                  {P.languages!.map(l => <option key={l.code} value={l.code} className="text-slate-900">{l.native === l.name ? l.name : `${l.native} (${l.name})`}</option>)}
+                </select>
+                <p className="mt-1 text-xs text-slate-400">The interviewer will ask its questions and listen in this language. You can answer in it, or mix in English words.</p>
+                {langErr && <p className="mt-1 text-xs text-red-300">{langErr}</p>}
+              </div>
+            )}
+            <Button id="toCheck" variant="primary" size="lg" className="mt-5 w-full" loading={langBusy} disabled={!agree || s.rejoin.left === 0 || langBusy} onClick={async () => {
+              if (!P.resuming && P.languages?.length && lang !== P.language) {
+                setLangBusy(true)
+                try { await engine.chooseLanguage(lang) } catch (e: any) { setLangErr(e.message || 'Could not set the language. Try again.'); setLangBusy(false); return }
+                setLangBusy(false)
+              }
+              engine.toCheck()
+            }}>
+              {langBusy ? `Preparing your interview in ${P.languages?.find(l => l.code === lang)?.name || 'your language'}...` : P.resuming ? 'Rejoin your interview' : 'Continue to device check'}
             </Button>
             {s.rejoin.left != null && <p className="mt-3 text-center text-sm text-amber-300">{s.rejoin.left > 0 ? `${s.rejoin.left}s left to rejoin` : 'Rejoin window has passed.'}</p>}
             {!P.resuming && <HumanAsk done={!!P.human_requested} />}

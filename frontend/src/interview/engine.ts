@@ -24,6 +24,7 @@ export interface PublicInfo {
   snapshots: boolean; reconnect_window_sec: number; resuming: boolean; reconnect_seconds_left: number | null
   liveness_check?: boolean; identity_check?: boolean; has_reference_photo?: boolean
   room_scan?: boolean; ear_check?: boolean; vision_check_sec?: number; vision_available?: boolean
+  language?: string; languages?: { code: string; name: string; native: string }[]
   human_requested?: boolean; locked?: boolean; opening?: 'pick' | 'now' | 'fixed'; booking?: { starts_at: number; ends_at: number } | null; needs_booking?: boolean
 }
 export interface Slots { opening: string; booking: { starts_at: number; ends_at: number } | null; can_change: boolean; why: string
@@ -241,6 +242,12 @@ export class InterviewEngine {
   }
 
   // ------------------------------------------------------------ step 2: device check
+  /** The candidate's interview language: the server translates the questions before the device check. Throws a message to show. */
+  async chooseLanguage(code: string) {
+    await post(`/api/interviews/${this.iid}/language`, { language: code })
+    this.state.P!.language = code
+    this.ev('language_chosen', code)
+  }
   async toCheck() {
     post(`/api/interviews/${this.iid}/consent`, { version: 'v5' }).catch(() => {})
     this.set({ step: 'check', err2: '' })

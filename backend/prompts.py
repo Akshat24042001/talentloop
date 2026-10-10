@@ -208,5 +208,6 @@ Return JSON:
 
 # Interview languages (per job or per interview). Codes follow BCP-47 where possible; "hi-en" = Hinglish.
 LANGUAGE_NAMES = {"en": "English", "hi": "Hindi", "hi-en": "Hinglish (natural Hindi-English mix, Latin script)", "ta": "Tamil", "te": "Telugu",
-                  "kn": "Kannada", "mr": "Marathi", "bn": "Bengali", "gu": "Gujarati", "ml": "Malayalam", "es": "Spanish", "fr": "French",
+                  "kn": "Kannada", "mr": "Marathi", "bn": "Bengali", "gu": "Gujarati", "ml": "Malayalam", "pa": "Punjabi (Gurmukhi script)",
+                  "ur": "Urdu", "or": "Odia", "as": "Assamese", "es": "Spanish", "fr": "French",
                   "de": "German", "pt": "Portuguese", "ar": "Arabic"}

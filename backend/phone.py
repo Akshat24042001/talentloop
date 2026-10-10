@@ -36,6 +36,14 @@ async def call_candidate(iid: str, number: str) -> str:
     e164 = messages.norm_phone(number)
     if not e164:
         raise PhoneError("That phone number doesn't look valid.")
+    from . import interviews
+    rec0 = store.load(iid)
+    if rec0:                                          # the questions must be in the language the call speaks
+        try:
+            await interviews.ensure_language(iid, (rec0.get("settings") or {}).get("language") or "en")
+        except interviews.LanguageError as e:
+            if e.status != 409:
+                raise PhoneError(str(e), e.status)
     async with store.lock(iid):
         rec = store.load(iid)
         if not rec:

@@ -38,7 +38,8 @@ async def setup_ai_interview(rr_id: str) -> None:
                "email": c.email, "phone": c.phone, "cfg": cfg, "deadline_at": rr.deadline_at}
     plan = await brain.generate_plan(inp)
     settings = interviews.settings_from({"candidate_email": ctx["email"], "candidate_phone": ctx["phone"], "max_warnings": ctx["cfg"].get("max_warnings", 2),
-                                         "language": ctx["cfg"].get("language", "en"), "channel": ctx["cfg"].get("channel", "web")})
+                                         "language": ctx["cfg"].get("language", "en"), "channel": ctx["cfg"].get("channel", "web"),
+                                         **({"languages": ctx["cfg"]["languages"]} if isinstance(ctx["cfg"].get("languages"), list) else {})})
     hours = max(24.0, ((ctx["deadline_at"] or time.time() + 3 * 86400) - time.time()) / 3600)
     rec = interviews.create_record(org_id=ctx["org_id"], created_by=ctx["created_by"], job_id=ctx["job_id"], candidate_id=ctx["candidate_id"],
                                    application_id=ctx["application_id"], round_result_id=rr_id, plan=plan, inputs=inp, settings=settings,

@@ -401,6 +401,34 @@ async def localize_lines(language: str) -> dict:
     return good
 
 
+async def translate_plan(plan: dict, from_lang: str, to_lang: str) -> dict:
+    """The interview plan with every question spoken in to_lang: same questions, same order, same meaning (HR's must-ask questions keep
+    their meaning word for word). Raises ValueError when a usable translation cannot be made, so the candidate is told instead of hearing
+    a half-translated interview."""
+    out = copy.deepcopy(plan)
+    if from_lang == to_lang:
+        return out
+    if llm.MOCK:
+        out["language"] = to_lang
+        return out
+    name = prompts.LANGUAGE_NAMES.get(to_lang, to_lang)
+    src = {q["id"]: q["ask"] for q in plan["questions"]}
+    system = ("You translate job interview questions for a voice interviewer. Translate each value into natural, polite spoken " + name +
+              ", as an experienced interviewer from that region would say it aloud. Keep the exact meaning and every detail (names, numbers, "
+              "tools, company and product names stay as they are, technical terms may stay in English where speakers normally say them in "
+              "English). One question per value, no extra words. Output ONLY a JSON object with the same keys.")
+    try:
+        got = await llm.complete_json(system, json.dumps(src, ensure_ascii=False), llm.FAST_MODEL, temperature=0.2, max_tokens=2500, timeout=45)
+    except Exception as e:
+        raise ValueError(f"translation failed: {e}")
+    if not isinstance(got, dict) or set(got) != set(src) or not all(isinstance(v, str) and len(v.strip()) >= 3 for v in got.values()):
+        raise ValueError("translation incomplete")
+    for q in out["questions"]:
+        q["ask"] = " ".join(got[q["id"]].split())
+    out["language"] = to_lang
+    return out
+
+
 def add_practice(plan: dict, rec: dict | None) -> None:
     """An unscored practice question first, so candidates can check their audio and settle in."""
     qs = plan.get("questions") or []
