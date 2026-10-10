@@ -155,3 +155,20 @@ and slow turn events, then tune. I did not add a client-side watchdog that speak
 - **Server-side check of the room scan.** The scan is measured in the candidate's browser, so a technically skilled cheater could fake the frames. The AI photo check on the server is the second layer.
 - **A way to reject a candidate whose camera cannot be measured.** Today, after 3 tries on a camera where motion cannot be followed (very dark or plain walls), the interview goes on and HR sees "room scan could not be measured". Decide if you want a stricter rule.
 - **Lower priority list from the review that I did not touch:** hours of live Vapi tuning, the rest of the dashboards and reports.
+
+## 7. Update: interruptions, resume history, Write with AI
+
+**Interrupting the interviewer (barge-in).** The interviewer used to need 3 words from the candidate before it stopped talking. Now one
+real word (0.2 s of voice) stops it, as a person would; "okay" and "hmm" still don't. Its next line knows it was cut off and what the
+candidate did not hear: "wait" or "one second" gets "Sure, go ahead, I'm listening"; "please continue" repeats the question; an early
+answer is judged as an answer. The pause before it speaks after the candidate finishes went from 0.8 s to 0.6 s. Settings to tune
+after real calls: `BARGE_IN_WORDS`, `BARGE_IN_VOICE_SEC`, `START_WAIT_SEC`.
+
+**Resume reading.** Experience is worked out from the job dates when the resume does not state it (many date formats; the degree's years
+are left out). Gaps of 3+ months between jobs, or since the last job, are shown in amber on the candidate's profile. Each skill gets the
+years of the jobs that mention it. Soft skills come from what the person did ("led a team of 5" -> Leadership), each with the words that
+show it. The AI reader runs on every new candidate in the background (3 at a time) and anything it claims must be found in the resume.
+
+**Write with AI.** It now shows that it is working, then outlines every field it wrote with a "Written by AI" label, opens the section
+where they are, names the model and the time it took, and offers Undo. Without an AI key it says plainly "Demo text, not written by an AI".
+It also suggests must-have skills (when empty) and soft skills.

@@ -104,8 +104,9 @@ export default function CandidateDetail({ id }: { id: string }) {
             <dl className="mt-4 divide-y divide-slate-100 dark:divide-ink-800">
               <KV k="Expected salary">{p.expected_salary}</KV><KV k="Current salary">{p.current_salary}</KV><KV k="Work authorisation">{p.work_authorization}</KV>
               <KV k="Willing to relocate">{p.willing_to_relocate == null ? '' : p.willing_to_relocate ? 'Yes' : 'No'}</KV><KV k="LinkedIn">{p.linkedin}</KV><KV k="Portfolio">{p.portfolio}</KV>
-              <KV k="Parsed experience">{c.parsed.years != null ? `${c.parsed.years} yrs (${c.parsed.years_source})` : ''}</KV>
+              <KV k="Parsed experience">{c.parsed.years != null ? `${c.parsed.years} yrs (${c.parsed.years_source === 'stated' ? 'as written in the resume' : 'worked out from the job dates'})` : ''}</KV>
             </dl>
+            <WorkHistory parsed={c.parsed} />
           </CardBody></Card>}
           {cur === 'check' && <ResumeCheck cid={c.id} v={c.parsed?.verification} canRun={me.can.manage_jobs} onDone={reload} />}
           {cur === 'activity' && <Card><CardBody><ul className="space-y-2 text-sm">{c.activity.map(a => <li key={a.id}><Badge>{ACTION_LABEL[a.action] || a.action}</Badge> {a.detail} <span className="text-xs text-slate-500">· {actor(a)} · {when(a.at)}</span></li>)}</ul></CardBody></Card>}
@@ -199,5 +200,42 @@ function EditCandidate({ c, onClose, onSaved }: { c: Detail; onClose: () => void
       </div>
       <div className="mt-5 flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>Save changes</Button></div>
     </Modal>
+  )
+}
+
+
+/** What the resume reader worked out: jobs with their dates, gaps between them, years per skill and soft skills with the words that show them. */
+function WorkHistory({ parsed }: { parsed: Record<string, any> }) {
+  const jobs: { title: string; start: string; end: string; months: number }[] = parsed?.jobs || []
+  const gaps: { from: string; to: string; months: number; kind: string }[] = parsed?.gaps || []
+  const sy: Record<string, number> = parsed?.skill_years || {}
+  const soft: Record<string, string> = parsed?.soft_evidence || {}
+  const dur = (m: number) => m >= 12 ? `${Math.floor(m / 12)} yr${m >= 24 ? 's' : ''}${m % 12 ? ` ${m % 12} mo` : ''}` : `${m} mo`
+  if (!jobs.length && !gaps.length && !Object.keys(sy).length && !Object.keys(soft).length) return null
+  return (
+    <div className="mt-6 space-y-5">
+      <div className="flex items-center gap-2 text-xs text-slate-500">{parsed.read_by === 'ai' ? <Badge tone="brand">Read by AI, checked against the resume</Badge> : <Badge>Read by rules</Badge>}</div>
+      {jobs.length > 0 && <div>
+        <h4 className="mb-2 text-sm font-semibold">Work history</h4>
+        <ol className="space-y-1.5 text-sm">{jobs.map((j, i) => (
+          <li key={i} className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 dark:bg-ink-850">
+            <span className="font-medium">{j.title || 'Job'}</span><span className="tabular-nums text-xs text-slate-500">{j.start} to {j.end} · {dur(j.months)}</span></li>))}</ol>
+      </div>}
+      {gaps.length > 0 && <div>
+        <h4 className="mb-2 text-sm font-semibold">Career gaps</h4>
+        <ul className="space-y-1.5 text-sm">{gaps.map((g, i) => (
+          <li key={i} className="rounded-lg bg-amber-50 px-3 py-2 text-amber-900 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/30">
+            {dur(g.months)} {g.kind === 'since last job' ? `without a job since ${g.from}` : `between jobs, ${g.from} to ${g.to}`}</li>))}</ul>
+        <p className="mt-1 text-xs text-slate-500">Worth asking about. A gap is not a reason to reject anyone on its own.</p>
+      </div>}
+      {Object.keys(sy).length > 0 && <div>
+        <h4 className="mb-2 text-sm font-semibold">Years per skill <span className="font-normal text-slate-500">(from the jobs that mention it)</span></h4>
+        <div className="flex flex-wrap gap-1.5">{Object.entries(sy).slice(0, 24).map(([k, v]) => <Badge key={k}>{k} · {v} yr{v === 1 ? '' : 's'}</Badge>)}</div>
+      </div>}
+      {Object.keys(soft).length > 0 && <div>
+        <h4 className="mb-2 text-sm font-semibold">Soft skills, with the words that show them</h4>
+        <ul className="space-y-1.5 text-sm">{Object.entries(soft).map(([k, q]) => <li key={k}><b>{k}</b> <span className="text-slate-500">"{q}"</span></li>)}</ul>
+      </div>}
+    </div>
   )
 }

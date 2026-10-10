@@ -80,7 +80,7 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str, langua
         ]}
     else:
         # Context-aware end-of-turn model + extra patience when the candidate signals they are thinking.
-        start_plan = {"waitSeconds": 0.8,
+        start_plan = {"waitSeconds": float(_env("START_WAIT_SEC", "0.6")),
                       "smartEndpointingPlan": {"provider": _env("SMART_ENDPOINTING_PROVIDER", "livekit")},
                       "customEndpointingRules": [
                           {"type": "customer", "regex": THINKING_REGEX,
@@ -107,7 +107,10 @@ def build_assistant(iid: str, plan: dict, first_message: str, token: str, langua
         "startSpeakingPlan": start_plan,
         # Backchannels ("okay", "mm-hmm") never cut the interviewer off mid-question; "wait" or "sorry" always do.
         # Fields per Vapi's voice pipeline docs (stopSpeakingPlan.acknowledgementPhrases / interruptionPhrases).
-        "stopSpeakingPlan": {"numWords": 3, "voiceSeconds": 0.3, "backoffSeconds": 1,
+        # Barge-in: one real word from the candidate (0.2 s of voice) stops the interviewer at once, as a person would. Backchannels
+        # ("okay", "hmm") are excluded by acknowledgementPhrases, so listening noises don't cut a question off. Tune with BARGE_IN_WORDS.
+        "stopSpeakingPlan": {"numWords": int(_env("BARGE_IN_WORDS", "1")), "voiceSeconds": float(_env("BARGE_IN_VOICE_SEC", "0.2")),
+                             "backoffSeconds": float(_env("BARGE_IN_BACKOFF_SEC", "0.8")),
                              "acknowledgementPhrases": ACK_PHRASES, "interruptionPhrases": INTERRUPT_PHRASES},
         "backgroundSpeechDenoisingPlan": {"smartDenoisingPlan": {"enabled": True}},
         "endCallPhrases": [END_PHRASE],

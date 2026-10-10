@@ -250,3 +250,43 @@ def extract_all(text: str) -> list[str]:
     ordered = sorted(base, key=lambda s: (min((low.find(a) for a in {s.lower(), *SKILLS.get(s, [])} if low.find(a) >= 0), default=10**9), s))
     seen = {s.lower() for s in ordered}
     return ordered + [x for x in extract_listed(text) if x.lower() not in seen]
+
+
+# --- non-technical skills shown by what the person did, not only by the words "communication skills" ---------------------------
+SOFT_EVIDENCE: dict[str, str] = {
+    "Leadership": r"\b(?:led|leading|headed|managed|manage[sd]?)\s+(?:a\s+)?(?:team|group|squad|unit|crew)\b|\bteam\s+(?:lead|leader|of\s+\d+)\b|\breporting\s+to\s+me\b|\bpeople\s+manag",
+    "Communication": r"\b(?:presented|presentations?\s+to|communicat\w+\s+with|liais\w+|client[- ]facing|customer[- ]facing|wrote\s+(?:documentation|reports?|proposals?)|"
+                     r"documented|explained|briefed|public\s+speaking|spokesperson|anchored|hosted)\b",
+    "Public Speaking": r"\b(?:spoke\s+at|speaker\s+at|talk\s+at|presented\s+at|conference\s+talk|webinar|keynote|workshop\s+(?:for|on)|conducted\s+(?:training|workshops?))\b",
+    "Teamwork": r"\b(?:cross[- ]functional|collaborat\w+|worked\s+(?:closely\s+)?with\s+(?:the\s+)?(?:\w+\s+)?teams?|team\s+player|coordinat\w+\s+with)\b",
+    "Stakeholder Management": r"\b(?:stakeholders?|senior\s+management|leadership\s+team|cxo|c-suite|business\s+owners?|clients?\s+and\s+partners)\b",
+    "Mentoring": r"\b(?:mentor\w*|coached|trained\s+(?:\d+\s+)?(?:new\s+)?(?:hires|juniors?|interns|team\s+members|freshers)|onboarded\s+(?:new\s+)?(?:hires|engineers|members))\b",
+    "Time Management": r"\b(?:deadlines?|on[- ]time|ahead\s+of\s+schedule|time[- ]bound|tight\s+timelines?|multiple\s+projects|prioriti[sz]\w+|delivered\s+within)\b",
+    "Problem Solving": r"\b(?:troubleshoot\w*|root[- ]cause|resolved|debugg\w+|diagnos\w+|fixed\s+(?:critical|production)|problem[- ]solv\w+|solved)\b",
+    "Negotiation": r"\b(?:negotiat\w+|closed\s+deals?|vendor\s+contracts?|pricing\s+discussions?)\b",
+    "Customer Service": r"\b(?:customer\s+(?:queries|complaints|issues|support)|client\s+(?:queries|issues)|resolved\s+(?:customer|client)|csat|nps)\b",
+    "Adaptability": r"\b(?:adapt\w+|quick(?:ly)?\s+learn\w*|picked\s+up|self[- ]taught|wore\s+many\s+hats|fast[- ]paced)\b",
+    "Ownership": r"\b(?:owned|end[- ]to[- ]end|single[- ]handedly|took\s+ownership|drove|spearheaded|initiated)\b",
+    "Analytical Thinking": r"\b(?:analy[sz]ed|insights?|data[- ]driven|metrics|kpis?|forecast\w*|identified\s+trends?)\b",
+    "Attention to Detail": r"\b(?:accuracy|error[- ]free|audit\w*|quality\s+checks?|reconcil\w+|zero\s+defects?|detail[- ]oriented)\b",
+    "Creativity": r"\b(?:designed|conceptuali[sz]ed|innovat\w+|brainstorm\w*|creative)\b",
+    "Conflict Resolution": r"\b(?:conflict\s+resolution|resolved\s+conflicts?|de-?escalat\w+|mediat\w+|escalations?)\b",
+}
+_SOFT_RX = {k: re.compile(v, re.I) for k, v in SOFT_EVIDENCE.items()}
+
+
+def infer_soft(text: str) -> list[str]:
+    """Soft skills the text shows through actions ("led a team of 6" -> Leadership), in a fixed order."""
+    return [k for k, rx in _SOFT_RX.items() if rx.search(text or "")]
+
+
+def soft_evidence(text: str) -> dict[str, str]:
+    """Each inferred soft skill with the words that show it, for HR to check."""
+    out = {}
+    for k, rx in _SOFT_RX.items():
+        m = rx.search(text or "")
+        if m:
+            a = text.rfind("\n", 0, m.start()) + 1
+            b = text.find("\n", m.end())
+            out[k] = " ".join(text[a:b if b >= 0 else len(text)].split()).lstrip("-•*▪● ")[:160]
+    return out

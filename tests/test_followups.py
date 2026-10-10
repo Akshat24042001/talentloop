@@ -54,5 +54,21 @@ check("the probe is not about the candidate's own words", "which part" not in sa
 check("the interview state did not stay on the same question after the probe", r["state"]["q_idx"] != 1)
 act, say, r = turn(LONG, {"action": "next_question", "ack": "Got it.", "followup": "Which part?", "covered": []}, qi=2)
 check("a question with one key point and a missing probe is probed twice", act == "follow_up" and r["state"]["fu_used"] > 1)
+
+# barge-in: the candidate cuts in while the interviewer is speaking; Vapi keeps only the words actually spoken
+def cut_turn(said):
+    r = {"id": "x", "plan": plan, "settings": {}, "events": [], "snapshots": [], "state": None}
+    brain.start_session(r); s = r["state"]; s["q_idx"] = 1; s["display"] = brain._display(plan["questions"][1])
+    s["last_say"] = "Thanks, that's clear. Let's switch gears a bit. How did you cut latency in the tracking API?"; r["snapshots"] = [brain._snap(s)]
+    return brain.prepare_turn(r, [{"role": "assistant", "content": "Thanks, that's clear. Let's switch gears a bit."}, {"role": "user", "content": said}])
+p1 = cut_turn("sorry, wait")
+check("'wait' while the interviewer speaks is not answered with 'go ahead'", "go ahead" not in p1.get("reply", "").lower(), str(p1)[:120])
+p2 = cut_turn("sorry, please continue")
+check("'please continue' after a cut-off line does not repeat the question", "tracking API" not in p2.get("reply", ""), str(p2)[:120])
+p3 = cut_turn("I think the main issue was the database queries, we added indexes")
+check("an early answer after cutting in is not judged as an answer", "reply" in p3 or not p3.get("cut_off"), str(p3)[:120])
+check("the judge is not told what the candidate did not hear", "tracking API" not in p3.get("unheard", ""))
+from backend import vapi_config
+
 bad = [n for n, b in RES if b]
 print(f"\n{len(RES) - len(bad)}/{len(RES)} ok"); raise SystemExit(1 if bad else 0)

@@ -164,7 +164,8 @@ def parse(text: str) -> dict:
             seen.add(digits)
             phones.append(re.sub(r"\s+", " ", p.strip()))
     stated = [float(x) for x in YEARS.findall(t) + YEARS_LABEL.findall(t) if float(x) < 45]
-    ranged = _years_from_ranges(t)
+    hist = history(t)
+    ranged = hist["years"] if hist["years"] is not None else _years_from_ranges(t)
     years = max(stated) if stated else ranged
     notice = None
     nm = NOTICE.search(t)
@@ -176,7 +177,8 @@ def parse(text: str) -> dict:
     location = next((c for c in CITIES if cm and c.lower() == cm.group(1).lower()), "")
     return {
         "emails": emails, "location": location, "phones": phones[:2], "links": list(dict.fromkeys(LINK.findall(t)))[:5],
-        "skills": skills.extract_all(t), "years": years, "years_source": "stated" if stated else ("dates" if ranged else None),
+        "skills": skills.extract_all(t) + [x for x in skills.infer_soft(t) if x not in skills.extract_all(t)], "years": years,
+        "years_from_dates": ranged, "jobs": hist["jobs"], "gaps": hist["gaps"], "skill_years": hist["skill_years"], "years_source": "stated" if stated else ("dates" if ranged else None),
         "notice_days": notice, "name_guess": _guess_name(t, emails[0] if emails else ""), "chars": len(t), "parsed_at": time.time(),
     }
 
@@ -260,3 +262,107 @@ def stability(text: str, profile: dict | None = None) -> dict:
             "history": [{"title": j["title"], "company": j["company"], "start": j["start"].isoformat()[:7],
                          "end": "present" if j["end"] >= date.today().replace(day=1) else j["end"].isoformat()[:7], "months": m}
                         for j, m in zip(jobs, months)][:8]}
+
+
+# --- work history: total experience, gaps and years per skill, worked out from the dates in the resume ---------------------------
+_MON = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+_DATE = rf"(?:{_MON}\s*['’]?\s*(\d{{4}}|\d{{2}})|(\d{{1,2}})\s*[/.-]\s*(\d{{4}})|(\d{{4}})\s*[/.-]\s*(\d{{1,2}})(?!\d)|((?:19|20)\d{{2}}))"
+_END = r"(present|current(?:ly)?|now|till\s*date|to\s*date|ongoing|today)"
+SPAN = re.compile(rf"{_DATE}\s*(?:-|–|—|to|till|until)\s*(?:{_DATE}|{_END})", re.I)
+_EDU_HEAD = re.compile(r"^\s*(?:education(?:al)?(?:\s+(?:details|qualifications?|background))?|academic(?:s| details| qualifications?| background)?|qualifications?|"
+                       r"certifications?|courses|training)\s*[:\-–]?\s*$", re.I)
+_WORK_HEAD = re.compile(r"^\s*(?:(?:work|professional|employment|career|relevant|internship)\s+)?(?:experience|history|employment|internships?)(?:\s+details)?\s*[:\-–]?\s*$|"
+                        r"^\s*(?:projects?|skills?|technical skills|summary|profile|achievements|awards)\s*[:\-–]?\s*$", re.I)
+_EDU_WORDS = re.compile(r"\b(?:b\.?\s?tech|b\.?e\b|m\.?\s?tech|bachelor|master|mba|bca|mca|b\.?sc|m\.?sc|b\.?com|m\.?com|ph\.?d|diploma|hsc|ssc|"
+                        r"class\s*(?:x|xii|10|12)|cbse|icse|university|college|school|institute|cgpa|gpa|percentage)\b", re.I)
+
+
+def _ym(groups: tuple, today: date) -> date | None:
+    mon, y2, m1, y1, y3, m3, yonly = groups
+    try:
+        if mon:
+            y = int(y2) + (2000 if len(y2) == 2 and int(y2) < 50 else 1900 if len(y2) == 2 else 0)
+            return date(y, MONTHS[mon[:3].lower()], 1)
+        if m1:
+            return date(int(y1), max(1, min(12, int(m1))), 1)
+        if y3:
+            return date(int(y3), max(1, min(12, int(m3))), 1)
+        if yonly:
+            return date(int(yonly), 1, 1)
+    except (ValueError, KeyError):
+        return None
+    return None
+
+
+def _months(a: date, b: date) -> int:
+    return max(0, (b.year - a.year) * 12 + b.month - a.month)
+
+
+def history(text: str) -> dict:
+    """Jobs found from date ranges outside the education section, with total experience (overlaps merged), gaps of 3+ months
+    between jobs or since the last job, and the years each skill was used (the jobs whose description mentions it)."""
+    from . import skills as sk
+    today = date.today()
+    lines = (text or "").splitlines()
+    in_edu, spans = False, []
+    for i, ln in enumerate(lines):
+        if _EDU_HEAD.match(ln):
+            in_edu = True
+            continue
+        if _WORK_HEAD.match(ln):
+            in_edu = False
+            continue
+        for m in SPAN.finditer(ln):
+            g = m.groups()
+            a = _ym(g[0:7], today)
+            b = today if g[14] else _ym(g[7:14], today)
+            if not a or not b or a > b or a.year < 1970 or (not g[14] and b > today):
+                continue
+            ctx = " ".join(lines[max(0, i - 1):i + 2])
+            year_only = bool(g[6]) and not g[14] and bool(g[13])
+            if in_edu or (_EDU_WORDS.search(ctx) and (year_only or _months(a, b) in (24, 36, 48, 60))):
+                continue                                        # a degree, not a job
+            spans.append({"start": a, "end": min(b, today), "line": i, "current": bool(g[14])})
+    spans.sort(key=lambda s: s["line"])
+    # each job's description runs from its date line to the next job's date line
+    for k, s in enumerate(spans):
+        nxt = spans[k + 1]["line"] if k + 1 < len(spans) else min(len(lines), s["line"] + 25)
+        prev = spans[k - 1]["line"] + 1 if k else 0
+        bullet = re.compile(r"^\s*[-•*▪●◦]")
+        above = [x for x in lines[max(prev, s["line"] - 2):s["line"]] if x.strip() and not bullet.match(x) and len(x.strip()) < 80
+                 and not _WORK_HEAD.match(x) and not _EDU_HEAD.match(x)]
+        if k:   # lines just after the previous job's dates belong to that job unless they look like a title
+            above = above[-2:]
+        body = lines[s["line"]:nxt]
+        if len(body) > 1 and k + 1 < len(spans):
+            for _ in range(2):                                  # the next job's title lines (at most two) sit just above its dates
+                if len(body) > 2 and body[-1].strip() and len(body[-1].strip()) < 60 and not bullet.match(body[-1]):
+                    body = body[:-1]
+        s["text"] = "\n".join(above + body)
+        own = re.sub(SPAN, "", lines[s["line"]]).strip(" |•-–,()")
+        s["title"] = own if len(own) > 2 else " | ".join(x.strip(" |•-–,") for x in above)
+    jobs = sorted(spans, key=lambda s: s["start"])
+    total, gaps, merged = 0, [], []
+    for s in jobs:
+        if merged and s["start"] <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], s["end"])
+        else:
+            merged.append([s["start"], s["end"]])
+    for a, b in merged:
+        total += _months(a, b)
+    for (a1, b1), (a2, b2) in zip(merged, merged[1:]):
+        if _months(b1, a2) >= 3:
+            gaps.append({"from": b1.isoformat()[:7], "to": a2.isoformat()[:7], "months": _months(b1, a2), "kind": "between jobs"})
+    if merged and not any(s["current"] for s in jobs) and _months(merged[-1][1], today) >= 3:
+        gaps.append({"from": merged[-1][1].isoformat()[:7], "to": "now", "months": _months(merged[-1][1], today), "kind": "since last job"})
+    skill_months: dict[str, int] = {}
+    for s in jobs:
+        for name in set(sk.extract_all(s["text"])) | set(sk.infer_soft(s["text"])):
+            skill_months[name] = skill_months.get(name, 0) + _months(s["start"], s["end"])
+    return {
+        "years": round(total / 12, 1) if jobs else None,
+        "jobs": [{"title": s["title"][:120], "start": s["start"].isoformat()[:7], "end": "present" if s["current"] else s["end"].isoformat()[:7],
+                  "months": _months(s["start"], s["end"])} for s in sorted(jobs, key=lambda s: s["start"], reverse=True)][:15],
+        "gaps": gaps,
+        "skill_years": {k: round(v / 12, 1) for k, v in sorted(skill_months.items(), key=lambda kv: -kv[1]) if v >= 3},
+    }

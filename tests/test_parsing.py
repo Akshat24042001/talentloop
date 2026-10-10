@@ -73,10 +73,36 @@ check("a wrapped bullet is split in two", len(f.get("responsibilities", [])) != 
 check("the summary is empty", not f.get("summary"))
 check("the skills are listed alphabetically instead of as written", f.get("must_have_skills", [])[:1] != ["Python"])
 
+
+# --- experience worked out from the dates, gaps, years per skill, soft skills shown by actions
+H = """Rahul Verma
+EXPERIENCE
+Senior Engineer | Zeta | Mar 2022 - Present
+- Led a team of 5 engineers, mentored 2 interns; delivered payments API with Kafka ahead of deadlines
+Software Engineer, Infosys (06/2018 - 08/2021)
+- Built Spring Boot services, presented designs to stakeholders, resolved production incidents
+
+EDUCATION
+B.Tech Computer Science, VIT University  2014 - 2018
+"""
+p = resumes.parse(H)
+check("experience is not worked out from the job dates", p["years_source"] != "dates" or not p["years"] or p["years"] < 7)
+check("the degree's years are counted as a job", any(j["start"].startswith("2014") for j in p["jobs"]))
+check("the 7-month gap between jobs is not highlighted", not any(g["months"] == 7 and g["kind"] == "between jobs" for g in p["gaps"]), str(p["gaps"]))
+check("Kafka's years are not tied to the job that used it", p["skill_years"].get("Kafka", 0) < 4, str(p["skill_years"]))
+check("Spring Boot gets years from a job that did not use it", p["skill_years"].get("Spring Boot", 0) > 3.5)
+for s in ["Leadership", "Mentoring", "Time Management", "Communication", "Stakeholder Management", "Problem Solving"]:
+    check(f"the soft skill {s} shown by an action is missed", s not in p["skills"])
+jd_soft = jdparse.parse("Data Analyst\nRequirements\n- SQL and Excel\n- Excellent communication skills\n- Work with cross-functional teams\n")
+check("JD soft skills are not in their own field", "Communication" not in jd_soft.get("soft_skills", []) or "Teamwork" not in jd_soft.get("soft_skills", []))
+check("a soft skill sits in the JD must-haves", "Communication" in jd_soft.get("must_have_skills", []))
+
 # --- the AI reading: only what is in the document survives
 async def fake(system, user, model, **kw):
-    if "resume" in system.lower()[:40]:
-        return {"name": "Name: Priya Sharma", "skills": ["Weaviate", "Quantum Gravity", "LangChain"], "location": "Mars", "total_experience_years": 99}
+    if "resume" in system.lower()[:80]:
+        return {"name": "Name: Priya Sharma", "skills": ["Weaviate", "Quantum Gravity", "LangChain", {"name": "Leadership", "type": "soft", "evidence": "led a huge team"}],
+                "location": "Mars", "stated_experience_years": 99,
+                "experience": [{"title": "CEO", "company": "Fake", "dates_text": "2001 - 2009", "start": "2001-01", "end": "2009-01"}]}
     return {"title": "Backend Wizard", "must_have_skills": ["Temporal", "Python", "Blockchain"], "nice_to_have_skills": ["Kubernetes"], "experience_min": 2}
 llm.complete_json = fake; llm.MOCK = False; llm.FAST_MODEL = "m"
 r = asyncio.run(extract_ai.read_resume(CV))
@@ -85,6 +111,8 @@ check("the AI skills are not added", "LangChain" not in r["skills"] or "Weaviate
 check("the AI name keeps its label", r["name_guess"] != "Priya Sharma")
 check("the AI invents a location", r.get("location") == "Mars")
 check("the AI invents experience", r.get("years") == 99)
+check("the AI invents a soft skill without a real quote", "Leadership" in r["skills"])
+check("the AI invents a job", any("Fake" in j["title"] for j in r.get("jobs", [])))
 j = asyncio.run(extract_ai.read_jd(JD + "\n- Working knowledge of Temporal workflows\n"))
 check("the AI invents a JD title", j["fields"]["title"] == "Backend Wizard")
 check("the AI invents a JD skill", "Blockchain" in j["fields"].get("must_have_skills", []))

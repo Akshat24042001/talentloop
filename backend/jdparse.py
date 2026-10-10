@@ -105,6 +105,12 @@ def parse(text: str) -> dict:
                     must.remove(s)
                 if s not in nice:
                     nice.append(s)
+    # non-technical skills go to their own field (stated, or implied: "work with cross-functional teams" -> Teamwork)
+    soft_names = set(skills.SOFT_EVIDENCE) | {"Communication", "Leadership", "Mentoring", "Stakeholder Management", "Problem Solving",
+                                              "Time Management", "Teamwork", "Negotiation", "Public Speaking"}
+    soft = [s for s in found_all if s in soft_names] + [s for s in skills.infer_soft(text) if s not in found_all]
+    must = [s for s in must if s not in soft_names]
+    nice = [s for s in nice if s not in soft_names]
     about = " ".join(ln.strip() for ln in body("about")[:6] if len(ln.split()) >= 6) or next((ln.strip() for ln in body("top")[1:] if len(ln) > 120), "")
     lo, hi = _years("\n".join(body("must")) or text)
     if lo is None:
@@ -115,7 +121,7 @@ def parse(text: str) -> dict:
     work = "Remote" if re.search(r"\bfully remote\b|\bremote(?: only|-first)?\b", low) and not re.search(r"\bhybrid\b|on-?site|work from office", low) \
         else "Hybrid" if "hybrid" in low else "On-site" if re.search(r"on-?site|work from office|\bwfo\b", low) else ""
     fields = {"title": _title(lines), "summary": about[:900], "responsibilities": _bullets(body("responsibilities"))[:10],
-              "must_have_skills": must[:15], "nice_to_have_skills": nice[:15], "tools": found_all[:20],
+              "must_have_skills": must[:15], "nice_to_have_skills": nice[:15], "soft_skills": list(dict.fromkeys(soft))[:12], "tools": found_all[:20],
               "benefits": [], "employment_type": emp, "workplace_type": work}
     if lo is not None:
         fields["experience_min"] = lo

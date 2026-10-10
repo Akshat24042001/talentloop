@@ -712,7 +712,8 @@ def followups_asked(st: dict, q_id: str) -> list[str]:
     return [e["text"] for e in st["log"] if e["role"] == "ai" and e.get("action") == "follow_up" and e.get("q_id") == q_id][-3:]
 
 
-async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list | None = None, lang: str = "en") -> dict:
+async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list | None = None, lang: str = "en",
+                 cut_off: bool = False, unheard: str = "") -> dict:
     q = plan["questions"][st["q_idx"]]
     ctx = {
         "allowed": allowed, "q": q, "said": said,
@@ -732,6 +733,7 @@ async def _judge(st: dict, plan: dict, said: str, allowed: list[str], faq: list 
         so_far=answer_so_far(st, q["id"], said), fu_asked=json.dumps(followups_asked(st, q["id"]), ensure_ascii=False),
         uncovered=json.dumps([c for i, c in enumerate(q["good_answer_covers"]) if i not in ctx["already"]][:4], ensure_ascii=False),
         claims=json.dumps((plan.get("resume_claims_to_verify") or [])[:4], ensure_ascii=False),
+        cut_off=("yes: the candidate started talking before you finished. They did NOT hear: " + json.dumps(unheard[:300], ensure_ascii=False)) if cut_off else "no",
     )
     return await asyncio.wait_for(
         llm.complete_json(prompts.TURN_SYSTEM, user, llm.FAST_MODEL, temperature=0.3, max_tokens=420,
@@ -768,6 +770,15 @@ def prepare_turn(rec: dict, messages: list[dict]) -> dict:
         return {"reply": base.get("last_say") or plan["questions"][base["q_idx"]]["ask"]}
     cur_q = plan["questions"][base["q_idx"]]
     cur_text = (base.get("display") or {}).get("text") or cur_q["ask"]
+    # Barge-in: the candidate spoke while the interviewer was still talking, so Vapi stopped the voice and kept only the words actually
+    # spoken. The interviewer must react to the interruption like a person would, not carry on as if its whole line was heard.
+    last_ai = next((_content(m) for m in reversed(messages) if m.get("role") == "assistant" and _content(m)), "")
+    cut_off = bool(last_ai and base.get("last_say")) and _match_score(base["last_say"], last_ai) >= MATCH_MIN \
+        and len(_norm(last_ai)) < 0.8 * len(_norm(base["last_say"]))
+    if cut_off and HOLD_ON.match(said.strip()):
+        return {"reply": "Sure, go ahead. I'm listening."}
+    if cut_off and GO_ON.match(said.strip()):
+        return {"reply": f"Sure. {cur_text}"}
     # The interviewer's own voice coming back through the speakers is not an answer.
     if base.get("last_say") and _match_score(base["last_say"], said) >= 0.75:
         rec["echo_hits"] = rec.get("echo_hits", 0) + 1
@@ -783,7 +794,8 @@ def prepare_turn(rec: dict, messages: list[dict]) -> dict:
     rec["turn_seq"] = rec.get("turn_seq", 0) + 1
     out = {"st": st, "said": said, "active": active, "allowed": allowed, "progress": progress, "ts": time.time(),
            "req": rec["turn_seq"], "ai_n": sum(1 for m in messages if m.get("role") == "assistant" and _content(m)) + 1,
-           "lang": (rec.get("settings") or {}).get("language") or "en", "faq": rec.get("company_faq") or [], "lines": lines_for(rec)}
+           "lang": (rec.get("settings") or {}).get("language") or "en", "faq": rec.get("company_faq") or [], "lines": lines_for(rec),
+           "cut_off": cut_off, "unheard": (base.get("last_say") or "")[len(last_ai):] if cut_off else ""}
     first_turn = not any(e["role"] == "candidate" for e in st["log"])
     if first_turn and declines_recording(said):
         out["fixed"] = {"action": "declined"}
@@ -799,7 +811,8 @@ async def judge_turn(prep: dict, plan: dict) -> tuple[dict, int, bool]:
     if prep.get("fixed"):
         return dict(prep["fixed"]), 0, False
     try:
-        d = await _judge(prep["st"], plan, prep["said"], prep["allowed"], prep.get("faq") or [], prep.get("lang") or "en")
+        d = await _judge(prep["st"], plan, prep["said"], prep["allowed"], prep.get("faq") or [], prep.get("lang") or "en",
+                         prep.get("cut_off", False), prep.get("unheard", ""))
         if not isinstance(d, dict):
             raise ValueError("judge returned non-object")
     except Exception as e:  # never let the interview stall on an LLM failure
@@ -837,6 +850,10 @@ PROTECTED = re.compile(r"\b(age|how old|married|marital|husband|wife|children|ki
                        r"disabilit|health|illness|medical|nationality|politic|sexual|boyfriend|girlfriend)\b", re.I)
 BACKCHANNEL = re.compile(r"^(?:(?:ok(?:ay)?|yeah|yes|yep|yup|right|sure|hmm+|mm+|uh[- ]?huh|alright|all right|got it|i see|"
                          r"cool|fine|great|go ahead|haan|ha|ji|theek hai|accha)[\s,.!]*){1,3}$", re.I)
+HOLD_ON = re.compile(r"^(?:(?:sorry|wait|hold on|one (?:second|sec|moment|minute)|just a (?:second|sec|moment)|excuse me|actually|ek minute|ruko|"
+                     r"can i (?:say|add) something|let me (?:say|add) something)[\s,.!]*){1,3}$", re.I)
+GO_ON = re.compile(r"^(?:(?:sorry|okay|ok|yes|please)[\s,.]*)*(?:go on|go ahead|continue|carry on|please continue|you were saying|"
+                   r"what were you saying|finish (?:your|the) question|complete (?:your|the) question)[\s,.!?]*$", re.I)
 YES_NO_START = re.compile(r"^(?:do|does|did|are|is|was|were|can|could|will|would|have|has|had|should)\b", re.I)
 
 

@@ -30,6 +30,9 @@ export default function JobEditor({ id }: { id?: string }) {
   const [status, setStatus] = useState('draft'), [perm, setPerm] = useState('manage')
   const [err, setErr] = useState(''), [saving, setSaving] = useState(''), [touched, setTouched] = useState(false), [aiBusy, setAiBusy] = useState(false)
   const [active, setActive] = useState('basics')
+  // What the AI (or the imported JD file) just filled in: those fields are outlined and labelled until edited, and can be undone together.
+  const [marks, setMarks] = useState<Record<string, 'ai' | 'demo' | 'file'>>({})
+  const [aiInfo, setAiInfo] = useState<{ source: 'ai' | 'demo' | 'file'; keys: string[]; prev: Record<string, unknown>; model?: string; secs?: number } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     loadMeta().then(async m => {
@@ -42,7 +45,22 @@ export default function JobEditor({ id }: { id?: string }) {
   }, [id])                                                  // eslint-disable-line react-hooks/exhaustive-deps
 
   const missing = useMemo(() => !meta || !v ? [] : meta.sections.flatMap(s => s.fields).filter(f => isRequired(f, v) && empty(v[f.key]) && !(f.type === 'number' && v[f.key] === 0)), [meta, v])
-  const set = (k: string, x: unknown) => setV(o => ({ ...o!, [k]: x }))
+  const set = (k: string, x: unknown) => { setV(o => ({ ...o!, [k]: x })); if (marks[k]) setMarks(m => { const n = { ...m }; delete n[k]; return n }) }
+  const labelOf = (k: string) => meta?.sections.flatMap(x => x.fields).find(f => f.key === k)?.label || k
+  const sectionOf = (k: string) => meta?.sections.find(x => x.fields.some(f => f.key === k))?.id
+  /** Put the new values in, outline them, and open the section where they landed so the change is seen at once. */
+  function applyFilled(out: Record<string, unknown>, keys: string[], source: 'ai' | 'demo' | 'file', extra: { model?: string; secs?: number } = {}) {
+    if (!keys.length) return
+    setAiInfo({ source, keys, prev: Object.fromEntries(keys.map(k => [k, v?.[k]])), ...extra })
+    setV(o => ({ ...o!, ...Object.fromEntries(keys.map(k => [k, out[k]])) }))
+    setMarks(m => ({ ...m, ...Object.fromEntries(keys.map(k => [k, source])) }))
+    const first = sectionOf(keys[0]!); if (first) go(first)
+  }
+  function undoFilled() {
+    if (!aiInfo) return
+    setV(o => ({ ...o!, ...aiInfo.prev })); setMarks(m => { const n = { ...m }; aiInfo.keys.forEach(k => delete n[k]); return n })
+    setAiInfo(null); toast('Undone: your earlier text is back.')
+  }
   // One section at a time (tabs), so the form never turns into one long scroll.
   const go = (sid: string) => { setActive(sid); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
@@ -71,18 +89,16 @@ export default function JobEditor({ id }: { id?: string }) {
     try {
       // The AI works from what is on screen now (unsaved edits included); nothing is saved until you press Save.
       const out = await api<Record<string, unknown>>(id ? `/api/jobs/${id}/ai-write` : '/api/jobs/ai-write', { json: { fields: v } })
-      const demo = !!out._demo; delete out._demo
+      const demo = !!out._demo, model = out._model as string | undefined, secs = out._secs as number | undefined
+      delete out._demo; delete out._model; delete out._secs
       const label = (k: string) => (meta?.sections || []).flatMap(x => x.fields).find(f => f.key === k)?.label || k
       const filled = Object.keys(out).filter(k => !empty(out[k]) && !empty(v[k]))
       let replace = false
       if (filled.length) replace = await ask(`Replace what you wrote in ${filled.map(label).join(', ')} with the AI draft? Choose "Keep mine" to fill only the empty fields.`,
         { title: 'Replace your text?', confirm: 'Replace with AI draft', cancel: 'Keep mine', danger: false })
       const take = Object.keys(out).filter(k => !empty(out[k]) && (replace || empty(v[k])))
-      if (take.length) {
-        setV(o => ({ ...o!, ...Object.fromEntries(take.map(k => [k, out[k]])) }))
-        toast(demo ? `Demo text in ${take.map(label).join(', ')}: no AI is connected, so this is placeholder wording. Connect an AI key in Platform admin > AI models.`
-          : `AI wrote ${take.map(label).join(', ')}. Review it, then Save.`)
-      } else toast('Nothing changed: those fields already have your text.')
+      if (take.length) applyFilled(out, take, demo ? 'demo' : 'ai', { model, secs })
+      else toast('Nothing changed: those fields already have your text.')
     } catch (e: any) { setErr(e.message) }
     setAiBusy(false)
   }
@@ -90,12 +106,9 @@ export default function JobEditor({ id }: { id?: string }) {
     const fd = new FormData(); fd.append('file', f)
     try {
       const r = await api('/api/jobs/parse-jd', { method: 'POST', body: fd })
-      setV(o => {
-        const n = { ...o! }
-        for (const [k, x] of Object.entries(r.fields || {})) if (!empty(x) && empty(n[k])) n[k] = x
-        return n
-      })
-      toast('Imported. Check the highlighted required fields.')
+      const keys = Object.entries(r.fields || {}).filter(([k, x]) => !empty(x) && empty(v?.[k])).map(([k]) => k)
+      if (keys.length) applyFilled(r.fields, keys, 'file', {})
+      else toast('Nothing new in that file: the fields it has are already filled.')
     } catch (e: any) { toast(e.message) }
   }
 
@@ -111,6 +124,22 @@ export default function JobEditor({ id }: { id?: string }) {
           <Button icon={<FileUp />} onClick={() => fileRef.current?.click()}>Import JD file</Button>
           <Button variant="subtle" icon={<Wand2 />} loading={aiBusy} onClick={aiWrite}>Write with AI</Button>
         </>} />
+      {aiBusy && <div id="aiWorking" className="mb-4 flex items-center gap-3 rounded-xl bg-violet-50 p-4 text-sm text-violet-900 ring-1 ring-violet-200 dark:bg-violet-500/10 dark:text-violet-100 dark:ring-violet-500/30">
+        <Sparkles className="size-5 animate-pulse" /><div><b>The AI is writing your job description</b> from the title, skills and details you entered: summary, responsibilities,
+        first 90 days, a typical day and skills. This usually takes 5 to 30 seconds.</div></div>}
+      {!aiBusy && aiInfo && <div id="aiDone" className={cn('mb-4 flex flex-wrap items-center gap-3 rounded-xl p-4 text-sm ring-1', aiInfo.source === 'demo' ? 'bg-amber-50 text-amber-900 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-100 dark:ring-amber-500/30' : 'bg-violet-50 text-violet-900 ring-violet-200 dark:bg-violet-500/10 dark:text-violet-100 dark:ring-violet-500/30')}>
+        {aiInfo.source === 'file' ? <FileUp className="size-5" /> : <Sparkles className="size-5" />}
+        <div className="min-w-0 flex-1">
+          <b>{aiInfo.source === 'file' ? `Filled ${aiInfo.keys.length} field${aiInfo.keys.length > 1 ? 's' : ''} from your JD file` : aiInfo.source === 'demo' ? 'Demo text, not written by an AI' : `The AI wrote ${aiInfo.keys.length} field${aiInfo.keys.length > 1 ? 's' : ''}`}</b>
+          {aiInfo.source === 'ai' && aiInfo.model && <span className="text-violet-700 dark:text-violet-300"> in {aiInfo.secs}s with {aiInfo.model}</span>}
+          <div className="mt-0.5">{aiInfo.keys.map(labelOf).join(', ')}. {aiInfo.source === 'demo' ? 'No AI key is connected, so this is placeholder wording. Connect one in Platform admin > AI models.' : 'They are outlined below. Read and edit them; nothing is saved until you press Save.'}</div>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => { const s = sectionOf(aiInfo.keys[0]!); if (s) go(s) }}>Show me</Button>
+        <Button size="sm" variant="ghost" onClick={undoFilled}>Undo</Button>
+        <Button size="sm" variant="ghost" aria-label="Close" onClick={() => setAiInfo(null)}><X className="size-4" /></Button>
+      </div>}
+      {!aiBusy && !aiInfo && <p className="no-print -mt-2 mb-4 text-[13px] text-slate-500 dark:text-slate-400"><Wand2 className="mr-1 inline size-3.5" />
+        <b>Write with AI</b> drafts the summary, responsibilities, first 90 days, a typical day and the skills from the job title and whatever else you have filled in. <b>Import JD file</b> reads an existing JD into these fields. You review everything before saving.</p>}
       <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav className="no-print hidden lg:block">
           <div className="sticky top-6 space-y-1">
@@ -140,7 +169,7 @@ export default function JobEditor({ id }: { id?: string }) {
                 <h2 className="mt-1 text-base font-semibold">{s.title}</h2>
                 <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{s.description}</p></div></div>
               <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                {s.fields.filter(f => visible(f, v)).map(f => <FieldInput key={f.key} f={f} value={v[f.key]} onChange={x => set(f.key, x)} req={isRequired(f, v)} invalid={touched && missing.includes(f)} skills={meta.skills} />)}
+                {s.fields.filter(f => visible(f, v)).map(f => <FieldInput key={f.key} f={f} value={v[f.key]} onChange={x => set(f.key, x)} req={isRequired(f, v)} invalid={touched && missing.includes(f)} skills={meta.skills} mark={marks[f.key]} />)}
               </div>
               <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-ink-800">
                 {i > 0 ? <Button variant="ghost" icon={<ChevronLeft />} onClick={() => go(meta.sections[i - 1].id)}>{meta.sections[i - 1].title}</Button> : <span />}
@@ -164,10 +193,11 @@ export default function JobEditor({ id }: { id?: string }) {
   )
 }
 
-function FieldInput({ f, value, onChange, req, invalid, skills }: { f: FieldDef; value: any; onChange: (v: any) => void; req: boolean; invalid: boolean; skills: string[] }) {
+function FieldInput({ f, value, onChange, req, invalid, skills, mark }: { f: FieldDef; value: any; onChange: (v: any) => void; req: boolean; invalid: boolean; skills: string[]; mark?: 'ai' | 'demo' | 'file' }) {
   const id = `f-${f.key}`
   const wide = ['textarea', 'list', 'questions', 'multiselect', 'skills', 'tags', 'benefits'].includes(f.type) || f.key === 'title'
-  const label = <>{f.label}{req && <span className="text-red-500"> *</span>}</>
+  const label = <>{f.label}{req && <span className="text-red-500"> *</span>}{mark && <span className={cn('ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', mark === 'demo' ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200' : 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200')}>
+    {mark === 'file' ? <FileUp className="size-3" /> : <Sparkles className="size-3" />}{mark === 'file' ? 'From your JD file' : mark === 'demo' ? 'Demo text' : 'Written by AI'}</span>}</>
   const ring = invalid ? 'ring-2 ring-red-400' : ''
   let input
   switch (f.type) {
@@ -196,7 +226,7 @@ function FieldInput({ f, value, onChange, req, invalid, skills }: { f: FieldDef;
     default:
       input = <Input id={id} className={ring} placeholder={f.placeholder} maxLength={f.max} value={value ?? ''} onChange={e => onChange(e.target.value)} />
   }
-  return <Field className={wide ? 'sm:col-span-2' : ''} label={label} htmlFor={id} hint={f.help}>{input}</Field>
+  return <Field className={cn(wide ? 'sm:col-span-2' : '', mark && 'rounded-xl bg-violet-50/60 p-2 ring-2 ring-violet-300 dark:bg-violet-500/5 dark:ring-violet-500/40')} label={label} htmlFor={id} hint={f.help}>{input}</Field>
 }
 
 /** The company's own benefits list: pick the ones this job offers, add new ones (saved for the company), remove old ones. */

@@ -280,15 +280,19 @@ def ai_unavailable(e: Exception) -> str:
     return f"The AI request failed: {str(e)[:160]}. Try again in a minute, or check Platform admin > AI models."
 
 
-AI_WRITE_SYSTEM = """You help a recruiter write a clear, inclusive, specific job description. Output ONLY JSON:
-{"summary": str (2-3 sentences, no fluff), "responsibilities": [str] (5-7, start with a verb), "first_90_days": [str] (3),
-"nice_to_have_skills": [str] (up to 5), "day_in_life": str (2 sentences)}
-Use only the facts given; never invent salary, benefits or company facts. Avoid gendered or exclusionary wording."""
+AI_WRITE_SYSTEM = """You help a recruiter write a clear, inclusive, specific job description from the facts they have filled in.
+Output ONLY JSON:
+{"summary": str (2-3 sentences: why the role exists and its impact, specific to the title, team and skills given, no fluff),
+"responsibilities": [str] (5-7, each starts with a verb and names a real task for THIS role and its skills),
+"first_90_days": [str] (3 concrete, checkable outcomes), "day_in_life": str (2 sentences),
+"must_have_skills": [str] (5-8 core skills this role needs, technical and domain; only used when the recruiter left it empty),
+"nice_to_have_skills": [str] (up to 5), "soft_skills": [str] (3-5 non-technical skills this role really needs, e.g. Stakeholder Management)}
+Use only the facts given; never invent salary, benefits, team size or company facts. Avoid gendered or exclusionary wording."""
 
 
 AI_WRITE_FACTS = ("title", "department", "team", "seniority", "employment_type", "workplace_type", "locations", "must_have_skills",
                   "nice_to_have_skills", "tools", "experience_min", "experience_max", "industry_experience", "summary", "responsibilities")
-AI_WRITE_KEYS = ("summary", "responsibilities", "first_90_days", "nice_to_have_skills", "day_in_life")
+AI_WRITE_KEYS = ("summary", "responsibilities", "first_90_days", "nice_to_have_skills", "day_in_life", "must_have_skills", "soft_skills")
 
 
 async def _ai_write(org_id: str, fields: dict) -> dict:
@@ -310,6 +314,7 @@ async def _ai_write(org_id: str, fields: dict) -> dict:
                "nice_to_have_skills": [], "day_in_life": "A mix of focused work, collaboration and review."}
     else:
         user = json.dumps(facts, ensure_ascii=False)
+        t0 = time.time()
         try:
             # fast: low, hidden reasoning. A reasoning model given a small budget can spend it all thinking and return
             # cut-off JSON; 3000 tokens leaves room for the ~400-token answer either way.
@@ -325,6 +330,8 @@ async def _ai_write(org_id: str, fields: dict) -> dict:
         raise HTTPException(502, "The AI answered, but not with a usable job description. Try again, or pick another model in Platform admin > AI models.")
     if llm.MOCK:
         draft["_demo"] = True        # canned placeholder text, not written by an AI: the page must say so
+    else:
+        draft["_model"], draft["_secs"] = llm.SMART_MODEL, round(time.time() - t0, 1)   # shown on the page: proof a real model wrote it
     return draft
 
 
@@ -552,6 +559,43 @@ def upsert_candidate(s, org_id: str, *, text: str, parsed: dict, profile: dict, 
     return cand, created
 
 
+_ENRICH: set = set()
+_ENRICH_SLOTS: asyncio.Semaphore | None = None     # a bulk upload of 2,000 resumes must not fire 2,000 AI calls at once
+
+
+def enrich_later(cand_id: str, text: str) -> None:
+    """After a candidate is saved with the free reader, the AI reader runs in the background (a candidate never waits for it) and
+    replaces the parsed details: skills from anywhere in the resume, soft skills with evidence, jobs, gaps and years per skill."""
+    if llm.MOCK or not llm.FAST_MODEL or not (text or "").strip():
+        return
+
+    async def run():
+        global _ENRICH_SLOTS
+        _ENRICH_SLOTS = _ENRICH_SLOTS or asyncio.Semaphore(int(os.getenv("AI_RESUME_CONCURRENCY", "3")))
+        try:
+            async with _ENRICH_SLOTS:
+                p = await extract_ai.read_resume(text)
+            with db.session() as s:
+                c = s.get(db.Candidate, cand_id)
+                if not c or (c.resume_text or "")[:2000] != text[:200000][:2000]:
+                    return                                  # a newer resume arrived meanwhile
+                c.parsed = {**p, **({"verification": c.parsed["verification"]} if (c.parsed or {}).get("verification") else {})}
+                if not c.name and p.get("name_guess"):
+                    c.name = p["name_guess"][:200]
+                matching.compute_features(c)
+                c.updated_at = time.time()
+                s.query(db.Job).filter(db.Job.org_id == c.org_id).update({db.Job.matched_at: None})
+        except Exception:
+            log.exception("[%s] AI resume reading failed", cand_id)
+        finally:
+            _ENRICH.discard(t)
+    try:
+        t = asyncio.get_running_loop().create_task(run())
+        _ENRICH.add(t)
+    except RuntimeError:
+        pass
+
+
 @router.post("/api/candidates/upload")
 async def upload_resumes(req: Request, files: list[UploadFile] = File(...)):
     with db.session() as s:
@@ -571,6 +615,7 @@ async def upload_resumes(req: Request, files: list[UploadFile] = File(...)):
             parsed = resumes.parse(text)
             with db.session() as s:
                 cand, created = upsert_candidate(s, org_id, text=text, parsed=parsed, profile={}, source="bulk", raw=raw, filename=f.filename or "")
+                enrich_later(cand.id, cand.resume_text or "")
                 results["created" if created else "updated"] += 1
                 results["candidates"].append(cand_summary(cand))
                 log_activity(s, ctx, "candidate_added" if created else "candidate_updated", f"{cand.name or cand.email} (resume upload)",
@@ -597,6 +642,7 @@ async def create_candidate(req: Request):
         text = resumes.profile_text(profile) + "\n" + str(body.get("resume_text") or "")
         cand, created = upsert_candidate(s, ctx.org_id, text=text, parsed=resumes.parse(text), profile=profile, source="manual")
         log_activity(s, ctx, "candidate_added", cand.name, candidate_id=cand.id)
+        enrich_later(cand.id, cand.resume_text or "")
         s.query(db.Job).filter(db.Job.org_id == ctx.org_id).update({db.Job.matched_at: None})
         return cand_summary(cand)
 
@@ -1261,6 +1307,7 @@ async def apply(job_id: str, req: Request, data: str = Form(...), resume: Upload
         raise HTTPException(400, "Please answer: " + "; ".join(missing))
     with db.session() as s:
         cand, created = upsert_candidate(s, org.id, text=text, parsed=resumes.parse(text), profile=profile, source="careers", raw=raw, filename=fname)
+        enrich_later(cand.id, cand.resume_text or "")
         if s.query(db.Application).filter_by(job_id=job_id, candidate_id=cand.id).first():
             raise HTTPException(409, "You have already applied for this job. We'll be in touch.")
         a = db.Application(org_id=org.id, job_id=job_id, candidate_id=cand.id, answers=answers, cover_letter=str(d.get("cover_letter") or "")[:5000],
@@ -1289,6 +1336,7 @@ async def talent_pool(slug: str, req: Request, data: str = Form(...), resume: Up
     profile, raw, fname, text, _ = await _intake(req, org, data, resume, "talent_pool")
     with db.session() as s:
         cand, created = upsert_candidate(s, org.id, text=text, parsed=resumes.parse(text), profile=profile, source="talent_pool", raw=raw, filename=fname)
+        enrich_later(cand.id, cand.resume_text or "")
         s.query(db.Job).filter(db.Job.org_id == org.id).update({db.Job.matched_at: None})
         log_activity(s, None, "talent_pool_joined", cand.name, org_id=org.id, candidate_id=cand.id)
     return {"ok": True}
