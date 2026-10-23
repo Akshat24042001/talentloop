@@ -122,5 +122,51 @@ llm.complete_json = boom
 j = asyncio.run(extract_ai.read_jd(JD))
 check("a failing AI breaks the JD upload", j["read_by"] != "rules" or "Python" not in j["fields"].get("must_have_skills", []))
 
+# --- a two-column designer resume (Canva style): name and contact on top, a sidebar, referees with phones at the bottom ----------
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+buf = io.BytesIO(); c = canvas.Canvas(buf, pagesize=A4); W, H = A4
+def col(x, y, rows, size=10):
+    for r in rows:
+        c.setFont("Helvetica", size); c.drawString(x, y, r); y -= size + 5
+    return y
+col(40, H - 50, ["RIYA DESAI"], 22); col(40, H - 78, ["9824012345"]); col(200, H - 78, ["riyadesai2002@gmail. com"])
+# drawn right column first, as builders do: a plain reader would put the referee's phone before the candidate's
+col(300, H - 130, ["E X P E R I E N C E", "Spark Labs, Rajkot.", "During my internship at Spark Labs, Rajkot, I gained", "three months experience building PHP apps.",
+                   "P R O J E C T S", "1 ) Portfolio", "https://riyadesai.github.io/", "portfolio/", "2 ) ShopKart", "An online store in PHP and MySQL.",
+                   "E D U C A T I O N", "Bachelor of Computer Applications (BCA)   2022-2025", "Saurashtra University", "HSC - From Modi School   2022",
+                   "Result : 78.5 %", "R E F E R E N C E S", "Kiran Mehta", "Mo. +91 98250 11111"])
+col(40, H - 130, ["O B J E C T I V E", "Motivated BCA graduate seeking", "a PHP Developer role.", "S K I L L S", "PHP Development", "CRUD Operations",
+                  "MySQL Database", "Management", "T O O L S &", "L A N G U A G E S", "C programming language", "C ++ programing language", "Word, Excel, PowerPoint"])
+c.save()
+pdf = buf.getvalue()
+txt = resumes.tidy(resumes.extract_text(pdf, "cv.pdf"))
+check("a two-column PDF starts with something other than the name", txt.splitlines()[0].strip() != "RIYA DESAI", txt[:80])
+check("letter-spaced headings stay spaced out", "SKILLS" not in txt or "EDUCATION" not in txt)
+p = resumes.parse(txt)
+check("the name of a two-column resume is missed", p["name_guess"] != "Riya Desai", p["name_guess"])
+check("an email written with a space ('gmail. com') is missed", p["emails"][:1] != ["riyadesai2002@gmail.com"], p["emails"])
+check("the referee's phone is taken as the candidate's", p["phones"][:1] != ["9824012345"], p["phones"])
+check("the city of a fresher (only in the internship line) is missed", p["location"] != "Rajkot", p["location"])
+check("a link wrapped onto the next line is cut", "https://riyadesai.github.io/portfolio/" not in p["links"], p["links"])
+check("the education years are counted as a job", bool(p["jobs"]) or (p["years"] or 0) > 1, p["years"])
+check("'three months experience' is not read", p["years"] != 0.2 or p["years_source"] != "stated", p["years"])
+check("the internship company is missed", p.get("current_company") != "Spark Labs", p.get("current_company"))
+check("the referee is missing", not any("Kiran Mehta" in r for r in p.get("references", [])), p.get("references"))
+check("the referee's name is taken as the candidate's", p["name_guess"] == "Kiran Mehta")
+for want in ("PHP", "CRUD", "MySQL", "C", "C++", "PowerPoint", "Database Management"):
+    check(f"the skill {want} is missed", want not in p["skills"], p["skills"])
+check("a heading is listed as a skill", any("TOOLS" in x or x == "Management" for x in p["skills"]), p["skills"])
+check("the grade under a school is lost", not any(e["grade"] == "78.5 %" for e in p.get("education", [])), p.get("education"))
+check("the college is split from its degree", not any("Saurashtra University" in e["text"] and "BCA" in e["text"] for e in p.get("education", [])), p.get("education"))
+check("numbered projects are not read", len(p.get("projects", [])) != 2, p.get("projects"))
+async def ref_ai(system, user, model, **k):
+    return {"name": "RIYA DESAI", "email": "riyadesai2002@gmail. com", "phone": "+91 98250 11111", "location": "Rajkot"}
+llm.complete_json = ref_ai
+r = asyncio.run(extract_ai.read_resume(txt))
+check("the AI's referee phone replaces the candidate's", r["phones"][:1] != ["9824012345"], r["phones"])
+check("the AI's name in capitals is not used", r["name_guess"] != "Riya Desai", r["name_guess"])
+
 bad = [n for n, b in RES if b]
 print(f"\n{len(RES) - len(bad)}/{len(RES)} ok"); raise SystemExit(1 if bad else 0)

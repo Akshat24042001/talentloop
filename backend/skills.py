@@ -9,8 +9,9 @@ import re
 SKILLS: dict[str, list[str]] = {
     # --- programming languages
     "Python": ["python", "python3", "py"], "Java": ["java", "core java", "j2ee", "java ee"], "JavaScript": ["javascript", "js", "es6", "ecmascript"],
-    "TypeScript": ["typescript", "ts"], "C": ["c language", "ansi c"], "C++": ["c++", "cpp"], "C#": ["c#", "c sharp", "csharp"],
-    "Go": ["golang", "go lang"], "Rust": ["rust"], "Kotlin": ["kotlin"], "Swift": ["swift"], "PHP": ["php"], "Ruby": ["ruby"],
+    "TypeScript": ["typescript", "ts"], "C": ["c language", "ansi c", "c programming", "c programming language", "c programing language"],
+    "C++": ["c++", "cpp", "c ++", "c++ programming", "c++ programming language", "c ++ programming language", "c ++ programing language", "c++ programing language"], "C#": ["c#", "c sharp", "csharp"],
+    "Go": ["golang", "go lang"], "Rust": ["rust"], "Kotlin": ["kotlin"], "Swift": ["swift"], "PHP": ["php", "php development", "core php"], "Ruby": ["ruby"],
     "Scala": ["scala"], "R": ["r programming", "r language", "rstudio"], "MATLAB": ["matlab"], "Dart": ["dart"], "Perl": ["perl"],
     "Bash": ["bash", "shell scripting", "shell script", "unix shell"], "PowerShell": ["powershell"], "SQL": ["sql", "t-sql", "tsql", "pl/sql", "plsql"],
     # --- web / frameworks
@@ -22,6 +23,11 @@ SKILLS: dict[str, list[str]] = {
     "Laravel": ["laravel"], "Ruby on Rails": ["rails", "ruby on rails", "ror"], "GraphQL": ["graphql"], "REST APIs": ["rest", "rest api", "rest apis", "restful", "restful apis"],
     "gRPC": ["grpc"], "Microservices": ["microservices", "microservice", "micro services"], "React Native": ["react native"], "Flutter": ["flutter"],
     "Android": ["android"], "iOS": ["ios"], "jQuery": ["jquery"], "Webpack": ["webpack"], "Vite": ["vite"], "Storybook": ["storybook"],
+    "Bootstrap": ["bootstrap"], "WordPress": ["wordpress"], "Responsive Web Design": ["responsive web design", "responsive website design", "responsive design", "responsive websites"],
+    "Web Development": ["web development", "website development"], "Full Stack Development": ["full stack development", "full-stack development", "full stack", "full-stack",
+    "frontend and backend development", "front-end and back-end development", "fronted and backend development"],
+    "CRUD": ["crud", "crud operations"], "Authentication": ["user authentication", "authentication", "jwt", "oauth"], "XAMPP": ["xampp", "wamp", "wamp server", "lamp stack"],
+    "Debugging": ["debugging"], "AI Tools": ["ai tools", "chatgpt", "github copilot", "copilot"],
     # --- data / ML
     "Pandas": ["pandas"], "NumPy": ["numpy"], "scikit-learn": ["scikit-learn", "sklearn", "scikit learn"], "TensorFlow": ["tensorflow"],
     "PyTorch": ["pytorch", "torch"], "Machine Learning": ["machine learning", "ml"], "Deep Learning": ["deep learning"], "NLP": ["nlp", "natural language processing"],
@@ -35,7 +41,7 @@ SKILLS: dict[str, list[str]] = {
     # --- databases
     "PostgreSQL": ["postgresql", "postgres", "psql"], "MySQL": ["mysql"], "MongoDB": ["mongodb", "mongo"], "Redis": ["redis"], "Oracle": ["oracle db", "oracle database"],
     "SQL Server": ["sql server", "mssql", "ms sql"], "Elasticsearch": ["elasticsearch", "elastic search", "elk"], "DynamoDB": ["dynamodb"], "Cassandra": ["cassandra"],
-    "Firebase": ["firebase"], "Supabase": ["supabase"],
+    "Firebase": ["firebase"], "Supabase": ["supabase"], "Database Management": ["database management", "dbms", "database integration"],
     # --- cloud / devops
     "AWS": ["aws", "amazon web services", "ec2", "s3", "lambda", "rds"], "Azure": ["azure", "microsoft azure"], "GCP": ["gcp", "google cloud", "google cloud platform"],
     "Docker": ["docker", "containers", "containerization"], "Kubernetes": ["kubernetes", "k8s", "eks", "aks", "gke"], "Terraform": ["terraform"], "Ansible": ["ansible"],
@@ -95,14 +101,15 @@ SKILLS: dict[str, list[str]] = {
     "Pre-sales": ["pre-sales", "presales", "pre sales", "solution consulting"], "Cold Calling": ["cold calling", "cold calls", "tele calling", "telecalling"],
     "Tenders": ["tender", "tenders", "gem portal", "rfp", "rfq", "bid management"], "Key Account Management": ["key account management", "key accounts", "kam"],
     # --- administration and office
-    "MS Office": ["ms office", "microsoft office", "ms word", "ms powerpoint", "ms-office"],
+    "MS Office": ["ms office", "microsoft office", "ms word", "ms powerpoint", "ms-office"], "MS Word": ["microsoft word", "word"],
+    "PowerPoint": ["powerpoint", "power point", "microsoft powerpoint"],
     "Data Entry": ["data entry", "typing speed"], "Office Administration": ["office administration", "office admin", "front office", "admin executive"],
     "Inventory Management": ["inventory management", "inventory control", "stock management"], "Procurement": ["procurement", "purchase orders", "purchasing"],
     "Vendor Management": ["vendor management", "vendor coordination", "supplier management"], "MIS Reporting": ["mis", "mis reporting", "mis reports"],
     # --- soft skills (matched loosely)
     "Communication": ["communication", "communication skills", "verbal communication", "written communication"], "Leadership": ["leadership", "team lead", "team leadership", "people management"],
     "Mentoring": ["mentoring", "mentored", "coaching"], "Stakeholder Management": ["stakeholder management", "stakeholders"], "Problem Solving": ["problem solving", "problem-solving"],
-    "Time Management": ["time management"], "Teamwork": ["teamwork", "collaboration"],
+    "Time Management": ["time management"], "Teamwork": ["teamwork", "collaboration"], "Adaptability": ["adaptability", "adaptability to change"],
     # --- languages
     "English": ["english"], "Hindi": ["hindi"], "Gujarati": ["gujarati"], "Marathi": ["marathi"], "Tamil": ["tamil"], "Telugu": ["telugu"], "Kannada": ["kannada"],
     "Bengali": ["bengali"], "Malayalam": ["malayalam"], "Arabic": ["arabic"], "French": ["french"], "German": ["german"], "Spanish": ["spanish"],
@@ -114,7 +121,8 @@ for canon, alts in SKILLS.items():
         _ALIAS.setdefault(a.lower(), canon)
 # Short or ambiguous aliases need word boundaries and are only trusted when written as-is (e.g. "go", "r", "c").
 _AMBIGUOUS = {"go", "r", "c", "ts", "py", "ml", "bd", "ui", "node", "rest", "spring", "sketch", "lean", "sap", "s3", "lambda", "ats",
-              "dns", "vpn", "sre", "kam", "sem", "smm", "elk", "rds", "ec2", "zoho", "gitlab", "operations", "analytics", "hiring", "demos"}
+              "dns", "vpn", "sre", "kam", "sem", "smm", "elk", "rds", "ec2", "zoho", "gitlab", "operations", "analytics", "hiring", "demos",
+              "word", "authentication", "full stack", "debugging"}
 _PATTERN = re.compile(r"(?<![a-z0-9+#.])(" + "|".join(sorted((re.escape(a) for a in _ALIAS if a not in _AMBIGUOUS), key=len, reverse=True)) + r")(?![a-z0-9+#])")
 
 
@@ -136,7 +144,8 @@ RELATED_GROUPS = [
     ["Figma", "Sketch", "Adobe XD", "UI Design", "Wireframing"],
     ["IT Hardware", "Hardware Troubleshooting", "Desktop Support", "Printers", "Server Hardware"], ["System Administration", "Windows Server", "Active Directory", "Microsoft 365", "Linux"],
     ["Networking", "Network Troubleshooting", "CCNA", "Firewall"], ["Server Hardware", "Storage", "Data Centre", "Virtualization"],
-    ["Office Administration", "Data Entry", "MS Office", "MIS Reporting"], ["Procurement", "Vendor Management", "Inventory Management", "Supply Chain"],
+    ["Office Administration", "Data Entry", "MS Office", "MIS Reporting", "MS Word", "PowerPoint", "Excel"],
+    ["Web Development", "Full Stack Development", "Responsive Web Design", "HTML", "CSS"], ["PHP", "Laravel", "XAMPP"], ["Procurement", "Vendor Management", "Inventory Management", "Supply Chain"],
 ]
 _RELATED: dict[str, set[str]] = {}
 for _g in RELATED_GROUPS:
@@ -179,13 +188,15 @@ def all_names() -> list[str]:
 # --- skills written in a "Skills" section that the dictionary does not know ---------------------------------------------
 _HEAD = re.compile(r"^\s*(?:(?:technical|key|core|primary|professional|it|soft|functional|top)\s+)?(?:skills?(?:\s*(?:set|summary|&\s*tools|and\s+tools))?|"
                    r"competenc(?:y|ies)|core competencies|tech(?:nical)? stack|technologies|tools(?:\s*(?:&|and)\s*technologies)?|tools|expertise|areas of expertise|"
-                   r"proficienc(?:y|ies)|languages\s*(?:&|and)\s*frameworks|programming languages)\s*[:\-–—]?\s*$", re.I)
+                   r"tools\s*(?:&|and)\s*(?:languages|platforms|software|frameworks)|software|"
+                   r"proficienc(?:y|ies)|languages\s*(?:&|and)\s*(?:frameworks|tools)|programming languages)\s*[:\-–—]?\s*$", re.I)
 _INLINE = re.compile(r"^\s*(?:(?:technical|key|core|primary|professional|it|soft|functional)\s+)?(?:skills?|competenc(?:y|ies)|tech(?:nical)? stack|technologies|tools|expertise)"
                      r"(?:\s*(?:set|summary))?\s*[:\-–—]\s*(.+)$", re.I)
 _OTHER_HEAD = re.compile(r"^\s*(?:work\s+|professional\s+)?(?:experience|employment|education|academics?|projects?|certifications?|achievements?|awards?|"
                          r"summary|profile|objective|references?|declaration|personal|interests|hobbies|responsibilities|requirements|qualifications|"
                          r"about|languages?|publications|training|internships?|contact)\b[^,.]{0,30}[:\-–—]?\s*$", re.I)
 _JUNK = {"and", "or", "etc", "others", "other", "more", "good", "basic", "advanced", "intermediate", "beginner", "expert", "proficient", "knowledge",
+         "development", "management", "design", "database", "programming", "language", "languages", "setup",
          "experience", "skills", "skill", "tools", "technologies", "familiar", "working", "strong", "excellent", "years", "year", "of", "in", "with", "the"}
 
 
@@ -230,6 +241,11 @@ def extract_listed(text: str, limit: int = 60) -> list[str]:
                     break
                 if len(nxt) > 140:
                     break
+                # a wrapped item: "MySQL Database" + "Management", "Use AI tools to assist in" + "coding and development"
+                while j + 1 < len(lines) and (n2 := lines[j + 1].strip()) and not _OTHER_HEAD.match(n2) and not _HEAD.match(n2) and (
+                        n2[:1].islower() or re.search(r"(?:\b(?:in|and|of|to|with|for|the|&)|[,&])$", nxt, re.I)
+                        or (len(n2.split()) == 1 and n2.lower() in _JUNK)):
+                    nxt, j = nxt + " " + n2, j + 1
                 found += _items(nxt)
                 j += 1
             i = j - 1
@@ -248,7 +264,10 @@ def extract_all(text: str) -> list[str]:
     """Dictionary matches plus everything listed in a skills section, in order of first appearance in the text."""
     base = extract(text)
     low = (text or "").lower()
-    ordered = sorted(base, key=lambda s: (min((low.find(a) for a in {s.lower(), *SKILLS.get(s, [])} if low.find(a) >= 0), default=10**9), s))
+    def first(s: str) -> int:              # whole-word position: "C" is not the "c" of "Chauhan"
+        hits = [m.start() for a in {s.lower(), *SKILLS.get(s, [])} if (m := re.search(rf"(?<![a-z0-9+#.]){re.escape(a)}(?![a-z0-9+#])", low))]
+        return min(hits, default=10**9)
+    ordered = sorted(base, key=lambda s: (first(s), s))
     seen = {s.lower() for s in ordered}
     return ordered + [x for x in extract_listed(text) if x.lower() not in seen]
 

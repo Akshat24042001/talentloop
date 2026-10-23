@@ -357,20 +357,9 @@ async def extract_text(req: Request, file: UploadFile = File(...)):
     require_admin(req)
     raw = await file.read()
     name = (file.filename or "").lower()
-    try:
-        if name.endswith(".pdf"):
-            from pypdf import PdfReader
-            text = "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(raw)).pages)
-        elif name.endswith(".docx"):
-            try:
-                import docx  # python-docx
-            except ImportError:
-                raise HTTPException(400, "DOCX needs: pip install python-docx. Or upload PDF/TXT.")
-            text = "\n".join(p.text for p in docx.Document(io.BytesIO(raw)).paragraphs)
-        else:
-            text = raw.decode("utf-8", errors="ignore")
-    except HTTPException:
-        raise
+    try:                                                  # the same reader as every other resume upload (column order, tables, scans)
+        from . import verify
+        text = await verify.read_resume_text(raw, name)
     except Exception as e:
         raise HTTPException(400, f"Could not read file: {e}")
     if len(text.strip()) < 50:
@@ -385,7 +374,8 @@ async def extract_text(req: Request, file: UploadFile = File(...)):
     if req.query_params.get("kind") == "resume":          # fill the candidate's name and email from the resume
         try:
             p = await extract_ai.read_resume(out["text"])
-            out["parsed"] = {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"][:40]}
+            out["parsed"] = {"name": p["name_guess"], "email": (p["emails"] or [""])[0], "phone": (p["phones"] or [""])[0], "skills": p["skills"][:40],
+                             "location": p.get("location", ""), "title": p.get("headline") or p.get("current_title") or "", "read_by": p.get("read_by", "rules")}
         except Exception:
             log.exception("resume reading failed")
     return out

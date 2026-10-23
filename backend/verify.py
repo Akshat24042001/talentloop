@@ -92,7 +92,7 @@ async def read_resume_text(raw: bytes, filename: str) -> str:
     """Text of any resume. Images and scanned PDFs go through the vision model (VISION_MODEL) when it is set."""
     name = (filename or "").lower()
     is_image = name.endswith((".png", ".jpg", ".jpeg", ".webp"))
-    text = "" if is_image else await asyncio.to_thread(resumes.extract_text, raw, filename)
+    text = "" if is_image else resumes.tidy(await asyncio.to_thread(resumes.extract_text, raw, filename))
     if len(text.strip()) >= 40:
         return text
     images = [j for j in [_jpeg(raw)] if j] if is_image else (_pdf_images(raw) if raw[:4] == b"%PDF" else [])

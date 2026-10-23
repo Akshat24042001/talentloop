@@ -110,6 +110,7 @@ function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => vo
       const fd = new FormData(); fd.append('resume', file)
       const p = await api<any>('/api/public/parse-resume', { method: 'POST', body: fd })
       setF(v => ({ ...v, name: p.name || v.name, email: p.email || v.email, phone: p.phone || v.phone, location: p.location || v.location,
+        headline: p.headline || p.current_title || v.headline, resume_text: v.resume_text || p.text || '',
         total_experience_years: p.total_experience_years != null ? String(p.total_experience_years) : v.total_experience_years,
         notice_days: p.notice_days != null ? String(p.notice_days) : v.notice_days }))
       if (p.skills?.length) setSk(p.skills.slice(0, 40))

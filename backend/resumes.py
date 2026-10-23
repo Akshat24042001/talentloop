@@ -1,10 +1,13 @@
 """Free resume parsing (no AI): text extraction plus regex/dictionary extraction of the fields matching needs."""
 import io
+import logging
 import re
 import time
 from datetime import date
 
 from . import skills
+
+log = logging.getLogger("resumes")
 
 MAX_RESUME_BYTES = 10 * 1024 * 1024
 RESUME_TYPES = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -12,8 +15,10 @@ RESUME_TYPES = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlform
                 ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-PHONE = re.compile(r"(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{2,5}\)?[\s-]?)?\d{3,5}[\s-]?\d{4,6}")
-LINK = re.compile(r"(?:https?://)?(?:www\.)?(?:linkedin\.com/in/[\w-]+|github\.com/[\w-]+|[\w-]+\.(?:dev|io|me|com)/[\w/-]*)", re.I)
+PHONE = re.compile(r"(?<![\w/.])(?:\+?\d{1,3}[ \t.-]?)?(?:\(?\d{2,5}\)?[ \t.-]?)?\d{3,5}[ \t.-]?\d{4,6}(?![\w/])")   # one line only
+URL = re.compile(r"(?:https?://|www\.)[^\s<>\"'|,;()]+|\b(?:[a-z0-9-]+\.)*(?:linkedin\.com/in|github\.com|gitlab\.com|behance\.net|dribbble\.com|medium\.com)/[^\s<>\"'|,;()]+|"
+                 r"\b[a-z0-9-]+\.(?:github\.io|vercel\.app|netlify\.app|wixsite\.com|carrd\.co|framer\.website)\b[^\s<>\"'|,;()]*", re.I)
+LINK = URL
 YEARS = re.compile(r"(\d{1,2}(?:\.\d)?)\s*\+?\s*(?:years?|yrs?)(?:\s+of)?(?:\s+\w+){0,3}?\s+(?:experience|exp)\b", re.I)
 YEARS_LABEL = re.compile(r"(?:total\s+|overall\s+)?(?:work\s+)?experience\s*[:\-–]\s*(\d{1,2}(?:\.\d)?)\s*\+?\s*(?:years?|yrs?)", re.I)
 YEARS_SIMPLE = re.compile(r"\b(\d{1,2}(?:\.\d)?)\s*\+?\s*(?:years?|yrs?)\b", re.I)
@@ -21,11 +26,27 @@ MONTHS = {m: i + 1 for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "ju
 RANGE = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*(\d{4})\s*[-–—to]+\s*(present|current|now|till date|"
                    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*\d{4})", re.I)
 NOTICE = re.compile(r"notice\s*(?:period)?\s*[:\-]?\s*(?:of\s*)?(\d{1,3})\s*(days?|months?|weeks?)", re.I)
-CITIES = ["Bengaluru", "Bangalore", "Mumbai", "Navi Mumbai", "Thane", "Pune", "Hyderabad", "Chennai", "Kolkata", "New Delhi", "Delhi", "Noida",
-          "Greater Noida", "Gurugram", "Gurgaon", "Ghaziabad", "Faridabad", "Ahmedabad", "Surat", "Vadodara", "Jaipur", "Lucknow", "Kochi",
-          "Thiruvananthapuram", "Trivandrum", "Coimbatore", "Indore", "Bhopal", "Nagpur", "Chandigarh", "Mohali", "Bhubaneswar", "Visakhapatnam",
-          "Mysuru", "Mysore", "Mangaluru", "Goa", "Patna", "Ranchi", "Dehradun", "Remote", "Dubai", "Abu Dhabi", "Singapore", "London",
-          "New York", "San Francisco", "Seattle", "Austin", "Toronto", "Sydney", "Berlin", "Amsterdam"]
+CITIES = ["Bengaluru", "Bangalore", "Mumbai", "Navi Mumbai", "Thane", "Pune", "Hyderabad", "Secunderabad", "Chennai", "Kolkata", "New Delhi", "Delhi",
+          "Noida", "Greater Noida", "Gurugram", "Gurgaon", "Ghaziabad", "Faridabad", "Ahmedabad", "Surat", "Vadodara", "Baroda", "Rajkot", "Bhavnagar",
+          "Jamnagar", "Junagadh", "Gandhinagar", "Anand", "Nadiad", "Bharuch", "Ankleshwar", "Vapi", "Valsad", "Navsari", "Mehsana", "Morbi",
+          "Gandhidham", "Bhuj", "Porbandar", "Amreli", "Botad", "Surendranagar", "Palanpur", "Himmatnagar", "Godhra", "Dahod", "Patan", "Veraval",
+          "Jaipur", "Jodhpur", "Udaipur", "Kota", "Ajmer", "Bikaner", "Alwar", "Bhilwara", "Sikar", "Lucknow", "Kanpur", "Agra", "Varanasi",
+          "Prayagraj", "Allahabad", "Meerut", "Bareilly", "Aligarh", "Moradabad", "Gorakhpur", "Jhansi", "Mathura", "Saharanpur", "Indore", "Bhopal",
+          "Gwalior", "Jabalpur", "Ujjain", "Sagar", "Raipur", "Bhilai", "Bilaspur", "Nagpur", "Nashik", "Aurangabad", "Chhatrapati Sambhajinagar",
+          "Solapur", "Kolhapur", "Amravati", "Sangli", "Satara", "Jalgaon", "Akola", "Latur", "Nanded", "Ahmednagar", "Kalyan", "Vasai", "Virar",
+          "Panvel", "Pimpri-Chinchwad", "Pimpri Chinchwad", "Chandigarh", "Mohali", "Panchkula", "Zirakpur", "Ludhiana", "Amritsar", "Jalandhar",
+          "Patiala", "Bathinda", "Ambala", "Karnal", "Panipat", "Sonipat", "Rohtak", "Hisar", "Kurukshetra", "Shimla", "Dharamshala", "Solan",
+          "Jammu", "Srinagar", "Dehradun", "Haridwar", "Roorkee", "Rishikesh", "Haldwani", "Kochi", "Cochin", "Ernakulam", "Thiruvananthapuram",
+          "Trivandrum", "Kozhikode", "Calicut", "Thrissur", "Kollam", "Kannur", "Palakkad", "Kottayam", "Coimbatore", "Madurai", "Tiruchirappalli",
+          "Trichy", "Salem", "Tirunelveli", "Erode", "Vellore", "Tiruppur", "Thoothukudi", "Hosur", "Pondicherry", "Puducherry", "Mysuru", "Mysore",
+          "Mangaluru", "Mangalore", "Hubli", "Hubballi", "Dharwad", "Belgaum", "Belagavi", "Davangere", "Ballari", "Shivamogga", "Tumakuru",
+          "Udupi", "Manipal", "Visakhapatnam", "Vizag", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kakinada", "Rajahmundry", "Kurnool",
+          "Anantapur", "Warangal", "Karimnagar", "Nizamabad", "Khammam", "Bhubaneswar", "Cuttack", "Rourkela", "Sambalpur", "Puri", "Berhampur",
+          "Patna", "Gaya", "Muzaffarpur", "Bhagalpur", "Darbhanga", "Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Hazaribagh", "Howrah", "Durgapur",
+          "Asansol", "Siliguri", "Kharagpur", "Guwahati", "Silchar", "Dibrugarh", "Jorhat", "Shillong", "Imphal", "Agartala", "Aizawl", "Kohima",
+          "Gangtok", "Itanagar", "Goa", "Panaji", "Margao", "Vasco da Gama", "Remote", "Dubai", "Abu Dhabi", "Sharjah", "Doha", "Riyadh", "Muscat",
+          "Kuwait", "Singapore", "Kuala Lumpur", "London", "Manchester", "Dublin", "New York", "San Francisco", "San Jose", "Seattle", "Austin",
+          "Boston", "Chicago", "Dallas", "Toronto", "Vancouver", "Sydney", "Melbourne", "Berlin", "Munich", "Amsterdam", "Paris"]
 CITY = re.compile(r"\b(" + "|".join(re.escape(c) for c in sorted(CITIES, key=len, reverse=True)) + r")\b", re.I)
 CTC = re.compile(r"(?:current|expected)\s*(?:ctc|salary|package)\s*[:\-]?\s*(?:inr|rs\.?|₹)?\s*([\d.,]+)\s*(lpa|lakhs?|l|k|cr)?", re.I)
 
@@ -34,7 +55,13 @@ def extract_text(raw: bytes, filename: str) -> str:
     name = (filename or "").lower()
     if name.endswith(".pdf") or raw[:4] == b"%PDF":
         from pypdf import PdfReader
-        return "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(raw)).pages)
+        flat = "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(raw)).pages)
+        try:
+            ordered = pdf_text(raw)
+        except Exception as e:                                # a PDF pdfplumber cannot read: the plain reading still works
+            log.warning("column-aware PDF reading failed, using the plain reading: %s", e)
+            return flat
+        return ordered if len(re.sub(r"\s", "", ordered)) >= 0.8 * len(re.sub(r"\s", "", flat)) else flat
     if name.endswith(".docx"):
         import docx
         d = docx.Document(io.BytesIO(raw))
@@ -47,6 +74,102 @@ def extract_text(raw: bytes, filename: str) -> str:
         txt = raw.decode("utf-8", errors="ignore")
         return re.sub(r"\\[a-z]+-?\d* ?|[{}]", " ", txt)
     return raw.decode("utf-8", errors="ignore")
+
+
+# --- PDF text in reading order ---------------------------------------------------------------------------------------------
+# pypdf returns text in the order it was drawn. Resume builders (Canva, Word templates) draw two-column layouts in any order,
+# so the name could land on line 45 and the email next to a reference's phone. Here words are placed by their position on the
+# page: visual lines, then the gutter between columns, then each column top to bottom (a full-width line such as a centred
+# header splits the page into bands, read in order).
+def pdf_text(raw: bytes) -> str:
+    import pdfplumber
+    logging.getLogger("pdfminer").setLevel(logging.ERROR)
+    pages = []
+    with pdfplumber.open(io.BytesIO(raw)) as pdf:
+        for page in pdf.pages[:12]:
+            words = page.extract_words(x_tolerance=1.5, y_tolerance=2.5, extra_attrs=["size"])
+            if words:
+                pages.append("\n".join(_emit(_rows(words), 0)))
+    return "\n\n".join(pages)
+
+
+def _join(ws: list[dict]) -> str:
+    """Words of one chunk. Letter-spaced headings ("S K I L L S") come back one letter per word: the wider gaps are the spaces."""
+    if len(ws) > 3 and sum(len(w["text"]) == 1 for w in ws) >= 0.7 * len(ws):
+        gaps = sorted(b["x0"] - a["x1"] for a, b in zip(ws, ws[1:]))
+        cut = gaps[len(gaps) // 2] * 1.8 + 0.5
+        out = ws[0]["text"]
+        for a, b in zip(ws, ws[1:]):
+            out += (" " if b["x0"] - a["x1"] > cut else "") + b["text"]
+        return out
+    return " ".join(w["text"] for w in ws)
+
+
+def _rows(words: list[dict]) -> list[list[dict]]:
+    lines: list[list[dict]] = []
+    for w in sorted(words, key=lambda w: (round(w["top"]), w["x0"])):
+        tol = max(2.0, 0.45 * float(w.get("size") or 10))
+        for ln in lines[-4:]:
+            if abs(ln[0]["top"] - w["top"]) <= tol:
+                ln.append(w)
+                break
+        else:
+            lines.append([w])
+    rows = []
+    for ln in sorted(lines, key=lambda l: min(w["top"] for w in l)):
+        ln.sort(key=lambda w: w["x0"])
+        chunks, cur = [], [ln[0]]
+        for a, b in zip(ln, ln[1:]):
+            if b["x0"] - a["x1"] > max(12.0, 1.6 * float(a.get("size") or 10)):
+                chunks.append(cur)
+                cur = []
+            cur.append(b)
+        chunks.append(cur)
+        rows.append([{"x0": c[0]["x0"], "x1": max(w["x1"] for w in c), "text": _join(c)} for c in chunks])
+    return rows
+
+
+def _line(r: list[dict]) -> str:
+    """One visual line. A wide gap (side-by-side items, not a justified line) becomes 3 spaces, which the readers treat as a break."""
+    out = r[0]["text"]
+    for a, b in zip(r, r[1:]):
+        out += ("   " if b["x0"] - a["x1"] > 30 else " ") + b["text"]
+    return out
+
+
+def _gutter(chunks: list[dict]) -> float | None:
+    if len(chunks) < 8:
+        return None
+    lo, hi = min(c["x0"] for c in chunks), max(c["x1"] for c in chunks)
+    best, best_x, x = None, None, lo + (hi - lo) * 0.15
+    while x < lo + (hi - lo) * 0.85:
+        cover = sum(1 for c in chunks if c["x0"] < x < c["x1"])
+        if (sum(1 for c in chunks if c["x1"] <= x) >= 4 and sum(1 for c in chunks if c["x0"] >= x) >= 4
+                and (best is None or cover < best)):
+            best, best_x = cover, x
+        x += 3
+    return best_x if best is not None and best <= max(2, 0.12 * len(chunks)) else None
+
+
+def _emit(rows: list[list[dict]], depth: int) -> list[str]:
+    g = _gutter([c for r in rows for c in r]) if depth < 2 else None
+    if g is None:
+        return [_line(r) for r in rows]
+    out: list[str] = []
+    left: list[list[dict]] = []
+    right: list[list[dict]] = []
+    for r in rows + [None]:
+        if r is None or any(c["x0"] < g < c["x1"] for c in r):
+            out += _emit(left, depth + 1) + _emit(right, depth + 1)
+            left, right = [], []
+            if r is not None:
+                out.append(_line(r))
+            continue
+        if (lc := [c for c in r if c["x1"] <= g]):
+            left.append(lc)
+        if (rc := [c for c in r if c["x0"] >= g]):
+            right.append(rc)
+    return out
 
 
 def _years_from_ranges(text: str) -> float | None:
@@ -129,24 +252,32 @@ def safe_name(raw: str) -> str:
 
 
 def _guess_name(text: str, email: str) -> str:
-    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    lines = [ln.strip() for ln in _without_references(text or "").splitlines() if ln.strip()]
     for ln in lines[:25]:                                  # an explicit "Name: ..." line wins over any guess
         m = _LABEL.match(ln)
         if m and (n := clean_name(ln)):
             return n
+    whole = re.sub(r"[^a-z]", "", email.split("@")[0].lower()) if email else ""
     local = [p.lower() for p in re.split(r"[._\d\-+]+", email.split("@")[0]) if len(p) > 1] if email else []
+    if len(whole) >= 4:                                    # a line whose every word is in the email address ("chauhanmittal2810" -> "Mittal Chauhan")
+        for ln in lines[:60]:
+            for part in re.split(r"\s{3,}", ln):
+                n = clean_name(part)
+                toks = [t.lower() for t in re.split(r"[\s.'-]+", n) if len(t) > 1]
+                if len(toks) >= 2 and all(t in whole for t in toks):
+                    return n
     found = []
     for ln in lines[:10]:
         if EMAIL.search(ln) and len(ln) > 60:
             continue
-        n = clean_name(ln)
+        n = clean_name(re.split(r"\s{3,}", ln)[0])
         if n and len(n.split()) >= 2:
             found.append(n)
         if len(found) == 3:
             break
     if found:                                              # prefer the line that agrees with the email address
         for n in found:
-            if any(tok in n.lower() for tok in local):
+            if any(tok in n.lower() for tok in local) or any(len(t) > 2 and t in whole for t in n.lower().split()):
                 return n
         return found[0]
     if local:
@@ -154,16 +285,134 @@ def _guess_name(text: str, email: str) -> str:
     return ""
 
 
-def parse(text: str) -> dict:
+# --- text clean-up the readers rely on ------------------------------------------------------------------------------------
+_TLD = r"(?:com|in|org|net|co|edu|ac|io|ai|me|info|biz|gov|us|uk|dev|tech|app|xyz|online|live|outlook|yahoo)"
+_SPACED_EMAIL = re.compile(rf"[\w.+-]+\s*(?:@|\[at\]|\(at\))\s*[\w-]+(?:\s*\.\s*[\w-]+)*?\s*\.\s*{_TLD}\b(?:\s*\.\s*(?:in|uk|au|sg))?", re.I)
+_URL_TAIL = re.compile(r"^/?[\w.~%-]+(?:/[\w.~%-]*)*/?$")
+
+
+def tidy(text: str) -> str:
+    """Repairs what PDF builders break: "name@gmail. com" (a space inside the address), a link wrapped onto the next line
+    ("https://x.github.io/" + "portfolio/"), and a heading wrapped after "&" ("TOOLS &" + "LANGUAGES")."""
     t = text or ""
-    emails = list(dict.fromkeys(e.lower().strip(".") for e in EMAIL.findall(t)))[:3]
+    t = _SPACED_EMAIL.sub(lambda m: re.sub(r"\s+", "", re.sub(r"\s*(?:\[at\]|\(at\))\s*", "@", m.group(0), flags=re.I)), t)
+    lines = t.split("\n")
+    out: list[str] = []
+    for ln in lines:
+        prev = out[-1].rstrip() if out else ""
+        last = prev.split()[-1] if prev.split() else ""
+        nxt = ln.strip()
+        if last and URL.fullmatch(last) and nxt and " " not in nxt and "/" in nxt and _URL_TAIL.match(nxt) and len(nxt) < 80:
+            out[-1] = prev + (nxt if last.endswith("/") or nxt.startswith("/") else "/" + nxt)
+            continue
+        if re.fullmatch(r"[A-Z][A-Z ]{1,30}\s*(?:&|AND)", prev) and re.fullmatch(r"[A-Z][A-Z ]{1,30}", nxt):
+            out[-1] = prev + " " + nxt
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
+_REF_HEAD = re.compile(r"^\s*(?:professional\s+)?references?(?:\s+details)?\s*[:\-–]?\s*$", re.I)
+
+
+def _references_block(text: str) -> tuple[int, int]:
+    """Start and end (line numbers) of the References section: its phones, emails and names are other people's."""
+    lines = (text or "").splitlines()
+    for i, ln in enumerate(lines):
+        if _REF_HEAD.match(ln):
+            for j in range(i + 1, len(lines)):
+                s = lines[j].strip()
+                if s and s.isupper() and len(s) < 40 and (_ANY_HEAD.match(s) or _WORK_HEAD.match(s) or _EDU_HEAD.match(s)) and not _REF_HEAD.match(s):
+                    return i, j
+            return i, len(lines)
+    return -1, -1
+
+
+def _without_references(text: str) -> str:
+    a, b = _references_block(text)
+    if a < 0:
+        return text or ""
+    lines = (text or "").splitlines()
+    return "\n".join(lines[:a] + lines[b:])
+
+
+def references(text: str) -> list[str]:
+    """The referees as written (name, role, phone), one entry per person where the layout allows."""
+    a, b = _references_block(text)
+    if a < 0:
+        return []
+    rows = [ln.strip() for ln in (text or "").splitlines()[a + 1:b] if ln.strip() and not re.match(r"^(?:available\s+on\s+request|on\s+request)\.?$", ln.strip(), re.I)]
+    cols = [re.split(r"\s{3,}", r) for r in rows]
+    width = max((len(c) for c in cols), default=0)
+    if width > 1 and sum(len(c) == width for c in cols) >= len(cols) * 0.6:     # referees side by side
+        return [", ".join(c[k].strip() for c in cols if k < len(c) and c[k].strip())[:200] for k in range(width)][:4]
+    people, cur = [], []
+    for r in rows:
+        if cur and clean_name(r) and len(clean_name(r).split()) >= 2:
+            people.append(", ".join(cur))
+            cur = []
+        cur.append(r)
+    if cur:
+        people.append(", ".join(cur))
+    return [x[:200] for x in people][:4]
+
+
+_NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+              "twelve": 12, "fifteen": 15, "eighteen": 18, "twenty": 20}
+_DURATION = re.compile(r"\b(\d{1,2}(?:\.\d)?|" + "|".join(_NUM_WORDS) + r")\s*\+?\s*(months?|years?|yrs?)\b(?:\s+of)?(?:\s+[\w-]+){0,3}?\s+"
+                       r"(?:experience|exp|internship)\b", re.I)
+_INTERN_AT = re.compile(r"\b(?:internship|interned|intern)\s+(?:at|with)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4})", re.M)
+
+
+def _stated_years(t: str) -> list[float]:
+    """Experience written as a number: "3+ years of experience", "Experience: 4 years", "two months experience" (in years)."""
+    out = [float(x) for x in YEARS.findall(t) + YEARS_LABEL.findall(t)]
+    for m in _DURATION.finditer(t):
+        n = float(_NUM_WORDS.get(m.group(1).lower(), 0) or (m.group(1) if m.group(1)[0].isdigit() else 0))
+        if m.group(2).lower().startswith("month"):
+            out.append(round(n / 12, 1) or 0.1)
+        else:
+            out.append(n)
+    return [x for x in out if 0 < x < 45]
+
+
+def _location(t: str) -> tuple[str, str]:
+    """(city, how it was found): a labelled address or location line, else the contact block at the top, else the city the
+    resume mentions most (where the person studied or worked: a likely current city, marked as inferred)."""
+    known = lambda s: next((c for c in CITIES if (m := CITY.search(s or "")) and c.lower() == m.group(1).lower()), "")
+    for ln in t.splitlines()[:80]:
+        m = re.match(r"^\s*(?:current\s+)?(?:address|location|city|residence|based\s+in|lives?\s+in|hometown|place)\s*[:\-–]\s*(.+)$", ln, re.I)
+        if m:
+            v = re.split(r"\s{3,}", m.group(1))[0].strip(" .,")
+            if (c := known(v)):
+                return c, "stated"
+            parts = [x.strip(" .") for x in re.split(r",", v) if x.strip(" .") and not re.search(r"\d", x)]
+            if parts and 2 < len(parts[-1 if len(parts) < 3 else -2]) < 40:
+                return parts[-1 if len(parts) < 3 else -2], "stated"
+    head = "\n".join([ln for ln in t.splitlines() if ln.strip()][:8])
+    if (c := known(head)) and c != "Remote":
+        return c, "stated"
+    counts: dict[str, int] = {}
+    for m in CITY.finditer(t):
+        c = next((x for x in CITIES if x.lower() == m.group(1).lower()), "")
+        if c and c != "Remote":
+            counts[c] = counts.get(c, 0) + 1
+    if counts:
+        return max(counts, key=lambda c: counts[c]), "inferred"
+    return "", ""
+
+
+def parse(text: str) -> dict:
+    t = tidy(text or "")
+    own = _without_references(t)                          # the referees' phones, emails and names are not the candidate's
+    emails = list(dict.fromkeys(e.lower().strip(".") for e in EMAIL.findall(own)))[:3]
     phones, seen = [], set()
-    for p in PHONE.findall(t):
+    for p in PHONE.findall(own):
         digits = re.sub(r"\D", "", p)
-        if 10 <= len(digits) <= 13 and digits not in seen:
+        if 10 <= len(digits) <= 13 and digits not in seen and not re.fullmatch(r"(?:19|20)\d{2}(?:19|20)\d{2}\d*", digits):
             seen.add(digits)
             phones.append(re.sub(r"\s+", " ", p.strip()))
-    stated = [float(x) for x in YEARS.findall(t) + YEARS_LABEL.findall(t) if float(x) < 45]
+    stated = _stated_years(t)
     hist = history(t)
     ranged = hist["years"] if hist["years"] is not None else _years_from_ranges(t)
     years = max(stated) if stated else ranged
@@ -172,15 +421,14 @@ def parse(text: str) -> dict:
     if nm:
         n, unit = int(nm.group(1)), nm.group(2).lower()
         notice = n * 30 if unit.startswith("month") else n * 7 if unit.startswith("week") else n
-    head = "\n".join([ln for ln in t.splitlines() if ln.strip()][:8])     # the contact block at the top
-    cm = CITY.search(head)
-    location = next((c for c in CITIES if cm and c.lower() == cm.group(1).lower()), "")
+    location, location_source = _location(own)
     return {
-        "emails": emails, "location": location, "phones": phones[:2], "links": list(dict.fromkeys(LINK.findall(t)))[:5],
+        "emails": emails, "location": location, "location_source": location_source, "phones": phones[:2],
+        "links": list(dict.fromkeys(u.rstrip(".") for u in URL.findall(own)))[:8], "references": references(t),
         "skills": skills.extract_all(t) + [x for x in skills.infer_soft(t) if x not in skills.extract_all(t)], "years": years,
         "years_from_dates": ranged, "jobs": hist["jobs"], "gaps": hist["gaps"], "skill_years": hist["skill_years"], "years_source": "stated" if stated else ("dates" if ranged else None),
         "notice_days": notice, "name_guess": _guess_name(t, emails[0] if emails else ""), "chars": len(t), "parsed_at": time.time(),
-        **details(t),
+        **details(own),
     }
 
 
@@ -374,7 +622,7 @@ _SECTIONS = {
     "summary": r"(?:professional\s+|career\s+|profile\s+)?(?:summary|profile|objective|career objective|about me|overview)",
     "education": r"education(?:al)?(?:\s+(?:details|qualifications?|background))?|academic(?:s| details| qualifications?| background)?|qualifications?",
     "certifications": r"certifications?(?:\s*(?:&|and)\s*(?:courses|trainings?|licenses?))?|licenses?(?:\s*(?:&|and)\s*certifications?)?|courses|trainings?",
-    "projects": r"(?:academic\s+|personal\s+|key\s+|major\s+)?projects?",
+    "projects": r"(?:academic\s+|personal\s+|key\s+|major\s+|college\s+|internship\s+)?projects?(?:\s+(?:during|in|at|undertaken|done)\b[\w\s]{0,30})?",
     "achievements": r"achievements?|awards?(?:\s*(?:&|and)\s*(?:achievements?|recognitions?|honou?rs))?|honou?rs|recognitions?|accomplishments?",
     "languages": r"languages?(?:\s+known|\s+spoken)?|linguistic\s+proficiency",
 }
@@ -429,19 +677,49 @@ def details(text: str) -> dict:
     t = text or ""
     lines = t.splitlines()
     out: dict = {}
-    summ = _section_lines(lines, "summary", 8)
+    summ = _section_lines(lines, "summary", 20)
     if summ:
         out["summary"] = " ".join(summ)[:1200]
-    edu = []
-    for ln in _section_lines(lines, "education", 25):
-        if _DEGREE.search(ln) or re.search(r"\b(university|college|institute|school|iit|nit|iiit|iim)\b", ln, re.I):
-            yr = re.findall(r"\b(?:19|20)\d{2}\b", ln)
-            g = _GRADE.search(ln)
-            edu.append({"text": ln[:200], "year": yr[-1] if yr else "", "grade": (g.group(1) or g.group(2)).strip() if g else ""})
+    edu: list[dict] = []
+    for ln in _section_lines(lines, "education", 30):
+        ln = re.sub(r"\s{3,}", "  ", ln).strip()
+        yr = re.findall(r"\b(?:19|20)\d{2}\b", ln)
+        g = _GRADE.search(ln)
+        grade = (g.group(1) or g.group(2) or "").strip() if g else ""
+        if _DEGREE.search(ln):
+            edu.append({"text": ln[:200], "year": yr[-1] if yr else "", "grade": grade})
+        elif edu and re.search(r"\b(university|college|institute|school|vidyalaya|vidhyalay|academy|iit|nit|iiit|iim|board|affiliated)\b", ln, re.I) \
+                and len(edu[-1]["text"]) + len(ln) < 300:
+            edu[-1]["text"] += ", " + ln                       # the institution under its degree
+            edu[-1]["year"] = edu[-1]["year"] or (yr[-1] if yr else "")
+        elif re.search(r"\b(university|college|institute|school|iit|nit|iiit|iim)\b", ln, re.I):
+            edu.append({"text": ln[:200], "year": yr[-1] if yr else "", "grade": grade})
+        elif edu and grade and not edu[-1]["grade"]:           # "Result : 81.14 %" / "CGPA: 8.1" on its own line
+            edu[-1]["grade"] = grade
+        elif edu and yr and not edu[-1]["year"]:
+            edu[-1]["year"] = yr[-1]
     if edu:
-        out["education"] = edu[:8]
+        out["education"] = [{**e, "text": e["text"][:300]} for e in edu][:8]
     for key in ("certifications", "projects", "achievements"):
-        items = [x for x in _section_lines(lines, key, 20) if 3 <= len(x) <= 300]
+        raw = [x for x in _section_lines(lines, key, 40) if x]
+        start = re.compile(r"^\s*(?:\d{1,2}\s*[).:]|[-•*▪●◦➢✓])\s*")
+        if key == "projects" and sum(bool(start.match(x)) for x in raw) >= 2:    # numbered projects: each with its link and description
+            items, cur, pending = [], "", ""
+            for x in raw:
+                if start.match(x):
+                    if cur:
+                        items.append(cur)
+                    cur = start.sub("", x).strip() + (f" ({pending})" if pending else "")
+                    pending = ""
+                elif re.fullmatch(r"(?:[A-Za-z]{3,9}\.?\s*[-–/']?\s*)?(?:19|20)\d{2}(?:\s*[-–]\s*(?:[A-Za-z]{3,9}\.?\s*)?(?:(?:19|20)\d{2}|present))?", x, re.I):
+                    pending = x                               # a date line above the next project
+                elif cur:
+                    cur += (" - " if " - " not in cur else " ") + x
+            if cur:
+                items.append(cur)
+            items = [i[:500] for i in items if len(i) >= 3]
+        else:
+            items = [x for x in raw if 3 <= len(x) <= 300][:20]
         if items:
             out[key] = items[:15]
     langs = {}
@@ -475,6 +753,11 @@ def details(text: str) -> dict:
             out["work_authorization"] = m.group(1).strip()[:200]
         if re.search(r"\b(?:willing|open|ready)\s+to\s+relocate\b", low):
             out["willing_to_relocate"] = not re.search(r"\bnot\s+(?:willing|open|ready)\b", low)
+    if "portfolio" not in out:                              # a personal site (github.io, vercel...) is the portfolio
+        site = next((u for u in URL.findall(t) if re.search(r"github\.io|vercel\.app|netlify\.app|wixsite|carrd\.co|framer\.website|portfolio", u, re.I)
+                     and not re.search(r"(?:linkedin|github)\.com/", u, re.I)), "")
+        if site:
+            out["portfolio"] = re.sub(r"(\.github\.io/)[^/]+/?$", r"\1", site) if "portfolio" not in site.lower() else site.rstrip(".")
     h = history(t)
     if h["jobs"]:
         latest = h["jobs"][0]
@@ -483,7 +766,16 @@ def details(text: str) -> dict:
             out["current_title"] = parts[0][:120]
             if len(parts) > 1:
                 out["current_company"] = parts[1][:120]
-    first = next((ln.strip() for ln in lines[1:6] if ln.strip() and 3 < len(ln.strip()) < 90 and not EMAIL.search(ln) and not re.search(r"\d{5,}", ln)
+    elif (m := _INTERN_AT.search(t)):                     # an internship written as a sentence, with no dates
+        out["current_title"], out["current_company"] = "Intern", m.group(1).strip(" .,")[:120]
+    top = []
+    for ln in lines[1:8]:                                   # the line under the name, before the first section heading
+        s_ = ln.strip()
+        if s_ and (any(rx.match(s_) for rx in _SEC_RX.values()) or _WORK_HEAD.match(s_) or _EDU_HEAD.match(s_) or _REF_HEAD.match(s_)):
+            break
+        top.append(s_)
+    first = next((ln for ln in top if ln and 3 < len(ln) < 90 and not EMAIL.search(ln) and not re.search(r"\d{5,}", ln) and not ln[:1].islower()
+                  and not re.search(r"\b(?:with|and|of|to|in|for)$", ln, re.I)
                   and re.search(r"\b(engineer|developer|manager|analyst|designer|consultant|executive|specialist|lead|architect|scientist|officer|associate|"
                                 r"administrator|recruiter|accountant|intern|student|graduate|fresher)\b", ln, re.I)), "")
     if first:
