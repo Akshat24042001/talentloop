@@ -16,6 +16,10 @@ check('a Jabra headset goes unnoticed', !EARPHONE.test('Headset Microphone (Jabr
 check('Galaxy Buds go unnoticed', !EARPHONE.test('Galaxy Buds2 Pro'))
 for (const ok of ['MacBook Pro Speakers', 'Speakers (Realtek(R) Audio)', 'Microphone Array (Intel® Smart Sound Technology)', 'FaceTime HD Camera', 'Built-in Audio Analog Stereo', 'Default - Speakers (High Definition Audio Device)', 'LG ULTRAFINE (DisplayPort)', 'Noise suppression mic'])
   check(`a normal laptop device counts as earphones: ${ok}`, EARPHONE.test(ok))
+for (const ok of ['Speakers/Headphones (Realtek(R) Audio)', 'Default - Speakers/Headphones (Realtek(R) Audio)', 'Speaker/HP (Realtek High Definition Audio)', 'Headphones/Speakers (Conexant SmartAudio HD)'])
+  check(`a laptop's own speaker counts as earphones: ${ok}`, earphonesInUse([dev('audiooutput', ok, 'default')], 'Microphone Array (Realtek(R) Audio)').length !== 0)
+check('wired headphones in the jack (own endpoint) go unnoticed', earphonesInUse([dev('audiooutput', 'Headphones (Realtek(R) Audio)', 'default')], 'Microphone Array (Realtek(R) Audio)').length !== 1)
+check('a USB mouse receiver counts as earphones', newEarphones([dev('audiooutput', 'Speakers/Headphones (Realtek(R) Audio)')], [dev('audiooutput', 'Speakers/Headphones (Realtek(R) Audio)'), dev('audioinput', 'Logitech USB Receiver')]).length !== 0)
 check('earbuds connected mid-interview go unnoticed', newEarphones([dev('audiooutput', 'MacBook Pro Speakers')], [dev('audiooutput', 'MacBook Pro Speakers'), dev('audiooutput', 'AirPods')]).join() !== 'AirPods')
 check('a device that was always there counts as newly connected', newEarphones([dev('audiooutput', 'AirPods')], [dev('audiooutput', 'AirPods')]).length !== 0)
 
@@ -103,6 +107,29 @@ check('a 2 kHz whine counts as a voice', voiced(Float32Array.from({ length: N },
   check('picture noise breaks the measurement of a full turn', noisy.circle < 280, `${noisy.circle}`)
   const upOnly = run(t => [slow(t), 20 * Math.sin(t * Math.PI)], 200)
   check('looking only up is counted as looking down', upOnly.down > 5 || upOnly.up < 12, `${upOnly.up} ${upOnly.down}`)
+  // a laptop left on the desk while the person in front of it sways, leans and the camera's exposure drifts (12 s at ~7 fps)
+  {
+    let body = new Float32Array(60 * 60).map(() => r2() * 255)
+    const sm = (a: Float32Array) => { const o = new Float32Array(a.length); for (let y = 1; y < 59; y++) for (let x = 1; x < 59; x++) o[y * 60 + x] = (a[y * 60 + x]! * 2 + a[y * 60 + x + 1]! + a[y * 60 + x - 1]! + a[(y - 1) * 60 + x]! + a[(y + 1) * 60 + x]!) / 6; return o }
+    body = sm(sm(body))
+    for (const [sway, gain, noise] of [[4, 0, 6], [15, 0.2, 16], [25, 0.3, 24]] as const) {
+      const rs = new RoomScan()
+      for (let i = 0; i < 90; i++) {
+        const t = i * 0.6, f = view(0, 0, noise), g = 1 + gain * Math.sin(t * 0.5)
+        const ox = Math.round(10 + sway * Math.sin(t * 0.9) + 6 * Math.sin(t * 2.3)), oy = Math.round(8 + 3 * Math.sin(t * 1.7))
+        for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+          const bx = x - ox, by = y - oy
+          if (bx >= 0 && by >= 0 && bx < 60 && by < 60 && ((bx - 30) ** 2 / 900 + (by - 25) ** 2 / 900) < 1) f[y * FW + x] = body[by * 60 + bx]! * 0.8 + 30
+          f[y * FW + x] = Math.max(0, Math.min(255, f[y * FW + x]! * g))
+        }
+        rs.feed(f)
+      }
+      check(`a laptop left still with the person moving passes the room scan (sway ${sway})`, rs.progress().done, JSON.stringify([rs.circle, Math.round(rs.span), rs.still.toFixed(2)]))
+      check(`a laptop left still is not recognised as not moving (sway ${sway})`, rs.still <= 0.5, rs.still.toFixed(2))
+    }
+    const real = run(t => [slow(t), t > 0.8 ? 18 * Math.sin((t - 0.8) * Math.PI * 10) : 0], 300, 8)
+    check('a real slow sweep is mistaken for a still camera', real.still > 0.5, real.still.toFixed(2))
+  }
   const wall = new RoomScan(); const flat = new Uint8Array(FW * FH).fill(120); for (let i = 0; i < 60; i++) wall.feed(flat)
   check('a blank wall counts as a room scan', wall.progress().done || !wall.progress().dark)
   const shots: string[] = []; const rs3 = new RoomScan(); for (let i = 0; i <= 200; i++) { const [y, p] = [slow(i / 200), 0]; const r = rs3.feed(view(y, p)); if (r) shots.push(r) }

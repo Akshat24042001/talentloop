@@ -6,19 +6,25 @@
 /** Earphones, earbuds and headsets by device label (Chrome shows labels once the camera and mic are allowed). */
 export const EARPHONE = /\b(airpods?|buds\d*|earbuds?|earphones?|headphones?|headset|hands-?free|bluetooth|bose|jabra|beats|plantronics|poly\s|jbl|soundcore|nothing ear|boat|sennheiser|skullcandy|wh-\d|wf-\d|galaxy buds|pixel buds|freebuds|oneplus buds|realme buds|redmi buds|airdopes)\b/i
 
+/** A laptop's own sound output that Windows names after both of its uses: Realtek, Conexant and other drivers call the built-in
+ * speaker "Speakers/Headphones (Realtek(R) Audio)" (one endpoint for the speaker and the 3.5 mm jack) whether or not anything is
+ * plugged in. The name says nothing about earphones, so it must not block anyone; earphones on that jack are left to the ear photos. */
+export const BUILT_IN_COMBO = /\b(?:speakers?\s*\/\s*head(?:phones?|set)|head(?:phones?|set)\s*\/\s*speakers?|speaker\s*\/\s*hp|hp\s*\/\s*speaker)\b/i
+export const isEarphone = (label: string) => !!label && EARPHONE.test(label) && !BUILT_IN_COMBO.test(label)
+
 export interface DeviceInfo { kind: string; label: string; deviceId: string }
 /** Earphone-like devices that are in use: the microphone actually captured, and the default output. */
 export function earphonesInUse(devices: DeviceInfo[], micLabel: string): string[] {
   const out: string[] = []
-  if (EARPHONE.test(micLabel)) out.push(micLabel)
+  if (isEarphone(micLabel)) out.push(micLabel)
   const def = devices.find(d => d.kind === 'audiooutput' && d.deviceId === 'default') || devices.find(d => d.kind === 'audiooutput')
-  if (def && EARPHONE.test(def.label)) out.push(def.label.replace(/^Default\s*-\s*/i, ''))
+  if (def && isEarphone(def.label)) out.push(def.label.replace(/^Default\s*-\s*/i, ''))
   return [...new Set(out)]
 }
 /** Earphone-like devices present now that were not there before (connected during the interview). */
 export function newEarphones(before: DeviceInfo[], now: DeviceInfo[]): string[] {
   const seen = new Set(before.map(d => d.label))
-  return [...new Set(now.filter(d => d.label && !seen.has(d.label) && EARPHONE.test(d.label)).map(d => d.label.replace(/^Default\s*-\s*/i, '')))]
+  return [...new Set(now.filter(d => d.label && !seen.has(d.label) && isEarphone(d.label)).map(d => d.label.replace(/^Default\s*-\s*/i, '')))]
 }
 
 /** Blendshape scores (0..1) from MediaPipe's face landmarker, by name. */

@@ -197,14 +197,14 @@ def wait_question(pg):
 
 
 def scan_room(pg):
-    """The room scan before the start (12 s with the stand-in detector); a no-op when the interview doesn't ask for it."""
+    """The room scan before the start (20 s or more: the film turns a full circle, then tilts); a no-op when the interview doesn't ask for it."""
     pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckEars'))", timeout=20000)
     if pg.locator("#roomBtn").count() and not pg.locator("#ckRoom.ok").count():
-        prev = pg.evaluate("window.__PERSONS")
-        pg.evaluate("window.__PERSONS = 0")                       # turned away from the candidate: nobody in view
+        prev = pg.evaluate("[window.__PERSONS, window.__FACES]")
+        pg.evaluate("window.__PERSONS = 0; window.__FACES = 0")  # turned away from the candidate: nobody in view, not even them
         pg.click("#roomBtn")
-        pg.wait_for_selector("#ckRoom.ok", timeout=110000)
-        pg.evaluate(f"window.__PERSONS = {json.dumps(prev)}")
+        pg.wait_for_selector("#ckRoom.ok", timeout=130000)
+        pg.evaluate(f"window.__PERSONS = {json.dumps(prev[0])}; window.__FACES = {json.dumps(prev[1])}")
 
 
 def tracks_stopped(pg) -> bool:
@@ -269,13 +269,13 @@ def main():
                 pg.wait_for_function("(e => !e || e.classList.contains('ok'))(document.getElementById('ckEars'))", timeout=15000)   # ear photos (demo: kept for HR)
                 if pg.locator("#roomBtn").count():
                     assert pg.is_enabled("#startBtn") is False, "start must wait for the room scan"
-                    pg.evaluate("window.__PERSONS = 0")                                                   # turned away from the candidate: nobody in view
+                    pg.evaluate("window.__PERSONS = 0; window.__FACES = 0")                               # turned away from the candidate: nobody in view
                     pg.click("#roomBtn")
                     try:
-                        pg.wait_for_selector("#ckRoom.ok", timeout=110000)                                # the camera film turns a full circle, then tilts
+                        pg.wait_for_selector("#ckRoom.ok", timeout=130000)                                # the camera film turns a full circle, then tilts
                     except Exception:
                         raise AssertionError("room scan did not finish: " + pg.inner_text("#ckRoom") + " | " + (pg.inner_text("#roomHint") if pg.locator("#roomHint").count() else "no hint"))
-                    pg.evaluate("window.__PERSONS = undefined")
+                    pg.evaluate("window.__PERSONS = undefined; window.__FACES = 1")
                 if share:
                     assert pg.is_enabled("#startBtn") is False, "start must wait for screen sharing"
                     pg.click("#shareBtn")

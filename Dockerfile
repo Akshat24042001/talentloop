@@ -6,6 +6,9 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
+# Render passes its variables as build arguments: the commit is shown as "Version ..." on the interview page.
+ARG RENDER_GIT_COMMIT=""
+ENV RENDER_GIT_COMMIT=$RENDER_GIT_COMMIT
 RUN npm run build
 
 # ---- 2. The server (FastAPI serves the built interface; no Node at runtime)

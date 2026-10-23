@@ -2,7 +2,7 @@
 // integrity signals (warnings spoken by the interviewer), rejoin window. Framework-free; React subscribes to
 // `state` (useSyncExternalStore) and to `onLevels` for the 60 fps audio meters.
 import { post } from '../lib/api'
-import { FW, FH, NEED_CIRCLE, NEED_DOWN, NEED_UP, RoomScan } from './roomscan'
+import { FW, FH, MAX_STILL, NEED_CIRCLE, NEED_DOWN, NEED_SPAN, NEED_UP, RoomScan } from './roomscan'
 import { AnswerTiming, FaceMatch, HeadTurn, VoiceWatch, virtualCameraLabel, yaw } from './signals'
 import { GazeAway, LipSync, ReadingWatch, SpeechLevel, earphonesInUse, gaze, newEarphones, shapesOf, type DeviceInfo } from './behaviour'
 
@@ -14,6 +14,10 @@ const BLIP_WINDOW_MS = 90000, BLIPS_ALLOWED = 2, FULLSCREEN_GRACE_MS = 10000, OF
 
 export type CheckState = '' | 'ok' | 'bad'
 export interface Check { state: CheckState; text: string; hidden: boolean }
+/** What to do about an earphone-like audio device, in words a candidate can act on. */
+const earMsg = (name: string) => `Disconnect "${name}". Unplug earphones from the audio jack or switch off Bluetooth earbuds, `
+  + 'then press Check again. A charger, a pen drive and a wireless mouse or keyboard receiver are fine.'
+
 export type CheckKey = 'cam' | 'mic' | 'face' | 'live' | 'room' | 'ears' | 'screen' | 'share'
 export interface Display { q_id: string; main: string; text: string; kind: 'question' | 'follow_up' | 'rephrase' | 'closing' }
 export interface Line { id: number; role: 'ai' | 'you'; text: string; final: boolean; warn?: boolean }
@@ -480,7 +484,7 @@ export class InterviewEngine {
       const found = earphonesInUse(list, mic)
       if (found.join() !== this.earDevices.join()) {
         this.earDevices = found
-        if (found.length) { this.ev('earphones_device', found.join(', ')); this.setCheck('ears', 'bad', `Disconnect ${found[0]}: the interview uses your computer's own speaker and microphone.`) }
+        if (found.length) { this.ev('earphones_device', found.join(', ')); this.setCheck('ears', 'bad', earMsg(found[0]!)) }
         else if (this.state.checks.ears.text.startsWith('Disconnect')) this.setCheck('ears', this.earsDone ? 'ok' : '', this.earsDone ? 'No earphones or earbuds' : 'No earphones or earbuds (checked from the head-turn photos)')
         this.updateStart()
       }
@@ -556,9 +560,10 @@ export class InterviewEngine {
     const scan = new RoomScan()
     const cv = document.createElement('canvas'); cv.width = FW; cv.height = FH
     const g = cv.getContext('2d', { willReadFrequently: true })!
-    const MIN_MS = 10000, MAX_MS = 90000, t0 = Date.now()
+    // A real sweep of a room, its ceiling and its floor takes well over 20 seconds when done slowly enough to be seen.
+    const MIN_MS = 20000, MAX_MS = 120000, t0 = Date.now()
     const sectorShots: string[] = [], extra: string[] = []
-    let most = 0, phone = 0, ticks = 0, far = 0
+    let most = 0, phone = 0, ticks = 0, far = 0, looks = 0, faceSeen = 0
     this.roomTries++
     this.setCheck('room', '', 'Pick up your laptop and turn slowly in a full circle, then show the ceiling and the floor')
     while (!this.ended) {
@@ -571,25 +576,34 @@ export class InterviewEngine {
       if (++ticks % 5 === 0) {
         const o = this.objects(v)
         most = Math.max(most, o.persons); phone = Math.max(phone, o.phones)
+        // The camera must point away from the candidate for most of the sweep: a laptop left facing its user always sees them.
+        try { looks++; if (this.faceDet?.detectForVideo(v, performance.now()).detections?.length) faceSeen++ } catch { looks-- }
         const away = Math.abs((((scan.yaw % 360) + 360) % 360) - 0), fromStart = Math.min(away, 360 - away)
         if (o.persons >= 1 && fromStart > 75 && ++far <= 3 && extra.length < 5) { const f = this.frame(640); if (f) extra.unshift(f) }   // a person where the candidate is not
       }
       const p = scan.progress()
       this.set({ roomScan: { running: true, left: Math.max(0, Math.ceil((MAX_MS - el) / 1000)), pct: p.circle / 360, up: Math.min(1, p.up / NEED_UP), down: Math.min(1, p.down / NEED_DOWN), hint: p.hint } })
-      if ((p.done && el >= MIN_MS) || el >= MAX_MS || most >= 2) break
+      const faceShare = looks ? faceSeen / looks : 1
+      if ((p.done && el >= MIN_MS && looks >= 8 && faceShare <= 0.6) || el >= MAX_MS || most >= 2) break
       await new Promise(r => setTimeout(r, 150))
     }
     const p = scan.progress()
+    try { this.speakerTest() } catch { /* no audio */ }        // the screen faces away during the sweep: a beep says it has ended
     this.set({ roomScan: { running: false, left: 0, pct: p.circle / 360, up: Math.min(1, p.up / NEED_UP), down: Math.min(1, p.down / NEED_DOWN), hint: '' } })
     if (most >= 2) {
       this.ev('room_scan_failed', `${most} people seen`); this.snap('room_scan_failed')
       this.setCheck('room', 'bad', 'Someone else was seen. You must be alone in the room. Scan again when you are.'); this.roomDone = false; return this.updateStart()
     }
-    if (!p.done) {
-      this.ev('room_scan_incomplete', `${Math.round(p.circle)} of 360 degrees, tilt up ${Math.round(p.up)}, down ${Math.round(p.down)}${scan.unreadable ? ', picture unreadable' : ''}`)
+    const faceShare = looks ? faceSeen / looks : 1
+    const facing = faceShare > 0.6
+    if (!p.done || facing) {
+      this.ev('room_scan_incomplete', `${Math.round(p.circle)} of 360 degrees (turned ${Math.round(p.span)}), tilt up ${Math.round(p.up)}, down ${Math.round(p.down)}, `
+        + `start view in ${Math.round(p.still * 100)}% of frames, candidate's face in ${Math.round(faceShare * 100)}%${scan.unreadable ? ', picture unreadable' : ''}`)
       // Strict: an incomplete or unreadable scan never passes. A dark or plain-walled room needs a light and things in view.
       if (scan.unreadable) { this.ev('room_scan_unverified', `the camera picture could not be followed (try ${this.roomTries})`); this.snap('room_scan_unverified') }
-      this.setCheck('room', 'bad', p.dark ? p.hint : p.circle < NEED_CIRCLE ? `Only ${Math.round(p.circle / 360 * 100)}% of the room was shown. Turn all the way round, slowly.`
+      this.setCheck('room', 'bad', p.dark ? p.hint
+        : p.still > MAX_STILL || facing ? 'The camera stayed pointed at you, so the room was not shown. Pick up the laptop, turn the camera away from you and walk it slowly round the whole room.'
+        : p.circle < NEED_CIRCLE || p.span < NEED_SPAN ? `Only ${Math.round(Math.min(p.circle / 360, p.span / NEED_SPAN) * 100)}% of the room was shown. Turn all the way round, slowly.`
         : p.up < NEED_UP ? 'Show the ceiling too: tilt the camera up.' : 'Show the floor and under your desk: tilt the camera down.')
       this.roomDone = false; return this.updateStart()
     }
@@ -605,7 +619,7 @@ export class InterviewEngine {
       this.setCheck('room', 'bad', 'Someone else was seen in the room. You must be alone. Scan again when you are.'); this.roomDone = false; return this.updateStart()
     }
     if (r?.checked && (r.notes || r.second_screen)) this.ev('room_items', [r.notes && 'written notes in view', r.second_screen && 'another screen in view'].filter(Boolean).join(', '))
-    this.ev('room_scan_passed', `${Math.round(p.circle)} degrees, ceiling and floor shown. ` + (r?.checked ? 'AI photo check: nobody else' : `nobody else seen on this device${phone ? '; a phone was in view' : ''}`))
+    this.ev('room_scan_passed', `${Math.round(p.circle)} degrees (turned ${Math.round(p.span)}), ceiling and floor shown, candidate's face in ${Math.round(faceShare * 100)}% of the sweep. ` + (r?.checked ? 'AI photo check: nobody else' : `nobody else seen on this device${phone ? '; a phone was in view' : ''}`))
     this.roomDone = true; this.setCheck('room', 'ok', 'Room checked: nobody else with you'); this.updateStart()
   }
   /** Before the start: photos of both ears (from the head turn) checked by the AI for earphones and earbuds. */
@@ -614,7 +628,7 @@ export class InterviewEngine {
     this.earBusy = true
     try { await this.earCheckRun() } finally { this.earBusy = false }
     // the photos may look fine while earbuds are connected by Bluetooth: the device name still wins
-    if (this.earDevices.length) this.setCheck('ears', 'bad', `Disconnect ${this.earDevices[0]}: the interview uses your computer's own speaker and microphone.`)
+    if (this.earDevices.length) this.setCheck('ears', 'bad', earMsg(this.earDevices[0]!))
   }
   private async earCheckRun() {
     const shots = this.earShots.filter((x): x is string => !!x)
@@ -633,8 +647,14 @@ export class InterviewEngine {
     this.setCheck('ears', 'ok', r?.checked && r.earphones === 'no' ? 'No earphones or earbuds seen' : 'Ear photos saved for the hiring team to review')
     this.updateStart()
   }
-  /** After a failed ear check: turn the head again for new ear photos. */
-  retryEars() {
+  /** After a failed ear check: read the audio devices again (the earphones may be unplugged by now), then turn the head again
+   * for new ear photos when the photos were the problem. */
+  async retryEars() {
+    this.earDevices = []
+    if (this.state.checks.ears.text.startsWith('Disconnect')) this.setCheck('ears', '', 'Checking your audio devices again...')
+    await this.checkAudioDevices()
+    if (this.earDevices.length) return
+    if (this.earsDone) { this.setCheck('ears', 'ok', 'No earphones or earbuds'); return this.updateStart() }
     this.earShots = [null, null]; this.earsDone = false
     if (this.P.liveness_check) { this.liveDone = false; this.liveSince = 0; this.head = new HeadTurn(); this.setCheck('live', '', 'Turn your head slowly to one side, then the other') }
     else this.earCheck()

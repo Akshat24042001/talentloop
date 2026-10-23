@@ -204,3 +204,45 @@ deliberately never read. The careers form fills every matching field.
 office days, openings, salary range with currency and period, must-have / nice-to-have / soft skills, experience range, education, field
 of study, certifications, languages, notice period, shift, travel, timezone, reporting line, industry, benefits, about the company,
 responsibilities. Choices are only taken from the form's allowed values and numbers only when written in the JD.
+
+## 9. Update: standard room scan procedure, laptop speakers no longer blocked
+
+### Room scan: the standard procedure (what the candidate is shown, and what the page checks)
+
+The check screen lists these steps before the scan:
+
+1. Read all the steps first. During the scan the screen faces away, so the candidate can't see it.
+2. Press **Scan the room**, pick up the laptop with both hands and turn the camera away from yourself.
+3. Turn slowly in a full circle, about 5 seconds per quarter turn: desk, left wall, door, behind, right wall.
+4. Tilt up to the ceiling, then down to the floor and under the desk.
+5. At the beep, put the laptop back and face the camera.
+
+Rules: nobody else in the room, lights on, no phone or notes on the desk.
+
+The scan passes only when **all** of these hold, measured from the camera picture in the browser:
+
+| Check | Why it exists |
+|---|---|
+| 330 of 360 degrees of the circle were in view, **and** the camera itself turned at least 300 degrees | Showing one side of the room, or wiggling the laptop, is not a circle. |
+| Tilted at least 12 degrees up and 14 degrees down | The ceiling side and the floor and under-desk side were shown. |
+| The starting view stays in view for at most half of the scan | **New.** A laptop left on the desk keeps its background edges in place however the person in front of it moves (measured: 36 to 100% of edges kept; a real sweep keeps at most 20%). The scan can't pass on drift, noise or someone swaying. |
+| The candidate's face is seen in at most 60% of the scan | **New.** A camera that never pointed away from the candidate did not show the room. |
+| At least 20 seconds | **New** (was 10). A slow, readable sweep takes longer than that. |
+| A move too fast to measure adds nothing | **New.** It used to count as an 11-degree turn. Now it is counted as "too fast" only. |
+| Nobody else seen by the person detector, then by the AI photo check (up to 8 photos) | Unchanged. |
+
+A beep sounds when the sweep ends, because the screen faces away during it.
+
+"The scan passed in 12 seconds without moving the laptop" is how the scan behaved before the measured scan (2026-10-10). The measured scan needs at least 10 seconds of a real turn, and now 20. If a live site still passes a still laptop, it runs an old build. The check screen now shows **Version** (the commit) so this can be confirmed.
+
+### Earphones by device name: the Realtek false alarm
+
+Windows laptops with Realtek, Conexant and similar drivers name their own speaker **"Speakers/Headphones (Realtek(R) Audio)"**. It is one sound output shared by the speaker and the 3.5 mm jack, and it has that name whether or not anything is plugged in. The check matched the word "Headphones" and blocked candidates with nothing plugged in. **Check again** only retook the ear photos, so the block never cleared.
+
+Now:
+- Combined names (`Speakers/Headphones`, `Headphones/Speakers`, `Speaker/HP`) are treated as the laptop's own speaker.
+- A separate `Headphones (Realtek(R) Audio)` output, Bluetooth earbuds and USB headsets still block.
+- **Check again** reads the audio devices again before anything else.
+- The message names the device and says what to do. It also says that chargers, pen drives and mouse or keyboard receivers are fine.
+
+Limit, stated plainly: with a combined output, wired earphones in the jack do not change the device name. Only the ear photos (head turn) and the camera can catch those.

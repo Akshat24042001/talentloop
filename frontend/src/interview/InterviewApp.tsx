@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { Button, Logo, Modal, Spinner, Tip, Toaster, TooltipProvider, cn, toast } from '../components/ui'
 import { InterviewEngine, isMobile, type CheckKey, type State } from './engine'
 
+declare const __BUILD__: string
 const engine = new InterviewEngine()
 // Stable ref callbacks: an inline arrow would detach and re-attach the stream on every render.
 const vref = {
@@ -292,6 +293,18 @@ function Lobby({ s }: { s: State }) {
             <CheckRow id="ckScreen" c={s.checks.screen} icon={<Monitor />} />
             <CheckRow id="ckShare" c={s.checks.share} icon={<ScreenShare />} />
           </ul>
+          {!s.checks.room.hidden && s.checks.room.state !== 'ok' && !s.roomScan.running && (
+            <div id="roomSop" className="mt-3 rounded-xl bg-white/5 p-3 text-[13px] leading-relaxed text-slate-300 ring-1 ring-white/10">
+              <p className="font-semibold text-white">How to scan the room (about 30 seconds)</p>
+              <ol className="mt-1.5 list-decimal space-y-1 pl-5">
+                <li>Read all steps first. During the scan the screen faces away from you, so you won't see it.</li>
+                <li>Press <b>Scan the room</b>, pick up the laptop with both hands and <b>turn the camera away from you</b>.</li>
+                <li>Turn slowly in a full circle, about 5 seconds per quarter turn: your desk, the wall on your left, the door, behind you, the wall on your right.</li>
+                <li>Tilt the camera up to the ceiling, then down to the floor and under your desk.</li>
+                <li>When you hear the beep, put the laptop back and face the camera.</li>
+              </ol>
+              <p className="mt-1.5 text-slate-400">Nobody else in the room, lights on, no phone or notes on the desk. A charger, a pen drive and a mouse or keyboard receiver can stay plugged in.</p>
+            </div>)}
           {s.roomScan.running && (
             <div id="roomHint" className="mt-3 rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
               <p className="text-sm font-medium text-amber-200">{s.roomScan.hint}</p>
@@ -310,6 +323,7 @@ function Lobby({ s }: { s: State }) {
           {s.err2 && <p className="mt-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-200 ring-1 ring-red-500/20">{s.err2}</p>}
           <Button id="startBtn" variant="primary" size="lg" className="mt-6 w-full" disabled={!s.startReady} loading={s.starting} onClick={() => engine.begin()}>Join interview</Button>
           <p id="checkMsg" className="mt-3 min-h-5 text-center text-sm text-slate-500 dark:text-slate-400">{s.rejoin.left != null ? (s.rejoin.left > 0 ? `${s.rejoin.left}s left to rejoin` : 'Rejoin window has passed.') : s.checkMsg}</p>
+          <p className="mt-1 text-center text-[11px] text-slate-600">Version {__BUILD__}</p>
         </aside>
       </div>
     </Shell>
